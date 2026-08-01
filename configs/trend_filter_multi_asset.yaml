@@ -1,0 +1,41 @@
+label: Trend Filter - Multi-Asset
+data:
+  source: yfinance
+  tickers: [SPY, EFA, EEM, IEF, TLT, GLD, VNQ]
+  start: '2005-01-01'
+  end: null
+  benchmark: SPY
+  cash_proxy: BIL
+  price_field: Close
+  fill_limit: 5
+  min_history: 60
+exog:
+  enabled: false
+  publication_lag_days: 1
+  ffill_limit: null
+  columns: []
+  note: ''
+strategy:
+  mode: builtin
+  name: sma_trend
+  params:
+    window: 200
+    ma_type: SMA
+    buffer: 1.5
+    sizing: Equal Weight
+    vol_window: 60
+  weights_normalize: None
+  weights_calendar: File dates
+  weights_source: ''
+engine:
+  initial_capital: 100000.0
+  rebalance: M
+  execution_lag: 1
+  max_leverage: 1.0
+  min_trade_weight: 0.005
+  periods_per_year: 252
+costs:
+  commission_bps: 2.0
+  slippage_bps: 8.0
+  cash_rate_pa: 0.0
+  borrow_rate_pa: 0.0

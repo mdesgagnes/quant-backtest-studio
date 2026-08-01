@@ -1,0 +1,43 @@
+label: Dual Momentum - Canadian ETFs
+data:
+  source: yfinance
+  tickers: [XIC.TO, ZEB.TO, XEI.TO, ZLB.TO, XDV.TO, XCG.TO]
+  start: '2012-01-01'
+  end: null
+  benchmark: XIC.TO
+  cash_proxy: PSA.TO
+  price_field: Close
+  fill_limit: 5
+  min_history: 60
+exog:
+  enabled: false
+  publication_lag_days: 1
+  ffill_limit: null
+  columns: []
+  note: ''
+strategy:
+  mode: builtin
+  name: dual_momentum
+  params:
+    lookback: 126
+    skip: 21
+    top_n: 3
+    abs_threshold: 0.0
+    trend_window: 200
+    sizing: Inverse Downside Volatility
+    vol_window: 60
+  weights_normalize: None
+  weights_calendar: File dates
+  weights_source: ''
+engine:
+  initial_capital: 500000.0
+  rebalance: M
+  execution_lag: 1
+  max_leverage: 1.0
+  min_trade_weight: 0.005
+  periods_per_year: 252
+costs:
+  commission_bps: 5.0
+  slippage_bps: 25.0
+  cash_rate_pa: 0.0
+  borrow_rate_pa: 0.0

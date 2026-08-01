@@ -1,0 +1,44 @@
+label: Imported Factor Ranking - Canadian ETFs
+data:
+  source: yfinance
+  tickers: [XIC.TO, ZEB.TO, XEI.TO, ZLB.TO, XDV.TO, XCG.TO]
+  start: '2012-01-01'
+  end: null
+  benchmark: XIC.TO
+  cash_proxy: PSA.TO
+  price_field: Close
+  fill_limit: 5
+  min_history: 60
+exog:
+  enabled: true
+  publication_lag_days: 45
+  ffill_limit: null
+  columns: []
+  note: 'Quarterly fundamental factor file, one column per symbol'
+strategy:
+  mode: builtin
+  name: factor_rank
+  params:
+    direction: Low value = favorable
+    top_n: 3
+    blend_momentum: 0.4
+    mom_window: 126
+    trend_filter: 200
+    sizing: Inverse Volatility
+    vol_window: 60
+    hold_cash: true
+  weights_normalize: None
+  weights_calendar: File dates
+  weights_source: ''
+engine:
+  initial_capital: 500000.0
+  rebalance: M
+  execution_lag: 1
+  max_leverage: 1.0
+  min_trade_weight: 0.005
+  periods_per_year: 252
+costs:
+  commission_bps: 5.0
+  slippage_bps: 25.0
+  cash_rate_pa: 0.0
+  borrow_rate_pa: 0.0
