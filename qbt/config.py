@@ -31,6 +31,8 @@ class DataConfig:
     price_field: str = "Close"             # adjusted close by default
     fill_limit: int = 5                    # forward-fill days tolerated
     min_history: int = 60                  # days required before the first signal
+    adjusted: bool = True                  # True = total-return prices
+    use_dividends: bool = False            # credit dividends as cash (needs adjusted=False)
 
 
 @dataclass
@@ -50,6 +52,8 @@ class EngineConfig:
     max_leverage: float = 1.0
     min_trade_weight: float = 0.005        # ignore micro-adjustments
     periods_per_year: int = 252
+    execute_at_open: bool = False          # trade at the open, mark at the close
+    trim_warmup: bool = True               # drop the leading uninvested stretch
 
 
 @dataclass
@@ -120,4 +124,9 @@ class RunConfig:
             errs.append(f"Unknown strategy mode: {self.strategy.mode}")
         if self.exog.enabled and self.exog.publication_lag_days < 0:
             errs.append("Publication lag cannot be negative.")
+        if self.data.use_dividends and self.data.adjusted:
+            errs.append(
+                "Dividends cannot be credited on top of adjusted prices: they "
+                "are already inside the price series. Switch to price-return "
+                "prices, or turn dividends off.")
         return errs

@@ -16,16 +16,19 @@ import yaml
 
 from qbt.config import (RunConfig, DataConfig, EngineConfig, CostConfig,
                         StrategyConfig, ExogConfig, REBALANCE_RULES)
-from qbt.data import load_yfinance, load_file, clean_prices, excel_sheet_names
+from qbt.data import (load_yfinance, load_market_data, load_file, clean_prices,
+                      excel_sheet_names, MarketData)
 from qbt.exog import load_exog, prepare_exog, exog_report, split_roles
 from qbt.external import (load_target_weights, prepare_target_weights,
                           weights_template)
-from qbt.engine import run_backtest, benchmark_result, align_results
+from qbt.engine import (run_backtest, benchmark_result, align_results,
+                        align_start, first_active_date)
 from qbt.strategies import REGISTRY, get as get_strategy
 from qbt import metrics as M
 from qbt import charts as C
 from qbt import robustness as R
 from qbt import report as REPORT
+from qbt import returns_input as RS
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -136,6 +139,22 @@ def eyebrow(text: str):
     st.markdown(f'<div class="eyebrow">{text}</div>', unsafe_allow_html=True)
 
 
+def _pseudo_result(returns, equity, label):
+    """Wraps a bare return stream in the structure the report expects."""
+    from qbt.engine import BacktestResult
+    idx = returns.index
+    one = pd.DataFrame(1.0, index=idx, columns=[label])
+    zero = pd.Series(0.0, index=idx)
+    return BacktestResult(
+        equity=equity, returns=returns, gross_returns=returns,
+        weights=one, target_weights=one, turnover=zero, costs=zero,
+        exposure=pd.Series(1.0, index=idx), cash_weight=zero,
+        rebalance_dates=pd.DatetimeIndex([]),
+        trades=pd.DataFrame(columns=["Date", "Instrument", "Weight Before",
+                                     "Weight After", "Change"]),
+        label=label)
+
+
 def note(text: str):
     st.markdown(f'<div class="note">{text}</div>', unsafe_allow_html=True)
 
@@ -199,9 +218,227 @@ x0 = loaded.exog if loaded else ExogConfig()
 
 # --- Data ---
 st.sidebar.markdown('<div class="eyebrow">Data</div>', unsafe_allow_html=True)
-source = st.sidebar.radio("Source", ["Yahoo Finance", "File (CSV / Excel)"],
-                          index=0 if d0.source == "yfinance" else 1,
-                          horizontal=True, label_visibility="collapsed")
+SOURCES = ["Yahoo Finance", "File (CSV / Excel)", "Return stream"]
+_src_idx = {"yfinance": 0, "upload": 1, "returns": 2}.get(d0.source, 0)
+source = st.sidebar.radio("Source", SOURCES, index=_src_idx,
+                          label_visibility="collapsed",
+                          help="\u201cReturn stream\u201d skips prices and signals "
+                               "entirely: upload periodic returns and get the "
+                               "statistics on that track record.")
+
+# ======================================================================
+# Return stream mode: no prices, no signals, no simulation.
+# ======================================================================
+if source == "Return stream":
+    st.sidebar.markdown('<div class="eyebrow">Return stream</div>',
+                        unsafe_allow_html=True)
+    rfile = st.sidebar.file_uploader("Returns file",
+                                     type=["csv", "xlsx", "xls", "txt"], key="rsup")
+    rsheet = None
+    if rfile is not None and rfile.name.lower().endswith((".xlsx", ".xls")):
+        names = excel_sheet_names(io.BytesIO(rfile.getvalue()))
+        if len(names) > 1:
+            rsheet = st.sidebar.selectbox("Sheet", names, key="rssheet")
+
+    scale_label = st.sidebar.selectbox(
+        "Value scale", ["Detect automatically", "Decimals (0.0213)",
+                        "Percentages (2.13)"],
+        help="Only override if the automatic reading is wrong.")
+    scale = {"Detect automatically": "auto", "Decimals (0.0213)": "decimal",
+             "Percentages (2.13)": "percentage"}[scale_label]
+    rs_capital = st.sidebar.number_input("Base value ($)", 1_000, 1_000_000_000,
+                                         100_000, 10_000, key="rscap")
+
+    st.markdown(
+        '<div class="masthead"><h1>Quant Backtest Studio</h1>'
+        '<div class="sub">Return stream &nbsp;\u00b7&nbsp; Statistics</div></div>',
+        unsafe_allow_html=True)
+
+    if rfile is None:
+        note("Upload a file of periodic returns: one date column, then one "
+             "column per series. Daily, weekly, monthly or quarterly \u2014 the "
+             "frequency is inferred from the dates and drives the "
+             "annualization. Values may be decimals (0.0213) or percentages "
+             "(2.13).<br><br>Long format (date, name, return) is also "
+             "recognized. This mode analyses the track record directly: there "
+             "is no portfolio to simulate, so positions, frictions and "
+             "parameter tests do not apply.")
+        st.download_button("Monthly CSV template", RS.template("monthly"),
+                           "returns_template.csv", "text/csv")
+        st.stop()
+
+    try:
+        rs_raw = RS.load_return_stream(io.BytesIO(rfile.getvalue()), rsheet)
+        rets, rrep = RS.prepare_returns(rs_raw, scale)
+    except Exception as exc:
+        st.error(f"The file could not be read: {exc}")
+        st.stop()
+
+    cols = list(rets.columns)
+    c1, c2 = st.columns(2)
+    main_col = c1.selectbox("Series analysed", cols)
+    bench_opts = ["\u2014 none \u2014"] + [c for c in cols if c != main_col]
+    bench_col = c2.selectbox("Compare against", bench_opts)
+    bench_col = None if bench_col.startswith("\u2014") else bench_col
+
+    ppy = rrep.periods_per_year
+    r_main = rets[main_col]
+    eq_main = RS.equity_from_returns(r_main, rs_capital)
+    r_bench = rets[bench_col] if bench_col else None
+    eq_bench = RS.equity_from_returns(r_bench, rs_capital) if bench_col else None
+
+    stats = M.summary(r_main, eq_main, r_bench, None, None, 0.0, ppy)
+    bstats = M.summary(r_bench, eq_bench, None, None, None, 0.0, ppy) if bench_col else {}
+
+    a, b, c, d = st.columns(4)
+    with a:
+        dial("Frequency", rrep.frequency.capitalize(), f"{ppy} periods/year")
+    with b:
+        dial("Observations", f"{rrep.n_periods:,}")
+    with c:
+        dial("Period", str(rrep.start.date()) if rrep.start is not None else "\u2014",
+             f"to {rrep.end.date()}" if rrep.end is not None else "")
+    with d:
+        dial("Scale read", rrep.scale.capitalize())
+    for w in rrep.warnings:
+        st.markdown(f'<div class="flag">{w}</div>', unsafe_allow_html=True)
+
+    rs_tabs = st.tabs(["Results", "Robustness", "Export"])
+
+    with rs_tabs[0]:
+        keys = ["CAGR", "Volatility", "Sharpe", "Max Drawdown", "Calmar", "Sortino"]
+        kcols = st.columns(len(keys))
+        for col, k in zip(kcols, keys):
+            with col:
+                v = stats.get(k, np.nan)
+                tone = ""
+                if k in ("CAGR", "Sharpe", "Calmar", "Sortino"):
+                    tone = "pos" if (v == v and v > 0) else "neg"
+                elif k == "Max Drawdown":
+                    tone = "neg"
+                sub = ""
+                if bstats:
+                    bv = bstats.get(k, np.nan)
+                    if bv == bv:
+                        sub = f"bench. {M.format_metric(k, bv)}"
+                dial(k, M.format_metric(k, v), sub, tone)
+
+        st.write("")
+        curves = {main_col: eq_main}
+        if bench_col:
+            curves[bench_col] = eq_bench
+        logs = st.toggle("Log scale", value=True, key="rslog")
+        st.plotly_chart(C.equity_curve(align_results(curves), logs),
+                        use_container_width=True, config={"displaylogo": False})
+        st.plotly_chart(C.underwater(curves), use_container_width=True,
+                        config={"displaylogo": False})
+
+        left, right = st.columns([1.15, 1])
+        with left:
+            st.plotly_chart(C.monthly_heatmap(r_main), use_container_width=True,
+                            config={"displaylogo": False})
+        with right:
+            st.plotly_chart(C.return_distribution(r_main), use_container_width=True,
+                            config={"displaylogo": False})
+            win = min(ppy, max(6, len(r_main) // 6))
+            st.plotly_chart(
+                C.rolling_metric(M.rolling_sharpe(r_main, win, ppy),
+                                 "Rolling Sharpe", ref=0.0,
+                                 title=f"Rolling Sharpe over {win} periods"),
+                use_container_width=True, config={"displaylogo": False})
+
+        eyebrow("Full statistics")
+        order = list(stats.keys())
+        tbl = pd.DataFrame({"Metric": order,
+                            main_col: [M.format_metric(k, stats[k]) for k in order]})
+        if bstats:
+            tbl[bench_col] = [M.format_metric(k, bstats.get(k, np.nan)) for k in order]
+        st.dataframe(tbl, use_container_width=True, hide_index=True, height=560)
+
+        eyebrow("Main drawdown episodes")
+        dd = M.drawdown_table(eq_main, 6)
+        if not dd.empty:
+            dd["Drawdown"] = dd["Drawdown"].map(lambda v: f"{v*100:.2f}%")
+            dd["Recovery"] = dd["Recovery"].astype(str)
+        st.dataframe(dd, use_container_width=True, hide_index=True)
+
+        eyebrow("Period returns")
+        pr = M.monthly_returns(r_main)
+        if not pr.empty:
+            st.dataframe((pr * 100).round(2), use_container_width=True)
+
+    with rs_tabs[1]:
+        note("A track record is one sample. These tests ask how much of it "
+             "survives being cut up or reshuffled. Parameter and cost tests "
+             "do not apply: there is no model here to re-run, only the "
+             "realized stream.")
+        eyebrow("Stability over sub-periods")
+        nf = st.slider("Number of folds", 3, 10, 5, key="rsfold")
+        wf = R.fold_stats(r_main, nf, ppy)
+        if not wf.empty:
+            disp = wf.copy()
+            for cc in ("CAGR", "Volatility", "Max Drawdown"):
+                disp[cc] = disp[cc].map(lambda v: f"{v*100:.2f}%")
+            disp["Sharpe"] = disp["Sharpe"].map(lambda v: f"{v:.2f}")
+            st.dataframe(disp, use_container_width=True, hide_index=True)
+            st.plotly_chart(C.bar_series(wf["Fold"], wf["Sharpe"], "Sharpe by fold"),
+                            use_container_width=True, config={"displaylogo": False})
+
+        eyebrow("Sampling uncertainty")
+        s1, s2 = st.columns(2)
+        nsim = s1.slider("Simulations", 100, 2000, 500, 100, key="rsmc")
+        blk = s2.slider("Block size (periods)", 2, max(3, min(63, len(r_main) // 8)),
+                        min(21, max(3, len(r_main) // 20)), 1, key="rsblk")
+        if st.button("Run Monte Carlo simulation", key="rsmcbtn"):
+            st.session_state["rsmc_res"] = R.monte_carlo(r_main, nsim, blk, ppy)
+        if "rsmc_res" in st.session_state:
+            mc = st.session_state["rsmc_res"]
+            if not mc["paths"].empty:
+                st.plotly_chart(C.monte_carlo_fan(mc["paths"], eq_main),
+                                use_container_width=True, config={"displaylogo": False})
+                m1, m2, m3 = st.columns(3)
+                with m1:
+                    dial("Simulated median CAGR", f"{mc['median_cagr']*100:.2f}%")
+                with m2:
+                    dial("Probability of loss", f"{mc['prob_loss']*100:.1f}%")
+                with m3:
+                    dial("Probability of a drawdown > 20%", f"{mc['prob_dd_20']*100:.1f}%")
+                sdf = mc["stats"].copy()
+                for cc in ("CAGR", "Max Drawdown"):
+                    sdf[cc] = sdf[cc].map(lambda v: f"{v*100:.2f}%")
+                sdf["Sharpe"] = sdf["Sharpe"].map(lambda v: f"{v:.2f}")
+                st.dataframe(sdf, use_container_width=True, hide_index=True)
+            else:
+                note("Not enough observations to resample meaningfully.")
+
+    with rs_tabs[2]:
+        note("Exports reproduce the statistics shown above for the selected "
+             "series.")
+        rs_cfg = RunConfig(label=str(main_col),
+                           engine=EngineConfig(initial_capital=float(rs_capital),
+                                               periods_per_year=ppy))
+        pseudo = _pseudo_result(r_main, eq_main, str(main_col))
+        pseudo_b = _pseudo_result(r_bench, eq_bench, str(bench_col)) if bench_col else None
+        ts = REPORT.render_tearsheet(pseudo, pseudo_b, stats, bstats, rs_cfg,
+                                     simple=True)
+        st.download_button("Download tearsheet report (HTML)", ts.encode("utf-8"),
+                           f"tearsheet_{main_col}.html", "text/html", key="rsts")
+
+        out = pd.DataFrame({"return": r_main, "value": eq_main})
+        if bench_col:
+            out["benchmark_return"] = r_bench
+            out["benchmark_value"] = eq_bench
+        e1, e2 = st.columns(2)
+        e1.download_button("Series (CSV)", out.to_csv().encode("utf-8"),
+                           "return_stream.csv", "text/csv", key="rscsv")
+        stat_df = pd.DataFrame({"Metric": list(stats.keys()),
+                                main_col: list(stats.values())})
+        if bstats:
+            stat_df[bench_col] = [bstats.get(k, np.nan) for k in stats]
+        e2.download_button("Statistics (CSV)", stat_df.to_csv(index=False).encode("utf-8"),
+                           "statistics.csv", "text/csv", key="rsstat")
+    st.stop()
+
 
 prices_raw: Optional[pd.DataFrame] = None
 upload_error = None
@@ -253,6 +490,21 @@ benchmark = st.sidebar.selectbox(
     "Comparison benchmark", bench_choices,
     index=bench_choices.index(bench_default) if bench_default else 0)
 benchmark = None if benchmark == "\u2014 none \u2014" else benchmark
+
+if source == "Yahoo Finance":
+    price_mode = st.sidebar.selectbox(
+        "Price convention",
+        ["Total return (dividends reinvested)", "Price return + cash dividends"],
+        index=1 if (not d0.adjusted) else 0,
+        help="Total return folds dividends into the price series, so they "
+             "compound inside the position from the instant they are paid. "
+             "The second option keeps prices ex-dividend and credits each "
+             "payment as cash on its ex-date, where it sits until the next "
+             "rebalance. Same cash in, different timing.")
+    adjusted = price_mode.startswith("Total")
+    use_divs = not adjusted
+else:
+    adjusted, use_divs = True, False
 
 cash_choices = ["Fixed rate"] + univ_options
 cash_proxy = st.sidebar.selectbox("Cash remuneration", cash_choices, index=0,
@@ -411,6 +663,25 @@ rebalance = st.sidebar.selectbox(
 lag = st.sidebar.slider("Execution lag (days)", 0, 5, int(e0.execution_lag),
                         help="1 = signal at the close, executed the next session. "
                              "0 assumes execution at the price that produced the signal.")
+exec_price = st.sidebar.selectbox(
+    "Execution price", ["Close", "Open (marked at the close)"],
+    index=1 if e0.execute_at_open else 0,
+    help="Trading at the open splits the day in two: the overnight move is "
+         "earned on the old weights, the intraday move on the new ones. It is "
+         "the more realistic assumption for an order placed after a "
+         "prior-close signal. Only available with Yahoo Finance data.")
+exec_at_open = exec_price.startswith("Open")
+if exec_at_open and source != "Yahoo Finance":
+    st.sidebar.markdown('<div class="flag">Opening prices come from Yahoo '
+                        'Finance only. Uploaded files fall back to close '
+                        'execution.</div>', unsafe_allow_html=True)
+trim_warm = st.sidebar.checkbox(
+    "Trim the warm-up period", value=bool(e0.trim_warmup),
+    help="Indicators are blind until they have enough history. Those early "
+         "sessions sit in cash and still earn the cash rate, which lifts the "
+         "reported return and dilutes volatility. Trimming starts the record "
+         "on the first day capital is actually at risk, for the strategy and "
+         "the benchmark alike.")
 capital = st.sidebar.number_input("Initial capital ($)", 1_000, 1_000_000_000,
                                   int(e0.initial_capital), 10_000)
 max_lev = st.sidebar.slider("Max leverage", 0.5, 2.0, float(e0.max_leverage), 0.1)
@@ -437,6 +708,7 @@ cfg = RunConfig(
         start=str(start) if start else "1990-01-01",
         end=str(end) if end else None,
         benchmark=benchmark, cash_proxy=cash_proxy,
+        adjusted=bool(adjusted), use_dividends=bool(use_divs),
     ),
     exog=ExogConfig(
         enabled=exog_raw is not None,
@@ -449,7 +721,9 @@ cfg = RunConfig(
                             weights_calendar=w_calendar,
                             weights_source=w_source),
     engine=EngineConfig(initial_capital=float(capital), rebalance=rebalance,
-                        execution_lag=int(lag), max_leverage=float(max_lev)),
+                        execution_lag=int(lag), max_leverage=float(max_lev),
+                        execute_at_open=bool(exec_at_open and source == "Yahoo Finance"),
+                        trim_warmup=bool(trim_warm)),
     costs=CostConfig(commission_bps=comm, slippage_bps=slip, cash_rate_pa=cash_rate),
 )
 
@@ -472,21 +746,32 @@ for p in problems:
 # ----------------------------------------------------------------------
 # Execution
 # ----------------------------------------------------------------------
-def build_prices() -> pd.DataFrame:
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_market(tickers: tuple, start: str, end: Optional[str],
+                 adjusted: bool, want_open: bool, want_div: bool) -> MarketData:
+    return load_market_data(list(tickers), start, end, adjusted=adjusted,
+                            want_open=want_open, want_dividends=want_div)
+
+
+def build_market() -> MarketData:
+    """Prices, plus opens and dividends when the settings call for them."""
     if source == "Yahoo Finance":
         needed = list(dict.fromkeys(
             sel_universe + [t for t in (benchmark, cash_proxy) if t]))
-        return fetch_yf(tuple(needed), str(start), str(end), "Close")
+        return fetch_market(tuple(needed), str(start), str(end),
+                            bool(adjusted), bool(exec_at_open), bool(use_divs))
     if prices_raw is None:
         raise RuntimeError("No file loaded.")
-    return prices_raw
+    return MarketData(close=prices_raw, adjusted=True)
 
 
 if run_clicked and not blocking:
     try:
         with st.spinner("Loading prices..."):
-            raw = build_prices()
-            prices, quality = clean_prices(raw, cfg.data)
+            market = build_market()
+            prices, quality = clean_prices(market.close, cfg.data)
+            for msg in market.notes:
+                quality.warnings.append(msg)
 
         cash_px = prices[cash_proxy] if (cash_proxy and cash_proxy in prices.columns) else None
         drop = [c for c in [cash_proxy] if c and c in prices.columns and c not in sel_universe]
@@ -520,11 +805,34 @@ if run_clicked and not blocking:
             else:
                 weights = strategy.generate(universe, params, exog_aligned)
 
+            cols = list(universe.columns)
+            open_px = None
+            if market.open is not None and cfg.engine.execute_at_open:
+                open_px = market.open.reindex(index=universe.index,
+                                              columns=cols)
+            div_px = None
+            if market.dividends is not None and cfg.data.use_dividends:
+                div_px = market.dividends.reindex(index=universe.index,
+                                                  columns=cols).fillna(0.0)
+
             result = run_backtest(universe, weights, cfg.engine, cfg.costs,
-                                  cash_px, run_label, rebal_dates)
+                                  cash_px, run_label, rebal_dates,
+                                  open_prices=open_px, dividends=div_px)
             bench = None
             if benchmark and benchmark in prices.columns:
-                bench = benchmark_result(prices[benchmark], cfg.engine, benchmark)
+                bdiv = None
+                if market.dividends is not None and cfg.data.use_dividends \
+                        and benchmark in market.dividends.columns:
+                    bdiv = market.dividends[benchmark]
+                bench = benchmark_result(prices[benchmark], cfg.engine,
+                                         benchmark, dividends=bdiv)
+
+            # Warm-up: both series must start on the same day or the
+            # benchmark is credited with a stretch the strategy sat out.
+            raw_start = result.equity.index[0]
+            if cfg.engine.trim_warmup:
+                result, bench = align_start(result, bench,
+                                            initial_capital=cfg.engine.initial_capital)
 
         st.session_state["run"] = {
             "result": result, "bench": bench, "prices": universe,
@@ -533,6 +841,10 @@ if run_clicked and not blocking:
             "exog": exog_aligned, "exog_raw": exog_raw, "exog_report": ex_rep,
             "weights_report": w_report, "rebalance_dates": rebal_dates,
             "weights": weights,
+            "market": market,
+            "raw_start": raw_start,
+            "trimmed": bool(cfg.engine.trim_warmup
+                            and result.equity.index[0] > raw_start),
             "stamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
         for k in ("sweep", "mc"):
@@ -587,6 +899,12 @@ tabs = st.tabs(["Results", "Positions", "Robustness", "Data", "Export"])
 
 # --------------------------- RESULTS -----------------------------------
 with tabs[0]:
+    if run.get("trimmed"):
+        dropped = run["raw_start"].date()
+        note(f"Warm-up trimmed: the record starts on "
+             f"{res.equity.index[0].date()}, the first day the strategy held "
+             f"a position, rather than {dropped}. The benchmark is measured "
+             f"over the same window.")
     keys = ["CAGR", "Volatility", "Sharpe", "Max Drawdown", "Calmar", "Sortino"]
     cols = st.columns(len(keys))
     for col, k in zip(cols, keys):
@@ -689,6 +1007,29 @@ with tabs[1]:
         drag = float(res.costs.sum())
         dial("Cumulative friction cost", f"{drag*100:,.2f}%",
              "compounded as a percentage of value", "neg")
+
+    if res.dividend_income is not None and float(res.dividend_income.sum()) > 0:
+        eyebrow("Dividends")
+        di = res.dividend_income
+        years = max(len(di) / ppy, 1e-9)
+        d1, d2, d3 = st.columns(3)
+        with d1:
+            dial("Cumulative dividends", f"{float(di.sum())*100:,.2f}%",
+                 "of portfolio value, summed", "pos")
+        with d2:
+            dial("Average per year", f"{float(di.sum())/years*100:,.2f}%",
+                 "cash yield on the portfolio")
+        with d3:
+            dial("Payment days", f"{int((di > 0).sum()):,}",
+                 "ex-dates with a credit")
+        note("Dividends are credited as cash on their ex-date and stay "
+             "uninvested until the next rebalance, which is what actually "
+             "happens in an account. Prices are ex-dividend, so nothing is "
+             "counted twice.")
+        st.plotly_chart(
+            C.rolling_metric((di * 100).cumsum(), "Cumulative dividends (%)",
+                             title="Dividend income, cumulative"),
+            use_container_width=True, config={"displaylogo": False})
 
     eyebrow("Average weight by instrument")
     avg = (res.weights.mean() * 100).sort_values(ascending=False)

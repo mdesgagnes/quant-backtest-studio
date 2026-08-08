@@ -104,10 +104,22 @@ def realized_vol(px: pd.DataFrame, n: int, ppy: int = 252) -> pd.DataFrame:
     return px.pct_change().rolling(n, min_periods=max(5, n // 2)).std() * np.sqrt(ppy)
 
 
-def downside_vol(px: pd.DataFrame, n: int, ppy: int = 252) -> pd.DataFrame:
-    r = px.pct_change()
-    neg = r.where(r < 0)
-    return neg.rolling(n, min_periods=max(5, n // 2)).std() * np.sqrt(ppy)
+def downside_vol(px: pd.DataFrame, n: int, ppy: int = 252,
+                 mar_pa: float = 0.0) -> pd.DataFrame:
+    """Downside deviation: root mean square of returns below the minimum
+    acceptable return (0 by default).
+
+    Deliberately NOT the standard deviation of the subset of negative days.
+    Taking the std of `r.where(r < 0)` drops every positive day as NaN, which
+    leaves only ~half the window populated; a `min_periods` sized for the full
+    window then rejects most rows, and the measure silently disappears exactly
+    for the calmest assets, which have the fewest negative days. Squaring the
+    clipped series keeps every observation and matches the textbook
+    definition used by the Sortino ratio.
+    """
+    d = (px.pct_change() - mar_pa / ppy).clip(upper=0.0)
+    msd = (d ** 2).rolling(n, min_periods=max(5, n // 2)).mean()
+    return np.sqrt(msd) * np.sqrt(ppy)
 
 
 def rsi(px: pd.DataFrame, n: int = 14) -> pd.DataFrame:
@@ -140,11 +152,34 @@ def size_equal(mask: pd.DataFrame, gross: float = 1.0) -> pd.DataFrame:
 
 
 def size_inverse_vol(mask: pd.DataFrame, px: pd.DataFrame, n: int = 60,
-                     gross: float = 1.0, downside: bool = False) -> pd.DataFrame:
+                     gross: float = 1.0, downside: bool = False,
+                     slots=None) -> pd.DataFrame:
+    """Weights inversely proportional to volatility, among the selected names.
+
+    `slots` controls what happens to unallocated capital. Left at None, the
+    held names are renormalized to `gross`, so the portfolio is always fully
+    invested. Given a number of slots (or a per-day Series), the weights sum
+    to (names held / slots) x gross instead, and the balance stays in cash.
+    That second form is what preserves the defensive behaviour of a strategy
+    whose filter rejects most of the universe: without it, rejecting five of
+    six assets would simply concentrate the whole portfolio into the sixth.
+
+    A name whose volatility cannot be measured yet is dropped from the
+    weighting rather than silently inheriting the others' capital.
+    """
     v = downside_vol(px, n) if downside else realized_vol(px, n)
-    inv = (1.0 / v.replace(0, np.nan)).where(mask.astype(bool))
+    usable = mask.astype(bool) & v.notna() & (v > 0)
+    inv = (1.0 / v.where(usable)).where(usable)
     tot = inv.sum(axis=1).replace(0, np.nan)
-    return inv.div(tot, axis=0).fillna(0.0) * gross
+    w = inv.div(tot, axis=0).fillna(0.0) * gross
+
+    if slots is not None:
+        held = usable.sum(axis=1)
+        denom = (slots if isinstance(slots, pd.Series)
+                 else pd.Series(float(slots), index=w.index))
+        scale = (held / denom.replace(0, np.nan)).clip(upper=1.0).fillna(0.0)
+        w = w.mul(scale, axis=0)
+    return w
 
 
 def apply_vol_target(w: pd.DataFrame, px: pd.DataFrame, target: float,

@@ -144,8 +144,13 @@ def render_tearsheet(res: BacktestResult,
                      stats: Dict[str, float],
                      bench_stats: Optional[Dict[str, float]],
                      cfg: RunConfig,
-                     currency: str = "$") -> str:
-    """Builds the full tearsheet as a self-contained HTML string."""
+                     currency: str = "$",
+                     simple: bool = False) -> str:
+    """Builds the full tearsheet as a self-contained HTML string.
+
+    `simple` drops the composition and holdings sections, for an imported
+    return stream where no position data exists.
+    """
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
     period = f"{res.equity.index[0].date()} to {res.equity.index[-1].date()}"
     bench_label = bench.label if bench is not None else None
@@ -161,8 +166,9 @@ def render_tearsheet(res: BacktestResult,
         theme="print")
     mh_fig = C.monthly_heatmap(res.returns, theme="print")
     rd_fig = C.return_distribution(res.returns, theme="print")
-    wa_fig = C.weights_area(res.weights, res.cash_weight,
-                            "Portfolio composition", theme="print")
+    wa_fig = (None if simple else
+              C.weights_area(res.weights, res.cash_weight,
+                             "Portfolio composition", theme="print"))
 
     dd_table = M.drawdown_table(res.equity, 6)
     kpi_keys = ["CAGR", "Volatility", "Sharpe", "Sortino", "Calmar", "Max Drawdown"]
@@ -173,13 +179,23 @@ def render_tearsheet(res: BacktestResult,
         for k in kpi_keys
     )
 
-    assumptions = (
-        f"Rebalance: {REBALANCE_RULES.get(cfg.engine.rebalance, cfg.engine.rebalance)} &middot; "
-        f"Execution lag: {cfg.engine.execution_lag} session(s) &middot; "
-        f"Costs: {cfg.costs.commission_bps + cfg.costs.slippage_bps:.0f} bps round-trip &middot; "
-        f"Initial capital: {currency}{cfg.engine.initial_capital:,.0f} &middot; "
-        f"Max leverage: {cfg.engine.max_leverage:.2f}x"
-    )
+    if simple:
+        assumptions = (
+            f"Imported return stream &middot; "
+            f"{len(res.returns):,} periods &middot; "
+            f"Statistics annualized at {cfg.engine.periods_per_year} periods per year &middot; "
+            f"Base {currency}{cfg.engine.initial_capital:,.0f}"
+        )
+    else:
+        assumptions = (
+            f"Rebalance: {REBALANCE_RULES.get(cfg.engine.rebalance, cfg.engine.rebalance)} &middot; "
+            f"Execution lag: {cfg.engine.execution_lag} session(s) &middot; "
+            f"Execution price: {'open, marked at close' if cfg.engine.execute_at_open else 'close'} &middot; "
+            f"Costs: {cfg.costs.commission_bps + cfg.costs.slippage_bps:.0f} bps round-trip &middot; "
+            f"Dividends: {'credited as cash' if cfg.data.use_dividends else 'inside adjusted prices'} &middot; "
+            f"Initial capital: {currency}{cfg.engine.initial_capital:,.0f} &middot; "
+            f"Max leverage: {cfg.engine.max_leverage:.2f}x"
+        )
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -222,8 +238,7 @@ def render_tearsheet(res: BacktestResult,
   </div>
 </div>
 
-<div class="eyebrow">Portfolio composition</div>
-<div class="chart">{_fig_html(wa_fig)}</div>
+{"" if simple else f'<div class="eyebrow">Portfolio composition</div><div class="chart">{_fig_html(wa_fig)}</div>'}
 
 <div class="two-col">
   <div>
@@ -236,8 +251,7 @@ def render_tearsheet(res: BacktestResult,
   </div>
 </div>
 
-<div class="eyebrow">Current holdings (as of {_esc(res.equity.index[-1].date())})</div>
-{_holdings_table_html(res)}
+{"" if simple else f'<div class="eyebrow">Current holdings (as of {_esc(res.equity.index[-1].date())})</div>{_holdings_table_html(res)}'}
 
 <div class="footer">
   <div class="assumptions">{assumptions}</div>

@@ -234,6 +234,37 @@ HTML file directly.
 
 ---
 
+## 4 bis. Analysing a return stream
+
+Set **Source** to "Return stream" to skip prices and signals entirely and
+analyse a track record directly: a fund's monthly history, a composite, a
+GIPS table, or the output of an engine that lives elsewhere.
+
+```csv
+Date,Strategy,Benchmark
+2020-01-31,0.0213,0.0185
+2020-02-29,-0.0154,-0.0210
+```
+
+Long format (`date, name, return`) is also recognized. Daily, weekly,
+monthly or quarterly: the frequency is inferred from the spacing of the
+dates and drives the annualization, so a monthly file is annualized at 12
+periods and not 252. Values may be decimals (0.0213) or percentages (2.13);
+the scale is detected and reported, with a manual override if the guess is
+wrong.
+
+The app flags the mistakes that quietly invalidate this kind of analysis: a
+file of index levels rather than periodic returns, a scale that produces
+impossible single-period moves, too few observations for the annualized
+figures to mean much.
+
+You get the full statistics, drawdown table, period-return grid, fold
+stability, Monte Carlo, and the tearsheet. Positions, frictions, cost
+sensitivity and parameter sweeps do not apply: there is no portfolio being
+simulated, only a realized stream.
+
+---
+
 ## 5. Engine assumptions
 
 They are explicit because they determine how credible the result is.
@@ -242,18 +273,45 @@ They are explicit because they determine how credible the result is.
    day *t*; the engine executes them at *t + lag*, one business day by
    default. The no-look-ahead property is verifiable: changing the last
    price in the history does not change any earlier return.
-2. **Weights drift between rebalances.** Positions evolve with prices.
+2. **Execution price.** By default trades settle at the close. Switching to
+   "Open (marked at the close)" splits the day in two: the overnight move
+   from the prior close to the open is earned on the old weights, the
+   intraday move from open to close on the new ones. That is the more
+   realistic assumption for an order placed after a prior-close signal, and
+   it stops the trade day from silently capturing an overnight gap the
+   portfolio was never positioned for. Opening prices come from Yahoo
+   Finance; uploaded files fall back to close execution.
+3. **Warm-up.** Indicators are blind until they have enough history: a
+   200-day average produces nothing for its first 200 sessions. Those
+   sessions are not neutral - the portfolio sits in cash *earning the cash
+   rate*, which lifts the reported return, stretches the measured period and
+   dilutes volatility and drawdown. With "Trim the warm-up period" on, the
+   record starts on the first day capital is actually at risk, and the
+   benchmark is cut to the same date so the comparison stays honest. Only
+   the leading stretch is removed: a deliberate move to cash mid-period is a
+   decision and is kept.
+4. **Dividends.** Two conventions, chosen under Price convention. *Total
+   return* uses dividend-adjusted prices, so payments are folded into the
+   price series and compound inside the position from the moment they are
+   paid. *Price return + cash dividends* keeps prices ex-dividend and
+   credits each payment as cash on its ex-date, where it sits uninvested
+   until the next rebalance. Same cash in, different timing - and for a
+   strategy that is often partly in cash or rebalances rarely, the gap is
+   real. The two are mutually exclusive by construction: crediting dividends
+   on top of adjusted prices would count every payment twice, and the app
+   refuses that combination rather than silently producing it.
+5. **Weights drift between rebalances.** Positions evolve with prices.
    Assuming an implicit daily rebalance is the mistake that most often
    inflates published results.
-3. **Frictions on actual turnover.** Cost = sum(|target weight - current
+6. **Frictions on actual turnover.** Cost = sum(|target weight - current
    weight|) x (commission + slippage). Default: 5 bps + 25 bps, a
    conservative blended assumption for Canadian ETFs.
-4. **Cash is remunerated.** Either at a fixed rate, or by the return of a
+7. **Cash is remunerated.** Either at a fixed rate, or by the return of a
    cash-equivalent ETF (PSA.TO, BIL): the opportunity cost of sitting out of
    the market is counted.
-5. **Adjustments under 0.5% of weight are ignored** (`min_trade_weight`), so
+8. **Adjustments under 0.5% of weight are ignored** (`min_trade_weight`), so
    the engine does not charge for trades no manager would place.
-6. **Survivorship bias is not handled automatically.** A universe built
+9. **Survivorship bias is not handled automatically.** A universe built
    today from ETFs that exist today carries that bias. The "Data" diagnostic
    flags histories shorter than the tested period.
 
@@ -341,6 +399,7 @@ qbt/
   data.py                  loading, cleaning, diagnostics
   exog.py                  exogenous series, publication lag
   external.py              imported target weights
+  returns_input.py         imported return streams
   engine.py                day-by-day simulation
   metrics.py                performance and risk
   charts.py                Plotly charts (dark in-app theme + light print theme)

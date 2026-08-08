@@ -60,9 +60,11 @@ def _sma_trend(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
     if b > 0:
         state = state.where(raw | exit_lvl).ffill().fillna(0.0)
     mask = state.fillna(0.0)
-    if p["sizing"] == "Inverse Volatility":
-        return size_inverse_vol(mask, px, p["vol_window"])
     n_assets = px.notna().sum(axis=1).replace(0, np.nan)
+    if p["sizing"] == "Inverse Volatility":
+        # Same denominator as the equal-weight branch: an asset failing the
+        # trend filter leaves its share in cash instead of being redistributed.
+        return size_inverse_vol(mask, px, p["vol_window"], slots=n_assets)
     return mask.div(n_assets, axis=0).fillna(0.0)
 
 
@@ -89,10 +91,13 @@ def _xs_momentum(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
     mom = base / base.shift(lb) - 1.0
     ranks = mom.rank(axis=1, ascending=False, na_option="keep", method="first")
     mask = (ranks <= p["top_n"]).astype(float).where(mom.notna(), 0.0)
+    # Cross-sectional ranking always fills top_n slots, so renormalizing to
+    # fully invested is the intended behaviour here.
     if p["sizing"] == "Inverse Volatility":
-        return size_inverse_vol(mask, px, p["vol_window"])
+        return size_inverse_vol(mask, px, p["vol_window"], slots=p["top_n"])
     if p["sizing"] == "Inverse Downside Volatility":
-        return size_inverse_vol(mask, px, p["vol_window"], downside=True)
+        return size_inverse_vol(mask, px, p["vol_window"], downside=True,
+                                slots=p["top_n"])
     return size_equal(mask)
 
 
@@ -131,10 +136,9 @@ def _dual_momentum(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
     # names actually held. That is what makes the strategy defensive.
     if p["sizing"] == "Equal Weight":
         return mask / float(p["top_n"])
-    w = size_inverse_vol(mask, px, p["vol_window"],
-                         downside=p["sizing"].startswith("Inverse Downside"))
-    held = mask.sum(axis=1)
-    return w.mul((held / float(p["top_n"])).clip(upper=1.0), axis=0)
+    return size_inverse_vol(mask, px, p["vol_window"],
+                            downside=p["sizing"].startswith("Inverse Downside"),
+                            slots=p["top_n"])
 
 
 # ----------------------------------------------------------------------
@@ -316,7 +320,8 @@ def _match_columns(ex: pd.DataFrame, cols) -> pd.DataFrame:
 )
 def _macro_gate(px: pd.DataFrame, p: Dict[str, Any], ex: pd.DataFrame) -> pd.DataFrame:
     mask = px.notna().astype(float)
-    base = (size_inverse_vol(mask, px, int(p["vol_window"]))
+    base = (size_inverse_vol(mask, px, int(p["vol_window"]),
+                             slots=mask.sum(axis=1))
             if p["sizing"] == "Inverse Volatility" else size_equal(mask))
 
     col = p.get("series")
@@ -386,10 +391,8 @@ def _factor_rank(px: pd.DataFrame, p: Dict[str, Any], ex: pd.DataFrame) -> pd.Da
     mask = (ranks <= p["top_n"]).astype(float).where(score.notna(), 0.0)
 
     if p["sizing"] == "Inverse Volatility":
-        w = size_inverse_vol(mask, px, int(p["vol_window"]))
-        if p["hold_cash"]:
-            w = w.mul((mask.sum(axis=1) / float(p["top_n"])).clip(upper=1.0), axis=0)
-        return w
+        return size_inverse_vol(mask, px, int(p["vol_window"]),
+                                slots=p["top_n"] if p["hold_cash"] else None)
     if p["hold_cash"]:
         return mask / float(p["top_n"])
     return size_equal(mask)
