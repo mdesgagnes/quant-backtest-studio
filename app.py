@@ -29,6 +29,8 @@ from qbt import charts as C
 from qbt import robustness as R
 from qbt import report as REPORT
 from qbt import returns_input as RS
+from qbt import presets as PRESETS
+from qbt import formula as FORMULA
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -444,9 +446,28 @@ prices_raw: Optional[pd.DataFrame] = None
 upload_error = None
 
 if source == "Yahoo Finance":
+    preset_names = ["\u2014 custom \u2014"] + PRESETS.names()
+    preset = st.sidebar.selectbox(
+        "Preset universe", preset_names,
+        help="Loads a ready-made set of symbols. Everything stays editable "
+             "afterwards, and the benchmark and cash proxy are filled in to "
+             "match.")
+    if preset != st.session_state.get("_preset_applied"):
+        st.session_state["_preset_applied"] = preset
+        if not preset.startswith("\u2014"):
+            info = PRESETS.get(preset)
+            st.session_state["tickers_box"] = "\n".join(info["tickers"])
+            st.session_state["_preset_bench"] = info.get("benchmark")
+            st.session_state["_preset_cash"] = info.get("cash")
+    if not preset.startswith("\u2014"):
+        st.sidebar.markdown(
+            f'<div class="note">{PRESETS.get(preset).get("note","")}</div>',
+            unsafe_allow_html=True)
+
+    st.session_state.setdefault("tickers_box", "\n".join(d0.tickers))
     tickers_txt = st.sidebar.text_area(
         "Symbols (one per line or comma-separated)",
-        value="\n".join(d0.tickers), height=110,
+        key="tickers_box", height=110,
         help="Add .TO for Toronto, .V for TSX-V, no suffix for U.S. tickers.")
     tickers = [t.strip().upper() for t in
                tickers_txt.replace(",", "\n").replace(";", "\n").split("\n") if t.strip()]
@@ -485,11 +506,27 @@ sel_universe = st.sidebar.multiselect(
              if t in univ_options] or univ_options)
 
 bench_choices = ["\u2014 none \u2014"] + univ_options
-bench_default = d0.benchmark if d0.benchmark in univ_options else None
+_pb = st.session_state.get("_preset_bench")
+bench_default = _pb if _pb in univ_options else (
+    d0.benchmark if d0.benchmark in univ_options else None)
 benchmark = st.sidebar.selectbox(
     "Comparison benchmark", bench_choices,
     index=bench_choices.index(bench_default) if bench_default else 0)
 benchmark = None if benchmark == "\u2014 none \u2014" else benchmark
+
+BENCH_MODES = ["Total return (adjusted close)",
+               "Price return + dividends reinvested at rebalance",
+               "Price return only"]
+bench_mode = BENCH_MODES[0]
+if benchmark:
+    bench_mode = st.sidebar.selectbox(
+        "Benchmark convention", BENCH_MODES,
+        help="Set independently of the strategy. A benchmark measured on "
+             "price return only is not the index anyone actually tracks and "
+             "understates the bar by roughly its dividend yield each year. "
+             "Adjusted close reinvests continuously; the middle option lets "
+             "dividends sit in cash until the rebalance, which is closer to "
+             "how a real account behaves.")
 
 if source == "Yahoo Finance":
     price_mode = st.sidebar.selectbox(
@@ -507,7 +544,10 @@ else:
     adjusted, use_divs = True, False
 
 cash_choices = ["Fixed rate"] + univ_options
-cash_proxy = st.sidebar.selectbox("Cash remuneration", cash_choices, index=0,
+_pc = st.session_state.get("_preset_cash")
+_cash_idx = cash_choices.index(_pc) if _pc in cash_choices else 0
+cash_proxy = st.sidebar.selectbox("Cash remuneration", cash_choices,
+                                  index=_cash_idx,
                                   help="A cash-equivalent ETF (e.g. PSA.TO) gives a "
                                        "realistic opportunity cost for staying out "
                                        "of the market.")
@@ -645,6 +685,11 @@ for p in (strategy.params if mode == "builtin" else []):
         choice = st.sidebar.selectbox(p.label, opts, index=idx,
                                       help=p.help or None, key=key)
         params[p.key] = "" if choice.startswith("\u2014") else choice
+    elif p.kind == "formula":
+        params[p.key] = st.sidebar.text_area(
+            p.label, str(default or ""), height=80,
+            help=(p.help or "") + " Edit and test in the Builder tab.",
+            key=key)
     elif p.kind == "choice" and p.choices:
         opts = list(p.choices)
         idx = opts.index(default) if default in opts else 0
@@ -758,8 +803,13 @@ def build_market() -> MarketData:
     if source == "Yahoo Finance":
         needed = list(dict.fromkeys(
             sel_universe + [t for t in (benchmark, cash_proxy) if t]))
+        # Adjusted close is fetched whenever the benchmark is measured on
+        # total return while the strategy runs on price-return prices.
+        need_div = bool(use_divs) or (
+            benchmark is not None
+            and bench_mode.startswith("Price return + dividends"))
         return fetch_market(tuple(needed), str(start), str(end),
-                            bool(adjusted), bool(exec_at_open), bool(use_divs))
+                            bool(adjusted), bool(exec_at_open), need_div)
     if prices_raw is None:
         raise RuntimeError("No file loaded.")
     return MarketData(close=prices_raw, adjusted=True)
@@ -820,12 +870,25 @@ if run_clicked and not blocking:
                                   open_prices=open_px, dividends=div_px)
             bench = None
             if benchmark and benchmark in prices.columns:
-                bdiv = None
-                if market.dividends is not None and cfg.data.use_dividends \
-                        and benchmark in market.dividends.columns:
-                    bdiv = market.dividends[benchmark]
-                bench = benchmark_result(prices[benchmark], cfg.engine,
-                                         benchmark, dividends=bdiv)
+                bseries, bdiv = prices[benchmark], None
+                if bench_mode.startswith("Total return"):
+                    # If the strategy runs on price-return prices, the
+                    # total-return series is the separate adjusted close.
+                    if market.adj_close is not None and \
+                            benchmark in market.adj_close.columns:
+                        bseries = market.adj_close[benchmark].reindex(prices.index)
+                elif bench_mode.startswith("Price return + dividends"):
+                    if market.dividends is not None and \
+                            benchmark in market.dividends.columns:
+                        bdiv = market.dividends[benchmark].reindex(prices.index)
+                    else:
+                        quality.warnings.append(
+                            f"No dividend data available for {benchmark}: the "
+                            f"benchmark is shown on price return only, which "
+                            f"understates it.")
+                bench = benchmark_result(bseries.dropna(), cfg.engine, benchmark,
+                                         dividends=bdiv,
+                                         reinvest_rule=cfg.engine.rebalance)
 
             # Warm-up: both series must start on the same day or the
             # benchmark is credited with a stretch the strategy sat out.
@@ -842,6 +905,7 @@ if run_clicked and not blocking:
             "weights_report": w_report, "rebalance_dates": rebal_dates,
             "weights": weights,
             "market": market,
+            "bench_mode": bench_mode,
             "raw_start": raw_start,
             "trimmed": bool(cfg.engine.trim_warmup
                             and result.equity.index[0] > raw_start),
@@ -895,7 +959,7 @@ stats = M.summary(res.returns, res.equity, bench_r, res.turnover,
 bstats = M.summary(bench.returns, bench.equity, None, None, None,
                    rcfg.costs.cash_rate_pa, ppy) if bench is not None else {}
 
-tabs = st.tabs(["Results", "Positions", "Robustness", "Data", "Export"])
+tabs = st.tabs(["Results", "Positions", "Robustness", "Data", "Builder", "Export"])
 
 # --------------------------- RESULTS -----------------------------------
 with tabs[0]:
@@ -1276,8 +1340,120 @@ with tabs[3]:
     st.download_button("Download prices used (CSV)",
                        universe.to_csv().encode("utf-8"), "prices.csv", "text/csv")
 
-# --------------------------- EXPORT ---------------------------------------
+# --------------------------- BUILDER --------------------------------------
 with tabs[4]:
+    note("Write a strategy as an expression over the same indicators the "
+         "packaged models use. Test it here against the loaded universe, "
+         "then select <b>Custom Formula</b> as the model in the sidebar and "
+         "paste the expressions in to run a full backtest.")
+
+    ref = FORMULA.available_names(list(universe.columns),
+                                  list(exog_used.columns) if exog_used is not None
+                                  else None)
+    with st.expander("Available indicators", expanded=False):
+        rc = st.columns(3)
+        for i, (group, items) in enumerate(ref.items()):
+            with rc[i % 3]:
+                st.markdown(
+                    f'<div style="font-family:IBM Plex Mono,monospace;'
+                    f'font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;'
+                    f'color:#C9A227;margin-top:.5rem;">{group}</div>',
+                    unsafe_allow_html=True)
+                for it in items:
+                    st.markdown(
+                        f'<div style="font-family:IBM Plex Mono,monospace;'
+                        f'font-size:.74rem;color:#E3E8EF;">{it}</div>',
+                        unsafe_allow_html=True)
+        st.markdown(
+            '<div class="note" style="margin-top:.8rem;">'
+            '<b>x</b> is any series, usually <code>price</code>. '
+            '<b>n</b> is a window in sessions. Expressions are applied to the '
+            'whole universe at once and produce one value per instrument per '
+            'day. Arithmetic, comparisons, <code>and</code>/<code>or</code> '
+            'and <code>ifelse</code> are available; nothing else is, by '
+            'design.</div>', unsafe_allow_html=True)
+
+    EXAMPLES = {
+        "Momentum rank": "pctrank(mom(price, 126))",
+        "Trend filter": "price > sma(price, 200)",
+        "Momentum, trend-filtered":
+            "ifelse(price > sma(price, 200), pctrank(mom(price, 126)), 0)",
+        "Momentum and low volatility":
+            "0.7 * pctrank(mom(price, 126)) + 0.3 * pctrank(-vol(price, 60))",
+        "Distance from the average": "price / sma(price, 100) - 1",
+        "Trend quality":
+            "pctrank(mom(price, 126)) * er(price, 20)",
+        "Oversold in an uptrend":
+            "ifelse(rsi(price, 14) < 35 and price > sma(price, 200), 1, 0)",
+        "Breakout": "price > mmax(shift(price, 1), 60)",
+    }
+    pick = st.selectbox("Start from an example", ["\u2014 blank \u2014"] + list(EXAMPLES))
+    if pick != st.session_state.get("_bld_pick"):
+        st.session_state["_bld_pick"] = pick
+        if not pick.startswith("\u2014"):
+            st.session_state["bld_expr"] = EXAMPLES[pick]
+
+    st.session_state.setdefault("bld_expr", "pctrank(mom(price, 126))")
+    expr = st.text_area("Expression", key="bld_expr", height=90)
+
+    if expr and expr.strip():
+        try:
+            d = FORMULA.describe(expr, universe, exog_used)
+            frame = d["frame"]
+            b1, b2, b3, b4 = st.columns(4)
+            with b1:
+                dial("Type", "Boolean" if d["is_boolean"] else "Continuous",
+                     "0 / 1 filter" if d["is_boolean"] else "score to rank")
+            with b2:
+                dial("Coverage", f"{d['coverage']*100:.0f}%",
+                     "of the price grid")
+            with b3:
+                dial("First value",
+                     str(d["first_valid"].date()) if d["first_valid"] is not None
+                     else "\u2014", "warm-up needed")
+            with b4:
+                dial("Median", f"{d['median']:.3f}",
+                     f"range {d['min']:.2f} to {d['max']:.2f}")
+
+            eyebrow("Value over time")
+            show = st.multiselect("Instruments", list(frame.columns),
+                                  default=list(frame.columns)[:3], key="bld_show")
+            if show:
+                st.plotly_chart(
+                    C.equity_curve(frame[show].dropna(how="all"), False,
+                                   "Expression value"),
+                    use_container_width=True, config={"displaylogo": False})
+
+            eyebrow("Latest values")
+            last = frame.dropna(how="all")
+            if not last.empty:
+                tail = last.iloc[-1].sort_values(ascending=False)
+                st.dataframe(
+                    pd.DataFrame({"Instrument": tail.index,
+                                  "Value": [f"{v:,.4f}" for v in tail.values]}),
+                    use_container_width=True, hide_index=True)
+
+            if d["coverage"] < 0.5:
+                st.markdown(
+                    f'<div class="flag">The expression only produces a value '
+                    f'on {d["coverage"]*100:.0f}% of the grid. A long window '
+                    f'costs history: the backtest cannot start until it has '
+                    f'one.</div>', unsafe_allow_html=True)
+
+            eyebrow("Use it")
+            note("Select <b>Custom Formula</b> as the model in the sidebar, "
+                 "then paste this into <b>Score expression</b> (higher is "
+                 "better) or into <b>Filter expression</b> if it is a "
+                 "boolean test.")
+            st.code(expr, language="text")
+        except FORMULA.FormulaError as exc:
+            st.markdown(f'<div class="flag">{exc}</div>', unsafe_allow_html=True)
+    else:
+        note("Enter an expression above, or pick an example.")
+
+
+# --------------------------- EXPORT ---------------------------------------
+with tabs[5]:
     note("Every export below reproduces the backtest currently on screen. "
          "The tearsheet is the fastest way to share a result; the workbook "
          "and CSVs are for further analysis elsewhere.")

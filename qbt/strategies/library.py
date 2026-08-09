@@ -434,3 +434,66 @@ def _exog_signal(px: pd.DataFrame, p: Dict[str, Any], ex: pd.DataFrame) -> pd.Da
 
     tot = raw.abs().sum(axis=1).replace(0, np.nan)
     return raw.div(tot, axis=0).fillna(0.0) * float(p["gross"])
+
+
+# ======================================================================
+# User-defined strategy
+# ----------------------------------------------------------------------
+@register(
+    key="custom_formula",
+    label="Custom Formula",
+    description="A strategy written in the Builder tab: a score expression "
+                "ranks the universe, an optional filter vetoes names, and "
+                "sizing spreads the capital. Everything is built from the "
+                "same indicators the packaged models use.",
+    params=[
+        Param("score", "Score expression", "formula", "pctrank(mom(price, 126))",
+              help="Higher is better. Ranked across the universe each day."),
+        Param("filter", "Filter expression (optional)", "formula",
+              "price > sma(price, 200)",
+              help="Must evaluate true for a name to be eligible. Leave blank "
+                   "to skip."),
+        Param("top_n", "Number of Positions", "int", 3, 1, 30, 1),
+        Param("hold_cash", "Hold unfilled positions in cash", "bool", True,
+              help="If the filter rejects names, the corresponding capital "
+                   "stays in cash instead of concentrating into survivors."),
+        Param("sizing", "Sizing", "choice", "Equal Weight",
+              choices=["Equal Weight", "Inverse Volatility",
+                       "Inverse Downside Volatility"]),
+        Param("vol_window", "Volatility Window", "int", 60, 20, 250, 5),
+        Param("gross", "Gross Exposure", "float", 1.0, 0.1, 1.0, 0.05),
+    ],
+)
+def _custom_formula(px: pd.DataFrame, p: Dict[str, Any],
+                    ex: pd.DataFrame) -> pd.DataFrame:
+    from ..formula import evaluate_frame, FormulaError
+
+    exog = ex if (ex is not None and not ex.empty) else None
+    try:
+        score = evaluate_frame(str(p.get("score") or ""), px, exog)
+    except FormulaError:
+        # A broken formula must not fabricate a position.
+        return pd.DataFrame(0.0, index=px.index, columns=px.columns)
+
+    filt_txt = str(p.get("filter") or "").strip()
+    if filt_txt:
+        try:
+            keep = evaluate_frame(filt_txt, px, exog).astype(float) > 0
+        except FormulaError:
+            return pd.DataFrame(0.0, index=px.index, columns=px.columns)
+        score = score.where(keep)
+
+    ranks = score.rank(axis=1, ascending=False, na_option="keep", method="first")
+    top_n = int(p["top_n"])
+    mask = (ranks <= top_n).astype(float).where(score.notna(), 0.0)
+
+    slots = top_n if bool(p["hold_cash"]) else None
+    gross = float(p["gross"])
+    sizing = p["sizing"]
+    if sizing == "Equal Weight":
+        if slots is not None:
+            return mask / float(slots) * gross
+        return size_equal(mask, gross)
+    return size_inverse_vol(mask, px, int(p["vol_window"]), gross=gross,
+                            downside=sizing.startswith("Inverse Downside"),
+                            slots=slots)

@@ -369,7 +369,8 @@ def align_start(*results: Optional[BacktestResult],
 # ----------------------------------------------------------------------
 def benchmark_result(bench_prices: pd.Series, engine: EngineConfig,
                      label: str = "Benchmark",
-                     dividends: Optional[pd.Series] = None) -> BacktestResult:
+                     dividends: Optional[pd.Series] = None,
+                     reinvest_rule: Optional[str] = None) -> BacktestResult:
     """Buy-and-hold on the index, no frictions, for comparison.
 
     The purchase happens on the first available session. Leaving it to a
@@ -389,12 +390,25 @@ def benchmark_result(bench_prices: pd.Series, engine: EngineConfig,
                        execution_lag=0, max_leverage=1.0,
                        min_trade_weight=0.0,
                        periods_per_year=engine.periods_per_year)
-    div = dividends.dropna().to_frame() if dividends is not None else None
-    if div is not None:
+    div = None
+    if dividends is not None:
+        div = dividends.reindex(px.index).fillna(0.0).to_frame()
         div.columns = px.columns
+
+    # With dividends paid as cash, the benchmark needs a recurring
+    # rebalance or the cash would pile up uninvested forever and the
+    # comparison would drift below a true total-return index. Without
+    # dividends a single purchase is enough: the weight simply drifts.
+    if div is not None and float(div.to_numpy().sum()) > 0:
+        eng.rebalance = reinvest_rule or engine.rebalance
+        dates = rebalance_calendar(px.index, eng.rebalance)
+        dates = pd.DatetimeIndex(
+            sorted(set([px.index[0]]) | set(dates)))
+    else:
+        dates = pd.DatetimeIndex([px.index[0]])
+
     return run_backtest(px, w, eng, zero_costs, label=label,
-                        rebalance_dates=pd.DatetimeIndex([px.index[0]]),
-                        dividends=div)
+                        rebalance_dates=dates, dividends=div)
 
 
 def align_results(results: Dict[str, "BacktestResult | pd.Series"]) -> pd.DataFrame:

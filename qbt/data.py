@@ -162,6 +162,7 @@ class MarketData:
     close: pd.DataFrame
     open: Optional[pd.DataFrame] = None
     dividends: Optional[pd.DataFrame] = None
+    adj_close: Optional[pd.DataFrame] = None   # total-return prices, when distinct
     adjusted: bool = True
     notes: List[str] = None
 
@@ -229,6 +230,13 @@ def load_market_data(tickers: List[str], start: str, end: Optional[str] = None,
             notes.append("No opening prices available: execution falls back "
                          "to the close.")
 
+    adj = None
+    if not adjusted:
+        # Yahoo ships the dividend-adjusted series alongside the raw one.
+        # Keeping it lets the benchmark be measured on total return even
+        # when the strategy is deliberately run on price-return prices.
+        adj = _extract(raw, "Adj Close", tickers)
+
     div = None
     if want_dividends:
         if adjusted:
@@ -242,8 +250,11 @@ def load_market_data(tickers: List[str], start: str, end: Optional[str] = None,
                 notes.append("No dividend was reported over this period for "
                              "these symbols.")
 
-    return MarketData(close=close, open=op, dividends=div,
+    return MarketData(close=close, open=op, dividends=div, adj_close=adj,
                       adjusted=bool(adjusted), notes=notes)
+
+    # note: when adjusted=True, close IS the total-return series and
+    # adj_close stays None -- there is nothing distinct to keep.
 
 
 # ----------------------------------------------------------------------

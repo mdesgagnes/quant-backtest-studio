@@ -234,6 +234,39 @@ HTML file directly.
 
 ---
 
+## 3 quater. Preset universes and the benchmark
+
+**Presets.** The Yahoo Finance source offers ready-made universes (Canadian
+ETFs, Canadian asset classes, TSX sectors, U.S. SPDR sectors, global asset
+classes, U.S. factors, sixty-forty blocks). Picking one fills the symbol
+box and sets a matching benchmark and cash proxy; everything stays
+editable. Add your own by appending an entry to `UNIVERSES` in
+`qbt/presets.py`.
+
+Two caveats apply to every preset, and to any universe assembled today out
+of instruments that exist today: these are the funds that *survived*, and
+several launched in the 2010s, so an early start date silently shortens the
+usable history. The Data tab reports the first usable date per instrument.
+
+**Benchmark convention.** Set independently of the strategy, because the
+two questions are unrelated: how you model your own portfolio's dividends
+is not how the index you are judged against handles them.
+
+| Option | Dividends |
+|---|---|
+| Total return (adjusted close) | Reinvested continuously, inside the price series |
+| Price return + dividends reinvested at rebalance | Credited as cash, put back to work on the rebalance calendar |
+| Price return only | Excluded |
+
+The default is total return, and it is almost always the right one: a
+price-return benchmark is not the index anyone actually tracks, and it
+understates the bar by roughly its dividend yield every year. On a Canadian
+equity ETF that is around two to three points annually - more than enough
+to turn a losing strategy into an apparent winner. The third option exists
+so the gap can be measured, not because it makes a fair comparison.
+
+---
+
 ## 4 bis. Analysing a return stream
 
 Set **Source** to "Return stream" to skip prices and signals entirely and
@@ -314,6 +347,55 @@ They are explicit because they determine how credible the result is.
 9. **Survivorship bias is not handled automatically.** A universe built
    today from ETFs that exist today carries that bias. The "Data" diagnostic
    flags histories shorter than the tested period.
+
+---
+
+## 5 bis. Building a strategy in the app
+
+The **Builder** tab writes a strategy as an expression, with no Python and
+no redeploy. Test it against the loaded universe, then select **Custom
+Formula** as the model and paste the expressions in.
+
+A strategy is two expressions plus sizing:
+
+- **Score** - higher is better; the universe is ranked by it each day and
+  the top N are held. `pctrank(mom(price, 126))`
+- **Filter** (optional) - must be true for a name to be eligible.
+  `price > sma(price, 200)`
+
+Available: `price`; `sma ema mom` for trend; `vol dvol` for risk;
+`rsi er` for oscillators and quality; `zscore mean std mmax mmin shift` for
+statistics; `pctrank rank` across the universe; `ifelse clip abs log sign`
+for shaping. Imported exogenous series appear under their own names. `x` is
+any series, `n` a window in sessions.
+
+Some working examples:
+
+```
+pctrank(mom(price, 126))                                  momentum rank
+price > sma(price, 200)                                   trend filter
+0.7 * pctrank(mom(price,126)) + 0.3 * pctrank(-vol(price,60))
+ifelse(rsi(price,14) < 35 and price > sma(price,200), 1, 0)
+price > mmax(shift(price, 1), 60)                         breakout
+```
+
+The Builder reports whether the expression is boolean or continuous, how
+much of the price grid it covers, and the first date it produces a value -
+a long window costs history, and the backtest cannot start before it.
+
+**On safety.** Expressions are parsed to a syntax tree and walked node by
+node against a whitelist; they are never handed to `eval` in any meaningful
+sense. There is no attribute access, no subscripting, no imports, no
+lambdas, no comprehensions, and no name that is not a declared indicator.
+This matters because the app is reachable at a public URL: running
+arbitrary user code there would let anyone past the login page read the
+secrets file or open network connections from inside the container. A
+malformed or hostile expression produces no position at all rather than a
+silent partial one.
+
+For anything the expression language cannot say - a stateful rule, an
+optimizer, a custom data join - write a real strategy in Python instead,
+as below.
 
 ---
 
@@ -399,6 +481,8 @@ qbt/
   data.py                  loading, cleaning, diagnostics
   exog.py                  exogenous series, publication lag
   external.py              imported target weights
+  formula.py               sandboxed expression evaluator
+  presets.py               preset universes
   returns_input.py         imported return streams
   engine.py                day-by-day simulation
   metrics.py                performance and risk
