@@ -157,6 +157,21 @@ def _pseudo_result(returns, equity, label):
         label=label)
 
 
+def _fmt_period_tables(tables, main_label, bench_label=None):
+    """Formats the trailing / calendar tables for display."""
+    out = {}
+    for key in ("trailing", "calendar"):
+        t = tables[key].copy()
+        if t.empty:
+            out[key] = t
+            continue
+        for c in [main_label] + ([bench_label] if bench_label else []) + ["Excess"]:
+            if c in t.columns:
+                t[c] = t[c].map(lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
+        out[key] = t
+    return out
+
+
 def note(text: str):
     st.markdown(f'<div class="note">{text}</div>', unsafe_allow_html=True)
 
@@ -356,6 +371,27 @@ if source == "Return stream":
         if bstats:
             tbl[bench_col] = [M.format_metric(k, bstats.get(k, np.nan)) for k in order]
         st.dataframe(tbl, use_container_width=True, hide_index=True, height=560)
+
+        eyebrow("Trailing periods")
+        rp = M.period_table(eq_main, r_main, eq_bench, r_bench, ppy,
+                            str(main_col), str(bench_col or "Benchmark"))
+        rfmt = _fmt_period_tables(rp, str(main_col),
+                                  str(bench_col) if bench_col else None)
+        if not rfmt["trailing"].empty:
+            st.dataframe(rfmt["trailing"], use_container_width=True, hide_index=True)
+            note("Periods longer than one year are annualized; shorter ones "
+                 "are cumulative.")
+
+        eyebrow("Calendar years")
+        if not rfmt["calendar"].empty:
+            st.dataframe(rfmt["calendar"], use_container_width=True, hide_index=True)
+            cyr = rp["calendar"]
+            if str(main_col) in cyr.columns:
+                st.plotly_chart(
+                    C.bar_series([str(y) for y in cyr["Year"]],
+                                 (cyr[str(main_col)] * 100).tolist(),
+                                 "Return by calendar year", "%"),
+                    use_container_width=True, config={"displaylogo": False})
 
         eyebrow("Main drawdown episodes")
         dd = M.drawdown_table(eq_main, 6)
@@ -1024,6 +1060,34 @@ with tabs[0]:
     if bstats:
         tbl[bench.label] = [M.format_metric(k, bstats.get(k, np.nan)) for k in order]
     st.dataframe(tbl, use_container_width=True, hide_index=True, height=560)
+
+    eyebrow("Trailing periods")
+    ptabs = M.period_table(res.equity, res.returns,
+                           bench.equity if bench is not None else None,
+                           bench.returns if bench is not None else None,
+                           ppy, rcfg.label, bench.label if bench is not None else "Benchmark")
+    fmt = _fmt_period_tables(ptabs, rcfg.label,
+                             bench.label if bench is not None else None)
+    if not fmt["trailing"].empty:
+        st.dataframe(fmt["trailing"], use_container_width=True, hide_index=True)
+        note("Periods longer than one year are annualized; shorter ones are "
+             "cumulative, as the <b>Annualized</b> column records. A window "
+             "the history does not cover is omitted rather than measured "
+             "over a shorter span and labelled as though it were complete.")
+
+    eyebrow("Calendar years")
+    if not fmt["calendar"].empty:
+        st.dataframe(fmt["calendar"], use_container_width=True, hide_index=True)
+        cy = ptabs["calendar"]
+        if rcfg.label in cy.columns:
+            st.plotly_chart(
+                C.bar_series([str(y) for y in cy["Year"]],
+                             (cy[rcfg.label] * 100).tolist(),
+                             "Return by calendar year", "%"),
+                use_container_width=True, config={"displaylogo": False})
+        if (cy["Partial"].astype(str) != "").any():
+            note("A partial first or last year is flagged in the "
+                 "<b>Partial</b> column: those are not full-year figures.")
 
     eyebrow("Main drawdown episodes")
     dd_tbl = M.drawdown_table(res.equity, 6)

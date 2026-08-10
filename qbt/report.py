@@ -134,6 +134,42 @@ def _holdings_table_html(res: BacktestResult, top: int = 30) -> str:
     )
 
 
+def _period_tables_html(res: BacktestResult, bench, ppy: int,
+                        label: str, bench_label: str) -> str:
+    """Trailing-period and calendar-year tables for the tearsheet."""
+    tabs = M.period_table(res.equity, res.returns,
+                          bench.equity if bench is not None else None,
+                          bench.returns if bench is not None else None,
+                          ppy, label, bench_label)
+
+    def _render(df, first_col):
+        if df.empty:
+            return '<div class="note">Not enough history.</div>'
+        cols = [c for c in df.columns if c != "Partial" or
+                (df["Partial"].astype(str) != "").any()]
+        head = "".join(f"<th>{_esc(c)}</th>" for c in cols)
+        body = ""
+        for _, row in df.iterrows():
+            cells = ""
+            for c in cols:
+                v = row[c]
+                if c in (label, bench_label, "Excess"):
+                    v = "\u2014" if pd.isna(v) else f"{v*100:+.2f}%"
+                cells += f"<td>{_esc(v)}</td>"
+            body += f"<tr>{cells}</tr>"
+        return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+    return (
+        '<div class="eyebrow">Trailing periods</div>'
+        + _render(tabs["trailing"], "Period")
+        + '<div class="note">Periods beyond one year are annualized; shorter '
+          'ones are cumulative, per the Annualized column. Windows the history '
+          'does not cover are omitted.</div>'
+        '<div class="eyebrow">Calendar years</div>'
+        + _render(tabs["calendar"], "Year")
+    )
+
+
 def _fig_html(fig) -> str:
     return fig.to_html(full_html=False, include_plotlyjs=False,
                        config={"displaylogo": False, "displayModeBar": False})
@@ -220,6 +256,8 @@ def render_tearsheet(res: BacktestResult,
 
 <div class="eyebrow">Key statistics</div>
 <div class="kpi-grid">{kpis}</div>
+
+{_period_tables_html(res, bench, cfg.engine.periods_per_year, res.label, bench_label or "Benchmark")}
 
 <div class="eyebrow">Portfolio value</div>
 <div class="chart">{_fig_html(eq_fig)}</div>

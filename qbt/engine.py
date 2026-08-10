@@ -118,12 +118,24 @@ def run_backtest(prices: pd.DataFrame,
     # --- Execution lag: this is where the future is neutralized -------
     w_exec = w_target.shift(max(0, int(engine.execution_lag))).fillna(0.0)
 
+    # Rebalance dates are *signal* dates and are shifted forward by the
+    # execution lag, so the trade lands on the session the order could
+    # actually be placed. A month-end signal with a one-day lag trades on
+    # the first session of the next month.
+    #
+    # The shift has to happen here as well as on the weights. Applying the
+    # lag only to the weights while firing the trade on the signal date
+    # counts it twice: the engine would trade on month-end using the
+    # weights from the day before, so a signal produced at month-end would
+    # not reach the book until the *following* rebalance -- a full period
+    # late for a quarterly strategy.
+    lag = max(0, int(engine.execution_lag))
     if rebalance_dates is not None and len(rebalance_dates):
         sig = pd.DatetimeIndex(rebalance_dates).intersection(idx)
-        pos = idx.get_indexer(sig) + max(0, int(engine.execution_lag))
-        rebal = idx[pos[pos < len(idx)]]
     else:
-        rebal = rebalance_calendar(idx, engine.rebalance)
+        sig = rebalance_calendar(idx, engine.rebalance)
+    pos = idx.get_indexer(pd.DatetimeIndex(sig)) + lag
+    rebal = idx[pos[(pos >= 0) & (pos < len(idx))]]
     rebal_set = set(rebal)
 
     # --- Return legs ---------------------------------------------------

@@ -225,6 +225,8 @@ under the **Export** tab, plus a few convenience buttons in "Positions".
 | Trade log | CSV | Every trade, with weight before/after and the change |
 | Daily series | CSV | Equity, return, exposure, cash, turnover, cost, benchmark |
 | Full workbook | XLSX | Statistics, Series, Holdings, Current Holdings, Monthly Returns, Trades in one file |
+| Trailing periods | on screen + tearsheet | 1M, 3M, 6M, YTD, 1Y, 2Y, 3Y, 5Y, 10Y, 15Y, 20Y, since inception, against the benchmark |
+| Calendar years | on screen + tearsheet | Year-by-year return and excess, partial years flagged |
 | Configuration | YAML | Exact reproduction of the run (imported files are not included; their name, settings, and lag are) |
 
 The tearsheet is the fastest way to share a result: it is a single
@@ -298,6 +300,29 @@ simulated, only a realized stream.
 
 ---
 
+## 4 ter. Period reporting
+
+The Results tab and the tearsheet both carry two standard tables.
+
+**Trailing periods** - 1M, 3M, 6M, YTD, 1Y, 2Y, 3Y, 5Y, 10Y, 15Y, 20Y and
+since inception, each against the benchmark with the excess alongside.
+Anything longer than a year is annualized; anything shorter stays
+cumulative, and an `Annualized` column records which convention each row
+uses. Annualizing a three-month figure implies that quarter repeats four
+times, which is precisely the extrapolation that makes a good quarter look
+like a track record.
+
+A window the history does not cover is left out entirely rather than
+measured over whatever exists and labelled as though it were complete - a
+"10Y" row computed from six years of data is worse than no row.
+
+**Calendar years** - the return for each year, with the benchmark and the
+excess, plus a bar chart. A partial first or last year is flagged in a
+`Partial` column, since a strategy that started in October will otherwise
+show a suspiciously calm first year.
+
+---
+
 ## 5. Engine assumptions
 
 They are explicit because they determine how credible the result is.
@@ -306,7 +331,13 @@ They are explicit because they determine how credible the result is.
    day *t*; the engine executes them at *t + lag*, one business day by
    default. The no-look-ahead property is verifiable: changing the last
    price in the history does not change any earlier return.
-2. **Execution price.** By default trades settle at the close. Switching to
+2. **Rebalance dates are signal dates.** A monthly or quarterly calendar
+   marks the day the signal is *derived*, at that session's close. The trade
+   lands `execution_lag` sessions later: with the default of one, a
+   quarter-end signal trades on the first session of the next quarter. The
+   trade log shows execution dates, so a quarterly strategy shows trades on
+   the 1st, not the 31st.
+3. **Execution price.** By default trades settle at the close. Switching to
    "Open (marked at the close)" splits the day in two: the overnight move
    from the prior close to the open is earned on the old weights, the
    intraday move from open to close on the new ones. That is the more
@@ -314,7 +345,7 @@ They are explicit because they determine how credible the result is.
    it stops the trade day from silently capturing an overnight gap the
    portfolio was never positioned for. Opening prices come from Yahoo
    Finance; uploaded files fall back to close execution.
-3. **Warm-up.** Indicators are blind until they have enough history: a
+4. **Warm-up.** Indicators are blind until they have enough history: a
    200-day average produces nothing for its first 200 sessions. Those
    sessions are not neutral - the portfolio sits in cash *earning the cash
    rate*, which lifts the reported return, stretches the measured period and
@@ -323,7 +354,7 @@ They are explicit because they determine how credible the result is.
    benchmark is cut to the same date so the comparison stays honest. Only
    the leading stretch is removed: a deliberate move to cash mid-period is a
    decision and is kept.
-4. **Dividends.** Two conventions, chosen under Price convention. *Total
+5. **Dividends.** Two conventions, chosen under Price convention. *Total
    return* uses dividend-adjusted prices, so payments are folded into the
    price series and compound inside the position from the moment they are
    paid. *Price return + cash dividends* keeps prices ex-dividend and
@@ -333,18 +364,18 @@ They are explicit because they determine how credible the result is.
    real. The two are mutually exclusive by construction: crediting dividends
    on top of adjusted prices would count every payment twice, and the app
    refuses that combination rather than silently producing it.
-5. **Weights drift between rebalances.** Positions evolve with prices.
+6. **Weights drift between rebalances.** Positions evolve with prices.
    Assuming an implicit daily rebalance is the mistake that most often
    inflates published results.
-6. **Frictions on actual turnover.** Cost = sum(|target weight - current
+7. **Frictions on actual turnover.** Cost = sum(|target weight - current
    weight|) x (commission + slippage). Default: 5 bps + 25 bps, a
    conservative blended assumption for Canadian ETFs.
-7. **Cash is remunerated.** Either at a fixed rate, or by the return of a
+8. **Cash is remunerated.** Either at a fixed rate, or by the return of a
    cash-equivalent ETF (PSA.TO, BIL): the opportunity cost of sitting out of
    the market is counted.
-8. **Adjustments under 0.5% of weight are ignored** (`min_trade_weight`), so
+9. **Adjustments under 0.5% of weight are ignored** (`min_trade_weight`), so
    the engine does not charge for trades no manager would place.
-9. **Survivorship bias is not handled automatically.** A universe built
+10. **Survivorship bias is not handled automatically.** A universe built
    today from ETFs that exist today carries that bias. The "Data" diagnostic
    flags histories shorter than the tested period.
 

@@ -202,3 +202,129 @@ def format_metric(key: str, value: float) -> str:
     if FORMATS.get(key) == "pct":
         return f"{value * 100:,.2f}%"
     return f"{value:,.2f}"
+
+
+# ----------------------------------------------------------------------
+# Period reporting
+# ----------------------------------------------------------------------
+# (label, months back). None = year-to-date, -1 = since inception.
+TRAILING_PERIODS = [
+    ("1M", 1), ("3M", 3), ("6M", 6), ("YTD", None), ("1Y", 12),
+    ("2Y", 24), ("3Y", 36), ("5Y", 60), ("10Y", 120), ("15Y", 180),
+    ("20Y", 240), ("Since inception", -1),
+]
+
+
+def trailing_returns(equity: pd.Series, ppy: int = TRADING_DAYS,
+                     as_of: Optional[pd.Timestamp] = None) -> pd.DataFrame:
+    """Cumulative returns over standard trailing windows.
+
+    Anything longer than a year is annualized, anything shorter is left
+    cumulative -- annualizing a three-month number implies the quarter
+    repeats four times, which is exactly the extrapolation that makes short
+    windows look impressive. The `Annualized` column records which
+    convention each row uses so the table can never be misread.
+
+    A window is reported only if the history actually covers it. A period
+    that reaches back further than the data is left out rather than
+    silently measured over whatever is available and labelled as though it
+    were the full span.
+    """
+    eq = equity.dropna()
+    if len(eq) < 2:
+        return pd.DataFrame()
+
+    end = as_of or eq.index[-1]
+    eq = eq.loc[:end]
+    start_all = eq.index[0]
+    end_val = float(eq.iloc[-1])
+
+    rows = []
+    for label, months in TRAILING_PERIODS:
+        if months is None:
+            start = pd.Timestamp(year=end.year, month=1, day=1)
+            if start <= start_all:
+                continue
+        elif months < 0:
+            start = start_all
+        else:
+            start = end - pd.DateOffset(months=months)
+            if start < start_all:
+                continue        # not enough history: omit rather than mislead
+
+        window = eq.loc[eq.index >= start]
+        if len(window) < 2:
+            continue
+        base = float(window.iloc[0])
+        if base <= 0:
+            continue
+
+        total = end_val / base - 1.0
+        years = max((window.index[-1] - window.index[0]).days / 365.25, 1e-9)
+        annualized = years > 1.0000001
+        value = ((1.0 + total) ** (1.0 / years) - 1.0) if annualized else total
+
+        rows.append({
+            "Period": label,
+            "Return": value,
+            "Annualized": "Yes" if annualized else "No",
+            "From": window.index[0].date(),
+            "To": window.index[-1].date(),
+        })
+    return pd.DataFrame(rows)
+
+
+def calendar_years(returns: pd.Series) -> pd.DataFrame:
+    """Return for each calendar year, with the partial first and last year
+    flagged rather than quietly presented as full years."""
+    r = returns.dropna()
+    if r.empty:
+        return pd.DataFrame()
+
+    grouped = (1.0 + r).groupby(r.index.year).prod() - 1.0
+    first_year, last_year = r.index[0].year, r.index[-1].year
+    rows = []
+    for year, value in grouped.items():
+        partial = ""
+        if year == first_year and (r.index[0].month, r.index[0].day) > (1, 5):
+            partial = f"from {r.index[0].date()}"
+        if year == last_year and (r.index[-1].month, r.index[-1].day) < (12, 26):
+            partial = f"to {r.index[-1].date()}"
+        rows.append({"Year": int(year), "Return": float(value),
+                     "Partial": partial})
+    return pd.DataFrame(rows)
+
+
+def period_table(equity: pd.Series, returns: pd.Series,
+                 bench_equity: Optional[pd.Series] = None,
+                 bench_returns: Optional[pd.Series] = None,
+                 ppy: int = TRADING_DAYS,
+                 label: str = "Strategy",
+                 bench_label: str = "Benchmark") -> Dict[str, pd.DataFrame]:
+    """Trailing and calendar-year tables, strategy against benchmark."""
+    tr = trailing_returns(equity, ppy)
+    cy = calendar_years(returns)
+
+    if bench_equity is not None and not tr.empty:
+        btr = trailing_returns(bench_equity, ppy)
+        merged = tr.merge(btr[["Period", "Return"]], on="Period", how="left",
+                          suffixes=("", "_bench"))
+        merged = merged.rename(columns={"Return": label,
+                                        "Return_bench": bench_label})
+        merged["Excess"] = merged[label] - merged[bench_label]
+        tr = merged
+    elif not tr.empty:
+        tr = tr.rename(columns={"Return": label})
+
+    if bench_returns is not None and not cy.empty:
+        bcy = calendar_years(bench_returns)
+        merged = cy.merge(bcy[["Year", "Return"]], on="Year", how="left",
+                          suffixes=("", "_bench"))
+        merged = merged.rename(columns={"Return": label,
+                                        "Return_bench": bench_label})
+        merged["Excess"] = merged[label] - merged[bench_label]
+        cy = merged
+    elif not cy.empty:
+        cy = cy.rename(columns={"Return": label})
+
+    return {"trailing": tr, "calendar": cy}
