@@ -119,8 +119,12 @@ def underwater(equities: Dict[str, pd.Series],
 
 def monthly_heatmap(returns: pd.Series,
                     title: str = "Monthly returns",
-                    theme: str = "dark") -> go.Figure:
+                    theme: str = "dark",
+                    ppy: int = 252) -> go.Figure:
     pal, _ = _colors(theme)
+    # A quarterly or annual stream cannot fill a month-by-month grid.
+    if ppy < 12:
+        return _base(go.Figure(), 200, title, theme)
     tbl = M.monthly_returns(returns)
     if tbl.empty:
         return _base(go.Figure(), 260, title, theme)
@@ -176,9 +180,11 @@ def rolling_metric(series: pd.Series, label: str, ref: Optional[float] = None,
 
 
 def return_distribution(returns: pd.Series,
-                        title: str = "Daily return distribution",
-                        theme: str = "dark") -> go.Figure:
+                        title: Optional[str] = None,
+                        theme: str = "dark",
+                        ppy: int = 252) -> go.Figure:
     pal, _ = _colors(theme)
+    title = title or f"{M.freq_words(ppy)[0].capitalize()} return distribution"
     r = returns.dropna() * 100
     fig = go.Figure(go.Histogram(
         x=r, nbinsx=90, marker=dict(color=pal["brass"], line=dict(width=0)),

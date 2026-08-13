@@ -10,6 +10,39 @@ TRADING_DAYS = 252
 
 
 # ----------------------------------------------------------------------
+# Frequency vocabulary
+# ----------------------------------------------------------------------
+# Statistics computed on a monthly stream are monthly statistics. The
+# arithmetic is identical, but a label reading "daily" on a monthly VaR is
+# simply false, and "18 days to trough" for an 18-month drawdown is worse:
+# it understates the episode by a factor of thirty.
+_FREQ_WORDS = {
+    252: ("daily", "day", "days", "Month", "Months"),
+    52: ("weekly", "week", "weeks", "Month", "Months"),
+    12: ("monthly", "month", "months", "Month", "Months"),
+    4: ("quarterly", "quarter", "quarters", "Quarter", "Quarters"),
+    2: ("semi-annual", "half-year", "half-years", "Half-year", "Half-years"),
+    1: ("annual", "year", "years", "Year", "Years"),
+}
+
+
+def freq_words(ppy: int = TRADING_DAYS) -> tuple:
+    """(adjective, singular, plural, period-noun, period-plural)."""
+    if ppy in _FREQ_WORDS:
+        return _FREQ_WORDS[ppy]
+    nearest = min(_FREQ_WORDS, key=lambda k: abs(k - ppy))
+    return _FREQ_WORDS[nearest]
+
+
+def var_label(ppy: int = TRADING_DAYS) -> str:
+    return f"VaR 95% ({freq_words(ppy)[0]})"
+
+
+def cvar_label(ppy: int = TRADING_DAYS) -> str:
+    return f"CVaR 95% ({freq_words(ppy)[0]})"
+
+
+# ----------------------------------------------------------------------
 # Building blocks
 # ----------------------------------------------------------------------
 def to_equity(returns: pd.Series, initial: float = 1.0) -> pd.Series:
@@ -55,8 +88,15 @@ def max_drawdown(equity: pd.Series) -> float:
     return float(drawdown(equity).min())
 
 
-def drawdown_table(equity: pd.Series, top: int = 5) -> pd.DataFrame:
-    """Worst drawdown episodes, with duration and recovery time."""
+def drawdown_table(equity: pd.Series, top: int = 5,
+                   ppy: int = TRADING_DAYS) -> pd.DataFrame:
+    """Worst drawdown episodes, with duration and recovery time.
+
+    Durations are counted in observations and labelled with the actual
+    frequency, so a monthly series reports months rather than "days".
+    Calendar days are given alongside, which is the figure that does not
+    depend on the sampling at all.
+    """
     dd = drawdown(equity)
     in_dd = dd < 0
     episodes = []
@@ -72,16 +112,24 @@ def drawdown_table(equity: pd.Series, top: int = 5) -> pd.DataFrame:
         seg = dd.loc[start:]
         episodes.append((start, seg.idxmin(), None, float(seg.min())))
 
+    # The observation unit, not the aggregation bucket: a daily series is
+    # measured in sessions even though its Best/Worst figures are monthly.
+    _, _, obs_plural, _, _ = freq_words(ppy)
+    obs_plural = "Sessions" if ppy >= 200 else obs_plural.capitalize()
+    to_trough = f"{obs_plural} to Trough"
+    total = f"Total {obs_plural}"
+
     rows = []
     for s, trough, rec, depth in sorted(episodes, key=lambda x: x[3])[:top]:
+        end = rec if rec is not None else equity.index[-1]
         rows.append({
             "Start": s.date(),
             "Trough": trough.date(),
             "Recovery": rec.date() if rec is not None else "ongoing",
             "Drawdown": depth,
-            "Days to Trough": int(len(equity.loc[s:trough])),
-            "Total Days": int(len(equity.loc[s:rec])) if rec is not None
-                          else int(len(equity.loc[s:])),
+            to_trough: max(int(len(equity.loc[s:trough])) - 1, 0),
+            total: max(int(len(equity.loc[s:end])) - 1, 0),
+            "Calendar Days": int((end - s).days),
         })
     return pd.DataFrame(rows)
 
@@ -126,8 +174,15 @@ def beta_alpha(returns: pd.Series, bench: pd.Series,
     }
 
 
-def monthly_returns(returns: pd.Series) -> pd.DataFrame:
-    """Year x month table, in decimal."""
+def monthly_returns(returns: pd.Series, ppy: int = TRADING_DAYS) -> pd.DataFrame:
+    """Year x month table, in decimal.
+
+    Empty for streams coarser than monthly: a quarterly series has no
+    month-by-month breakdown to show, and resampling one into months would
+    invent buckets that were never observed.
+    """
+    if ppy < 12:
+        return pd.DataFrame()
     m = (1 + returns.fillna(0)).resample("ME").prod() - 1
     if m.empty:
         return pd.DataFrame()
@@ -155,8 +210,12 @@ def summary(returns: pd.Series,
     returns = returns.dropna()
     eq = equity if equity is not None else to_equity(returns)
     vc = var_cvar(returns)
-    monthly = (1 + returns).resample("ME").prod() - 1
+    # Only aggregate when the stream is finer than a month. Resampling a
+    # monthly series to months is a no-op; resampling a quarterly one to
+    # months would invent empty buckets.
+    monthly = ((1 + returns).resample("ME").prod() - 1) if ppy > 12 else returns
 
+    adj, _, _, unit, units = freq_words(ppy)
     out: Dict[str, float] = {
         "Total Return": float(eq.iloc[-1] / eq.iloc[0] - 1) if len(eq) > 1 else np.nan,
         "CAGR": cagr(eq, ppy),
@@ -166,13 +225,13 @@ def summary(returns: pd.Series,
         "Calmar": calmar(eq, ppy),
         "Max Drawdown": max_drawdown(eq),
         "Ulcer Index": ulcer_index(eq),
-        "VaR 95% (daily)": vc["var"],
-        "CVaR 95% (daily)": vc["cvar"],
+        var_label(ppy): vc["var"],
+        cvar_label(ppy): vc["cvar"],
         "Skew": float(returns.skew()),
         "Kurtosis": float(returns.kurtosis()),
-        "% Positive Months": float((monthly > 0).mean()) if len(monthly) else np.nan,
-        "Best Month": float(monthly.max()) if len(monthly) else np.nan,
-        "Worst Month": float(monthly.min()) if len(monthly) else np.nan,
+        f"% Positive {units}": float((monthly > 0).mean()) if len(monthly) else np.nan,
+        f"Best {unit}": float(monthly.max()) if len(monthly) else np.nan,
+        f"Worst {unit}": float(monthly.min()) if len(monthly) else np.nan,
     }
     if turnover is not None and len(turnover):
         out["Annual Turnover"] = float(turnover.sum() / (len(returns) / ppy))
@@ -196,10 +255,14 @@ FORMATS = {
 }
 
 
+_PCT_PREFIXES = ("VaR 95%", "CVaR 95%", "% Positive", "Best ", "Worst ")
+
+
 def format_metric(key: str, value: float) -> str:
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return "\u2014"
-    if FORMATS.get(key) == "pct":
+    pct = FORMATS.get(key) == "pct" or key.startswith(_PCT_PREFIXES)
+    if pct:
         return f"{value * 100:,.2f}%"
     return f"{value:,.2f}"
 
@@ -239,22 +302,41 @@ def trailing_returns(equity: pd.Series, ppy: int = TRADING_DAYS,
     start_all = eq.index[0]
     end_val = float(eq.iloc[-1])
 
+    # A return is measured *between* two observations, so the base is the
+    # last point at or before the cutoff -- not the first point after it.
+    #
+    # With daily data the distinction is nearly invisible: the last close
+    # before Jan 1 and the first close after it are a day apart. On a
+    # monthly series it is a whole period. Taking the first point inside
+    # the window makes YTD start at the January close, silently discarding
+    # January's own return -- the single month most likely to matter.
+    positions = eq.index
     rows = []
     for label, months in TRAILING_PERIODS:
         if months is None:
-            start = pd.Timestamp(year=end.year, month=1, day=1)
-            if start <= start_all:
-                continue
+            # Strictly before Jan 1: the base is the prior year's final
+            # observation. Using <= would select Jan 1 itself whenever the
+            # index happens to contain it, discarding that day's return.
+            cutoff = pd.Timestamp(year=end.year, month=1, day=1) - pd.Timedelta(days=1)
         elif months < 0:
-            start = start_all
+            cutoff = None                      # since inception
         else:
-            start = end - pd.DateOffset(months=months)
-            if start < start_all:
-                continue        # not enough history: omit rather than mislead
+            cutoff = end - pd.DateOffset(months=months)
 
-        window = eq.loc[eq.index >= start]
-        if len(window) < 2:
-            continue
+        if cutoff is None:
+            base_pos = 0
+        else:
+            prior = positions[positions <= cutoff]
+            if len(prior) == 0:
+                # The window reaches back beyond the data. Reporting it
+                # would measure a shorter span under a longer label.
+                continue
+            base_pos = len(prior) - 1
+
+        if base_pos >= len(eq) - 1:
+            continue                            # no completed period yet
+
+        window = eq.iloc[base_pos:]
         base = float(window.iloc[0])
         if base <= 0:
             continue

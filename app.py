@@ -31,6 +31,7 @@ from qbt import report as REPORT
 from qbt import returns_input as RS
 from qbt import presets as PRESETS
 from qbt import formula as FORMULA
+from qbt import excel_export as XL
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -352,16 +353,19 @@ if source == "Return stream":
 
         left, right = st.columns([1.15, 1])
         with left:
-            st.plotly_chart(C.monthly_heatmap(r_main), use_container_width=True,
+            st.plotly_chart(C.monthly_heatmap(r_main, ppy=ppy),
+                            use_container_width=True,
                             config={"displaylogo": False})
         with right:
-            st.plotly_chart(C.return_distribution(r_main), use_container_width=True,
+            st.plotly_chart(C.return_distribution(r_main, ppy=ppy),
+                            use_container_width=True,
                             config={"displaylogo": False})
             win = min(ppy, max(6, len(r_main) // 6))
+            _u = M.freq_words(ppy)[2]
             st.plotly_chart(
                 C.rolling_metric(M.rolling_sharpe(r_main, win, ppy),
                                  "Rolling Sharpe", ref=0.0,
-                                 title=f"Rolling Sharpe over {win} periods"),
+                                 title=f"Rolling Sharpe over {win} {_u}"),
                 use_container_width=True, config={"displaylogo": False})
 
         eyebrow("Full statistics")
@@ -394,14 +398,14 @@ if source == "Return stream":
                     use_container_width=True, config={"displaylogo": False})
 
         eyebrow("Main drawdown episodes")
-        dd = M.drawdown_table(eq_main, 6)
+        dd = M.drawdown_table(eq_main, 6, ppy)
         if not dd.empty:
             dd["Drawdown"] = dd["Drawdown"].map(lambda v: f"{v*100:.2f}%")
             dd["Recovery"] = dd["Recovery"].astype(str)
         st.dataframe(dd, use_container_width=True, hide_index=True)
 
         eyebrow("Period returns")
-        pr = M.monthly_returns(r_main)
+        pr = M.monthly_returns(r_main, ppy)
         if not pr.empty:
             st.dataframe((pr * 100).round(2), use_container_width=True)
 
@@ -466,7 +470,7 @@ if source == "Return stream":
         if bench_col:
             out["benchmark_return"] = r_bench
             out["benchmark_value"] = eq_bench
-        e1, e2 = st.columns(2)
+        e1, e2, e3 = st.columns(3)
         e1.download_button("Series (CSV)", out.to_csv().encode("utf-8"),
                            "return_stream.csv", "text/csv", key="rscsv")
         stat_df = pd.DataFrame({"Metric": list(stats.keys()),
@@ -475,6 +479,25 @@ if source == "Return stream":
             stat_df[bench_col] = [bstats.get(k, np.nan) for k in stats]
         e2.download_button("Statistics (CSV)", stat_df.to_csv(index=False).encode("utf-8"),
                            "statistics.csv", "text/csv", key="rsstat")
+        try:
+            rbook = XL.workbook_from_returns(
+                r_main, eq_main, stats, r_bench, eq_bench, bstats or None,
+                ppy, str(main_col), str(bench_col or "Benchmark"),
+                all_series=rets,
+                report_notes={"Scale read": rrep.scale,
+                              "Source file": rfile.name})
+            e3.download_button("Full report (Excel)", rbook,
+                               f"return_stream_{main_col}.xlsx",
+                               "application/vnd.openxmlformats-officedocument."
+                               "spreadsheetml.sheet", key="rsxl")
+        except Exception as exc:
+            st.markdown(f'<div class="flag">Excel export unavailable: {exc}</div>',
+                        unsafe_allow_html=True)
+        note("The workbook carries every table behind this report: "
+             "statistics, trailing periods, calendar years, drawdown "
+             "episodes, monthly returns, the full series, and every column "
+             "from the uploaded file \u2014 plus a Notes sheet recording the "
+             "frequency and scale that were read.")
     st.stop()
 
 
@@ -1039,10 +1062,12 @@ with tabs[0]:
 
     left, right = st.columns([1.15, 1])
     with left:
-        st.plotly_chart(C.monthly_heatmap(res.returns), use_container_width=True,
+        st.plotly_chart(C.monthly_heatmap(res.returns, ppy=ppy),
+                        use_container_width=True,
                         config={"displaylogo": False})
     with right:
-        st.plotly_chart(C.return_distribution(res.returns), use_container_width=True,
+        st.plotly_chart(C.return_distribution(res.returns, ppy=ppy),
+                        use_container_width=True,
                         config={"displaylogo": False})
         win = min(252, max(63, len(res.returns) // 6))
         st.plotly_chart(
@@ -1090,7 +1115,7 @@ with tabs[0]:
                  "<b>Partial</b> column: those are not full-year figures.")
 
     eyebrow("Main drawdown episodes")
-    dd_tbl = M.drawdown_table(res.equity, 6)
+    dd_tbl = M.drawdown_table(res.equity, 6, ppy)
     if not dd_tbl.empty:
         dd_tbl["Drawdown"] = dd_tbl["Drawdown"].map(lambda v: f"{v*100:.2f}%")
         # "Recovery" mixes date objects with the string "ongoing"; Arrow
@@ -1564,27 +1589,25 @@ with tabs[5]:
     c2.download_button("Daily series (CSV)",
                        series.to_csv().encode("utf-8"), "series.csv", "text/csv")
 
-    buf = io.BytesIO()
     try:
-        with pd.ExcelWriter(buf, engine="openpyxl") as xw:
-            pd.DataFrame({"Metric": list(stats.keys()),
-                          "Value": list(stats.values())}).to_excel(
-                xw, sheet_name="Statistics", index=False)
-            series.to_excel(xw, sheet_name="Series")
-            res.weights.to_excel(xw, sheet_name="Holdings")
-            cur.to_excel(xw, sheet_name="Current Holdings", index=False)
-            mt = M.monthly_returns(res.returns)
-            if not mt.empty:
-                mt.to_excel(xw, sheet_name="Monthly Returns")
-            if not res.trades.empty:
-                res.trades.to_excel(xw, sheet_name="Trades", index=False)
-        c3.download_button("Full report (Excel)", buf.getvalue(),
-                           "backtest.xlsx",
+        book = XL.workbook_from_backtest(
+            res, bench, stats, bstats, rcfg,
+            prices=universe, exog=exog_used,
+            quality=quality.per_asset if quality is not None else None)
+        c3.download_button("Full report (Excel)", book,
+                           f"backtest_{run['strategy_key']}.xlsx",
                            "application/vnd.openxmlformats-officedocument."
-                           "spreadsheetml.sheet")
-    except Exception:
-        c3.markdown('<div class="note">Excel export unavailable '
-                    '(openpyxl missing).</div>', unsafe_allow_html=True)
+                           "spreadsheetml.sheet", key="dlxl")
+        note("The workbook carries every table behind this report: "
+             "statistics, trailing periods, calendar years, drawdown "
+             "episodes, monthly returns, the full daily series, current and "
+             "historical holdings, target weights, the trade log, rebalance "
+             "dates, parameters, prices, any imported series, and the data "
+             "diagnostic \u2014 plus a Notes sheet recording the settings "
+             "these figures depend on.")
+    except Exception as exc:
+        st.markdown(f'<div class="flag">Excel export unavailable: {exc}</div>',
+                    unsafe_allow_html=True)
 
     st.markdown(
         f'<div class="note" style="margin-top:1.5rem;">Run on {run["stamp"]} \u00b7 '

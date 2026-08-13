@@ -224,10 +224,21 @@ under the **Export** tab, plus a few convenience buttons in "Positions".
 | Holdings history | CSV | Full weight time series (same shape used internally for drift) |
 | Trade log | CSV | Every trade, with weight before/after and the change |
 | Daily series | CSV | Equity, return, exposure, cash, turnover, cost, benchmark |
-| Full workbook | XLSX | Statistics, Series, Holdings, Current Holdings, Monthly Returns, Trades in one file |
+| Full workbook | XLSX | Everything below, in one file |
 | Trailing periods | on screen + tearsheet | 1M, 3M, 6M, YTD, 1Y, 2Y, 3Y, 5Y, 10Y, 15Y, 20Y, since inception, against the benchmark |
 | Calendar years | on screen + tearsheet | Year-by-year return and excess, partial years flagged |
 | Configuration | YAML | Exact reproduction of the run (imported files are not included; their name, settings, and lag are) |
+
+**The workbook is complete by design.** Anything visible in the report is
+in it, so nothing has to be re-derived by hand. For a backtest that is
+fifteen sheets: Notes (every setting the figures depend on), Statistics,
+Trailing Periods, Calendar Years, Drawdowns, Monthly Returns, the full
+daily Series, Current Holdings, Holdings History, Target Weights, Trades,
+Rebalance Dates, Parameters, Prices, Exogenous Series and Data Quality. For
+an imported return stream it is eight, covering everything the return
+series supports; sheets that would need position data are absent because
+none exists. Percentages are written as real numbers, not formatted
+strings, so they can be charted or recomputed directly.
 
 The tearsheet is the fastest way to share a result: it is a single
 self-contained HTML file (Plotly loaded from a CDN), styled for print. Open
@@ -306,6 +317,12 @@ The Results tab and the tearsheet both carry two standard tables.
 
 **Trailing periods** - 1M, 3M, 6M, YTD, 1Y, 2Y, 3Y, 5Y, 10Y, 15Y, 20Y and
 since inception, each against the benchmark with the excess alongside.
+
+Every window is measured from the last observation *at or before* the
+cutoff, not the first one after it. On daily data the difference is a
+session; on a monthly series it is a whole period, and taking the first
+point inside the window would make YTD start at the January close and
+silently drop January's own return.
 Anything longer than a year is annualized; anything shorter stays
 cumulative, and an `Annualized` column records which convention each row
 uses. Annualizing a three-month figure implies that quarter repeats four
@@ -320,6 +337,29 @@ measured over whatever exists and labelled as though it were complete - a
 excess, plus a bar chart. A partial first or last year is flagged in a
 `Partial` column, since a strategy that started in October will otherwise
 show a suspiciously calm first year.
+
+---
+
+## 4 quater. Frequency awareness
+
+Every statistic adapts to the sampling of the data it is given, because a
+figure computed on monthly returns is a monthly figure regardless of what
+the label says.
+
+- **VaR and CVaR** are labelled with the actual frequency: "VaR 95%
+  (monthly)" on a monthly stream, not "(daily)".
+- **Best / Worst / % Positive** report the natural bucket - months for
+  daily, weekly and monthly data, quarters for quarterly data. A stream
+  coarser than monthly is never resampled into months, which would invent
+  buckets that were never observed.
+- **Drawdown durations** are counted in observations and named accordingly:
+  sessions, weeks, months or quarters. A `Calendar Days` column sits
+  alongside, which is the one figure independent of sampling. An eighteen-
+  month drawdown previously read as "18 days".
+- **The monthly heatmap** is omitted entirely for quarterly or annual
+  streams rather than drawn with fabricated cells.
+- **Annualization** follows the detected frequency: 12 periods for monthly
+  data, 4 for quarterly, 252 for daily.
 
 ---
 
@@ -512,6 +552,7 @@ qbt/
   data.py                  loading, cleaning, diagnostics
   exog.py                  exogenous series, publication lag
   external.py              imported target weights
+  excel_export.py          complete multi-sheet workbook export
   formula.py               sandboxed expression evaluator
   presets.py               preset universes
   returns_input.py         imported return streams

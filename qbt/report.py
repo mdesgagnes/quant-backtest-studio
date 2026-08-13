@@ -200,14 +200,18 @@ def render_tearsheet(res: BacktestResult,
     dd_fig = C.underwater(
         {res.label: res.equity, **({bench.label: bench.equity} if bench is not None else {})},
         theme="print")
-    mh_fig = C.monthly_heatmap(res.returns, theme="print")
-    rd_fig = C.return_distribution(res.returns, theme="print")
+    ppy = cfg.engine.periods_per_year
+    mh_fig = C.monthly_heatmap(res.returns, theme="print", ppy=ppy)
+    rd_fig = C.return_distribution(res.returns, theme="print", ppy=ppy)
     wa_fig = (None if simple else
               C.weights_area(res.weights, res.cash_weight,
                              "Portfolio composition", theme="print"))
 
-    dd_table = M.drawdown_table(res.equity, 6)
+    dd_table = M.drawdown_table(res.equity, 6, ppy)
     kpi_keys = ["CAGR", "Volatility", "Sharpe", "Sortino", "Calmar", "Max Drawdown"]
+    monthly_block = "" if ppy < 12 else (
+        '<div class="eyebrow" style="border-top:none; margin-top:0;">Monthly returns</div>'
+        f'<div class="chart">{_fig_html(mh_fig)}</div>')
     kpis = "".join(
         _kpi(k, M.format_metric(k, stats.get(k, float("nan"))),
              f"benchmark {M.format_metric(k, bench_stats.get(k, float('nan')))}"
@@ -267,11 +271,10 @@ def render_tearsheet(res: BacktestResult,
 
 <div class="two-col">
   <div>
-    <div class="eyebrow" style="border-top:none; margin-top:0;">Monthly returns</div>
-    <div class="chart">{_fig_html(mh_fig)}</div>
+    {monthly_block}
   </div>
   <div>
-    <div class="eyebrow" style="border-top:none; margin-top:0;">Daily return distribution</div>
+    <div class="eyebrow" style="border-top:none; margin-top:0;">{_esc(M.freq_words(ppy)[0].capitalize())} return distribution</div>
     <div class="chart">{_fig_html(rd_fig)}</div>
   </div>
 </div>
