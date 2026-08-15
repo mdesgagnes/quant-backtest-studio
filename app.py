@@ -21,8 +21,8 @@ from qbt.data import (load_yfinance, load_market_data, load_file, clean_prices,
 from qbt.exog import load_exog, prepare_exog, exog_report, split_roles
 from qbt.external import (load_target_weights, prepare_target_weights,
                           weights_template)
-from qbt.engine import (run_backtest, benchmark_result, align_results,
-                        align_start, first_active_date)
+from qbt.engine import (run_backtest, benchmark_result, blended_benchmark,
+                        align_results, align_start, first_active_date)
 from qbt.strategies import REGISTRY, get as get_strategy
 from qbt import metrics as M
 from qbt import charts as C
@@ -760,14 +760,51 @@ sel_universe = st.sidebar.multiselect(
     default=[t for t in (d0.tickers if source == "Yahoo Finance" else univ_options)
              if t in univ_options] or univ_options)
 
-bench_choices = ["\u2014 none \u2014"] + univ_options
+BLEND = "\u2014 blend of several \u2014"
+bench_choices = ["\u2014 none \u2014"] + univ_options + [BLEND]
 _pb = st.session_state.get("_preset_bench")
 bench_default = _pb if _pb in univ_options else (
     d0.benchmark if d0.benchmark in univ_options else None)
 benchmark = st.sidebar.selectbox(
     "Comparison benchmark", bench_choices,
     index=bench_choices.index(bench_default) if bench_default else 0)
-benchmark = None if benchmark == "\u2014 none \u2014" else benchmark
+
+bench_blend: Dict[str, float] = {}
+bench_blend_rule = "A"
+bench_extra: List[str] = []
+if benchmark == BLEND:
+    bench_spec = st.sidebar.text_area(
+        "Benchmark weights", value=st.session_state.get(
+            "benchspec", "XIC.TO:60, XBB.TO:40"),
+        height=68, key="benchspec",
+        help="TICKER:WEIGHT, comma or line separated. Percentages or "
+             "fractions both work. Instruments outside the investable "
+             "universe are downloaded alongside it.")
+    bench_blend = ALLOC.parse_fixed(
+        bench_spec, univ_options + [t.strip().upper() for t in
+                                    bench_spec.replace(":", " ").replace(",", " ")
+                                    .replace(";", " ").split()
+                                    if any(ch.isalpha() for ch in t)])
+    bench_blend_rule = st.sidebar.selectbox(
+        "Benchmark rebalance", list(REBALANCE_RULES.keys()),
+        index=list(REBALANCE_RULES.keys()).index("A"),
+        format_func=lambda k: REBALANCE_RULES[k],
+        help="How often the blend returns to its target weights. An "
+             "unrebalanced 60/40 drifts toward equities over a long window, "
+             "which quietly changes the bar being measured against.")
+    if bench_blend:
+        _tot = sum(abs(v) for v in bench_blend.values()) or 1.0
+        st.sidebar.markdown(
+            '<div class="note">' + ", ".join(
+                f"{k} {abs(v)/_tot*100:.0f}%" for k, v in bench_blend.items())
+            + "</div>", unsafe_allow_html=True)
+        bench_extra = [t for t in bench_blend if t not in univ_options]
+    else:
+        st.sidebar.markdown('<div class="flag">No valid weight parsed. Use '
+                            'TICKER:WEIGHT.</div>', unsafe_allow_html=True)
+    benchmark = BLEND if bench_blend else None
+else:
+    benchmark = None if benchmark == "\u2014 none \u2014" else benchmark
 
 BENCH_MODES = ["Total return (adjusted close)",
                "Price return + dividends reinvested at rebalance",
@@ -923,6 +960,7 @@ if mode == "builtin":
 # Sleeves sit above the model: the model still picks holdings, the sleeve
 # decides how much of the portfolio it gets to pick for.
 construction = "Single strategy"
+core_exclusive = True
 class_map: Dict[str, str] = {}
 class_budgets: Dict[str, float] = {}
 core_spec, core_budget = "", 0.5
@@ -979,6 +1017,13 @@ if mode == "builtin":
                 help="One per line or comma separated, as TICKER:WEIGHT. "
                      "Percentages or fractions both work; only the ratios "
                      "matter, since the sleeve is scaled to its share.")
+            core_exclusive = st.checkbox(
+                "Keep core holdings out of the strategy universe",
+                value=True, key="coreexcl",
+                help="On, the model never picks a name the core already "
+                     "holds, so the core position is exactly the core share. "
+                     "Off, the model may add to it, and the combined weight "
+                     "can exceed the core share.")
             _parsed = ALLOC.parse_fixed(core_spec, sel_universe)
             if _parsed:
                 _t = sum(abs(v) for v in _parsed.values()) or 1.0
@@ -1086,7 +1131,8 @@ cfg = RunConfig(
         tickers=sel_universe,
         start=str(start) if start else "1990-01-01",
         end=str(end) if end else None,
-        benchmark=benchmark, cash_proxy=cash_proxy,
+        benchmark=(None if benchmark == BLEND else benchmark),
+        cash_proxy=cash_proxy,
         adjusted=bool(adjusted), use_dividends=bool(use_divs),
     ),
     exog=ExogConfig(
@@ -1136,7 +1182,9 @@ def build_market() -> MarketData:
     """Prices, plus opens and dividends when the settings call for them."""
     if source == "Yahoo Finance":
         needed = list(dict.fromkeys(
-            sel_universe + [t for t in (benchmark, cash_proxy) if t]))
+            sel_universe
+            + [t for t in (benchmark, cash_proxy) if t and t != BLEND]
+            + list(bench_blend.keys())))
         # Adjusted close is fetched whenever the benchmark is measured on
         # total return while the strategy runs on price-return prices.
         need_div = bool(use_divs) or (
@@ -1205,10 +1253,18 @@ if run_clicked and not blocking:
                             mode="fixed", fixed=core))
                     sat = 1.0 - float(core_budget)
                     if sat > 1e-9:
-                        sleeves.append(ALLOC.Sleeve(
-                            "Strategy", sat, list(universe.columns),
-                            mode="strategy", strategy_key=strat_key,
-                            params=dict(params)))
+                        pool = [c for c in universe.columns
+                                if not (core_exclusive and c in core)]
+                        if not pool:
+                            st.warning(
+                                "The core covers the whole universe, leaving "
+                                "the strategy nothing to pick from. Its share "
+                                "stays in cash.")
+                        else:
+                            sleeves.append(ALLOC.Sleeve(
+                                "Strategy", sat, pool,
+                                mode="strategy", strategy_key=strat_key,
+                                params=dict(params)))
                     weights, sleeve_report = ALLOC.resolve(
                         universe, sleeves, REGISTRY, exog_aligned,
                         float(cfg.engine.max_leverage))
@@ -1229,7 +1285,36 @@ if run_clicked and not blocking:
                                   cash_px, run_label, rebal_dates,
                                   open_prices=open_px, dividends=div_px)
             bench = None
-            if benchmark and benchmark in prices.columns:
+            if benchmark == BLEND and bench_blend:
+                have = {k: v for k, v in bench_blend.items() if k in prices.columns}
+                missing = [k for k in bench_blend if k not in prices.columns]
+                if missing:
+                    quality.warnings.append(
+                        "Benchmark component(s) unavailable and dropped: "
+                        + ", ".join(missing))
+                if have:
+                    bsrc, bdiv = prices, None
+                    if bench_mode.startswith("Total return") and \
+                            market.adj_close is not None:
+                        bsrc = market.adj_close.reindex(prices.index)
+                    elif bench_mode.startswith("Price return + dividends"):
+                        if market.dividends is not None:
+                            bdiv = market.dividends.reindex(prices.index)
+                        else:
+                            quality.warnings.append(
+                                "No dividend data for the benchmark blend: it "
+                                "is shown on price return only, which "
+                                "understates it.")
+                    _tot = sum(abs(v) for v in have.values()) or 1.0
+                    blabel = " / ".join(
+                        f"{k} {abs(v)/_tot*100:.0f}%" for k, v in have.items())
+                    try:
+                        bench = blended_benchmark(
+                            bsrc, have, cfg.engine, blabel,
+                            dividends=bdiv, rebalance=bench_blend_rule)
+                    except Exception as exc:
+                        quality.warnings.append(f"Benchmark blend failed: {exc}")
+            elif benchmark and benchmark in prices.columns:
                 bseries, bdiv = prices[benchmark], None
                 if bench_mode.startswith("Total return"):
                     # If the strategy runs on price-return prices, the

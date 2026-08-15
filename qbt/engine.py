@@ -423,6 +423,62 @@ def benchmark_result(bench_prices: pd.Series, engine: EngineConfig,
                         rebalance_dates=dates, dividends=div)
 
 
+def blended_benchmark(prices: pd.DataFrame,
+                      weights: Dict[str, float],
+                      engine: EngineConfig,
+                      label: str = "Benchmark",
+                      dividends: Optional[pd.DataFrame] = None,
+                      rebalance: str = "A") -> BacktestResult:
+    """A fixed-weight benchmark across several instruments.
+
+    The blend is run through the same engine as everything else rather than
+    being averaged: a 60/40 that is rebalanced is not the same thing as the
+    weighted average of its two return series, because the drift between
+    rebalances is real. Frictions are zero, since a policy benchmark is a
+    measuring stick and nobody pays commissions on it.
+
+    `rebalance` sets how often the blend is restored to its target weights.
+    This matters more than it looks: an unrebalanced 60/40 drifts toward
+    equities over a long window and quietly becomes a harder benchmark to
+    beat in a bull market, and an easier one in a drawdown.
+    """
+    cols = [c for c in weights if c in prices.columns and float(weights[c]) != 0.0]
+    if not cols:
+        raise ValueError("None of the benchmark's instruments are available.")
+
+    px = prices[cols].dropna(how="all")
+    if px.empty:
+        raise ValueError("The benchmark's instruments have no overlapping history.")
+    # Start only once every component has a price, otherwise the first
+    # weights would be applied to an incomplete blend.
+    first = px.dropna().index
+    if len(first):
+        px = px.loc[first[0]:]
+
+    total = sum(abs(float(weights[c])) for c in cols) or 1.0
+    w = pd.DataFrame(
+        {c: float(weights[c]) / total for c in cols},
+        index=px.index)
+
+    zero = CostConfig(commission_bps=0, slippage_bps=0,
+                      cash_rate_pa=0, borrow_rate_pa=0)
+    eng = EngineConfig(initial_capital=engine.initial_capital,
+                       rebalance=rebalance, execution_lag=0,
+                       max_leverage=1.0, min_trade_weight=0.0,
+                       periods_per_year=engine.periods_per_year)
+
+    div = None
+    if dividends is not None:
+        div = dividends.reindex(index=px.index, columns=cols).fillna(0.0)
+        if float(div.to_numpy().sum()) <= 0:
+            div = None
+
+    dates = rebalance_calendar(px.index, rebalance)
+    dates = pd.DatetimeIndex(sorted(set([px.index[0]]) | set(dates)))
+    return run_backtest(px, w, eng, zero, label=label,
+                        rebalance_dates=dates, dividends=div)
+
+
 def align_results(results: Dict[str, "BacktestResult | pd.Series"]) -> pd.DataFrame:
     """Value curves rebased to 100 over the common period.
 

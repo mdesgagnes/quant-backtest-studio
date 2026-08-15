@@ -261,6 +261,21 @@ of instruments that exist today: these are the funds that *survived*, and
 several launched in the 2010s, so an early start date silently shortens the
 usable history. The Data tab reports the first usable date per instrument.
 
+**A blended benchmark.** Choosing "blend of several" as the comparison
+benchmark lets the bar be a fixed-weight portfolio rather than one fund:
+`XIC.TO:60, XBB.TO:40` for a balanced mandate, say. Components outside the
+investable universe are downloaded alongside it, so the benchmark is not
+restricted to what the strategy can trade.
+
+The blend runs through the same engine as everything else rather than being
+averaged, because a rebalanced 60/40 is not the weighted average of its two
+return series -- the drift between rebalances is real. Its rebalance
+frequency is set separately and is worth thinking about: an unrebalanced
+60/40 drifts toward equities over a long window, which quietly makes it a
+harder bar in a bull market and an easier one in a drawdown. Annual is the
+default, matching most policy benchmarks. Frictions are zero, since nobody
+pays commission on a measuring stick.
+
 **Benchmark convention.** Set independently of the strategy, because the
 two questions are unrelated: how you model your own portfolio's dividends
 is not how the index you are judged against handles them.
@@ -445,6 +460,17 @@ A fixed sleeve held permanently, and the model running on the rest. Set the
 core share and list its holdings as `XIC.TO:60, XBB.TO:40`. Percentages or
 fractions both work, since only the ratios matter -- the sleeve is scaled to
 its share either way.
+
+**Keep core holdings out of the strategy universe** decides whether the two
+sleeves can overlap. On, the model never picks a name the core already
+holds, so a core of `XIC.TO:100` at fifty percent means XIC.TO sits at
+exactly fifty percent, always. Off, the model may add to it and the combined
+position can exceed the core share -- a 50% core plus a model that also
+likes XIC.TO can reach 67%. On is the default, because "half in XIC.TO, half
+run by the model" almost always means the first thing.
+
+If the core covers the entire universe, the model has nothing left to pick
+from and its share stays in cash, with a warning.
 
 ### Two rules that decide how this behaves
 
