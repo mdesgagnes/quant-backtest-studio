@@ -1339,8 +1339,14 @@ if run_clicked and not blocking:
             # benchmark is credited with a stretch the strategy sat out.
             raw_start = result.equity.index[0]
             if cfg.engine.trim_warmup:
-                result, bench = align_start(result, bench,
-                                            initial_capital=cfg.engine.initial_capital)
+                # A permanently held core keeps total exposure above zero from
+                # session one, hiding the model's warm-up. Start the record
+                # where the model itself first takes a position.
+                sig_start = (sleeve_report.signal_start
+                             if sleeve_report is not None else None)
+                result, bench = align_start(
+                    result, bench, initial_capital=cfg.engine.initial_capital,
+                    signal_start=sig_start)
 
         st.session_state["run"] = {
             "result": result, "bench": bench, "prices": universe,
@@ -1444,10 +1450,14 @@ tabs = st.tabs(["Results", "Positions", "Robustness", "Data", "Builder", "Export
 with tabs[0]:
     if run.get("trimmed"):
         dropped = run["raw_start"].date()
+        _why = ("the first day the model took a position"
+                if (sleeve_report is not None
+                    and sleeve_report.signal_start is not None)
+                else "the first day the strategy held a position")
         note(f"Warm-up trimmed: the record starts on "
-             f"{res.equity.index[0].date()}, the first day the strategy held "
-             f"a position, rather than {dropped}. The benchmark is measured "
-             f"over the same window.")
+             f"{res.equity.index[0].date()}, {_why}, rather than {dropped}. "
+             f"Anything held before that \u2014 a fixed core, cash \u2014 is "
+             f"excluded, and the benchmark is measured over the same window.")
     keys = ["CAGR", "Volatility", "Sharpe", "Max Drawdown", "Calmar", "Sortino"]
     cols = st.columns(len(keys))
     for col, k in zip(cols, keys):

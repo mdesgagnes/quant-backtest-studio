@@ -358,19 +358,30 @@ def trim_warmup(res: BacktestResult, start: Optional[pd.Timestamp] = None,
 
 
 def align_start(*results: Optional[BacktestResult],
-                initial_capital: Optional[float] = None):
+                initial_capital: Optional[float] = None,
+                signal_start: Optional[pd.Timestamp] = None):
     """Trims a set of results to their common first active day.
 
     The benchmark is invested from day one, so left alone it would be
     credited with the whole warm-up while the strategy sat in cash. Both
     sides have to start on the same date for the comparison to mean
     anything.
+
+    `signal_start` overrides the portfolio's own first active day, for the
+    case where part of the book is invested before the model has a signal.
+    A permanently held core makes the portfolio look active from session
+    one, so the total exposure never reveals the warm-up: what gets
+    measured is a stretch of core-plus-cash that the strategy had no hand
+    in. Passing the date the model first takes a position starts the record
+    where the strategy actually begins.
     """
     live = [r for r in results if r is not None]
     if not live:
         return list(results)
     starts = [first_active_date(r) for r in live]
     starts = [s for s in starts if s is not None]
+    if signal_start is not None:
+        starts.append(pd.Timestamp(signal_start))
     if not starts:
         return list(results)
     common = max(starts)

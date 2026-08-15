@@ -474,6 +474,15 @@ from and its share stays in cash, with a warning.
 
 ### Two rules that decide how this behaves
 
+**The record starts when the model does.** A permanently held core is
+invested from session one, so total exposure never reveals the model's
+warm-up: a 200-day average leaves the book sitting at fifty percent core and
+fifty percent cash for its first two hundred sessions, and measuring that
+stretch reports a period the strategy had no hand in. With warm-up trimming
+on, the record starts the day the model first takes a position, and the
+benchmark is cut to the same date. Only the leading stretch goes: once the
+model is live, a move to cash is a decision and is kept.
+
 **Cash inside a sleeve stays in that sleeve.** If the bond model rejects
 every bond, that thirty percent sits in cash. It is not handed to equities.
 Spilling it over would convert a defensive signal into extra equity risk at

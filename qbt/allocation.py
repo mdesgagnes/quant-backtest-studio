@@ -56,6 +56,7 @@ class SleeveReport:
     total_budget: float = 0.0
     exposure: Optional[pd.Series] = None      # realized total exposure
     by_sleeve: Optional[pd.DataFrame] = None  # realized weight per sleeve
+    signal_start: Optional[pd.Timestamp] = None  # first day a model sleeve holds
 
 
 # ----------------------------------------------------------------------
@@ -195,9 +196,21 @@ def resolve(prices: pd.DataFrame, sleeves: List[Sleeve],
 
     by_sleeve = pd.DataFrame({k: v.abs().sum(axis=1) for k, v in frames.items()})
 
+    # When the model first takes a position. A fixed core is invested from
+    # session one, so the portfolio's own exposure hides the model's warm-up
+    # entirely; this is the date that reveals it.
+    model_names = [s.name for s in live if s.mode != "fixed" and s.name in by_sleeve]
+    signal_start = None
+    if model_names:
+        held = by_sleeve[model_names].sum(axis=1)
+        live_days = held[held > 1e-9]
+        if len(live_days):
+            signal_start = live_days.index[0]
+
     return combined, SleeveReport(
         rows=pd.DataFrame(rows), warnings=warnings, total_budget=total_budget,
-        exposure=combined.abs().sum(axis=1), by_sleeve=by_sleeve)
+        exposure=combined.abs().sum(axis=1), by_sleeve=by_sleeve,
+        signal_start=signal_start)
 
 
 # ----------------------------------------------------------------------
