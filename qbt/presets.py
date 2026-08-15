@@ -23,12 +23,29 @@ from typing import Dict, List
 
 UNIVERSES: Dict[str, Dict[str, object]] = {
     "Canadian ETFs \u2014 broad": {
+        "classes": {
+            "XIC.TO": "Equities",
+            "ZEB.TO": "Equities",
+            "XEI.TO": "Equities",
+            "ZLB.TO": "Equities",
+            "XDV.TO": "Equities",
+            "XCG.TO": "Equities",
+        },
         "tickers": ["XIC.TO", "ZEB.TO", "XEI.TO", "ZLB.TO", "XDV.TO", "XCG.TO"],
         "benchmark": "XIC.TO",
         "cash": "PSA.TO",
         "note": "Canadian equity: broad market, banks, dividend, low volatility, growth.",
     },
     "Canadian asset classes": {
+        "classes": {
+            "XIC.TO": "Equities",
+            "XEF.TO": "Equities",
+            "XUU.TO": "Equities",
+            "XBB.TO": "Fixed income",
+            "XSB.TO": "Fixed income",
+            "XRE.TO": "Real assets",
+            "CGL.TO": "Real assets",
+        },
         "tickers": ["XIC.TO", "XBB.TO", "XSB.TO", "XRE.TO", "CGL.TO", "XEF.TO", "XUU.TO"],
         "benchmark": "XIC.TO",
         "cash": "PSA.TO",
@@ -36,6 +53,15 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
                 "gold, developed and U.S. equity.",
     },
     "Canadian sectors": {
+        "classes": {
+            "XFN.TO": "Equities",
+            "XEG.TO": "Equities",
+            "XMA.TO": "Equities",
+            "XIT.TO": "Equities",
+            "XST.TO": "Equities",
+            "XUT.TO": "Equities",
+            "XRE.TO": "Real assets",
+        },
         "tickers": ["XFN.TO", "XEG.TO", "XMA.TO", "XIT.TO", "XST.TO", "XUT.TO", "XRE.TO"],
         "benchmark": "XIC.TO",
         "cash": "PSA.TO",
@@ -43,12 +69,33 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
                 "staples, utilities, real estate.",
     },
     "U.S. sectors (SPDR)": {
+        "classes": {
+            "XLK": "Equities",
+            "XLF": "Equities",
+            "XLV": "Equities",
+            "XLE": "Equities",
+            "XLI": "Equities",
+            "XLY": "Equities",
+            "XLP": "Equities",
+            "XLU": "Equities",
+            "XLB": "Equities",
+        },
         "tickers": ["XLK", "XLF", "XLV", "XLE", "XLI", "XLY", "XLP", "XLU", "XLB"],
         "benchmark": "SPY",
         "cash": "BIL",
         "note": "The classic sector-rotation universe. Long, clean history.",
     },
     "Global asset classes": {
+        "classes": {
+            "SPY": "Equities",
+            "EFA": "Equities",
+            "EEM": "Equities",
+            "IEF": "Fixed income",
+            "TLT": "Fixed income",
+            "GLD": "Real assets",
+            "VNQ": "Real assets",
+            "DBC": "Real assets",
+        },
         "tickers": ["SPY", "EFA", "EEM", "IEF", "TLT", "GLD", "VNQ", "DBC"],
         "benchmark": "SPY",
         "cash": "BIL",
@@ -57,6 +104,14 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
                 "commodities.",
     },
     "U.S. factors": {
+        "classes": {
+            "MTUM": "Equities",
+            "QUAL": "Equities",
+            "USMV": "Equities",
+            "VLUE": "Equities",
+            "SIZE": "Equities",
+            "SPY": "Equities",
+        },
         "tickers": ["MTUM", "QUAL", "USMV", "VLUE", "SIZE", "SPY"],
         "benchmark": "SPY",
         "cash": "BIL",
@@ -64,6 +119,13 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
                 "launched in 2013.",
     },
     "Sixty-forty building blocks": {
+        "classes": {
+            "XIC.TO": "Equities",
+            "XUU.TO": "Equities",
+            "XEF.TO": "Equities",
+            "XBB.TO": "Fixed income",
+            "XSB.TO": "Fixed income",
+        },
         "tickers": ["XIC.TO", "XUU.TO", "XEF.TO", "XBB.TO", "XSB.TO"],
         "benchmark": "XIC.TO",
         "cash": "PSA.TO",
@@ -79,3 +141,15 @@ def names() -> List[str]:
 
 def get(name: str) -> Dict[str, object]:
     return UNIVERSES.get(name, {})
+
+
+def classes_for(name: str, tickers: List[str]) -> Dict[str, str]:
+    """Asset class per instrument, for a preset or a hand-typed universe.
+
+    Anything the preset does not name -- including every ticker in a custom
+    universe -- comes back as "Unclassified" rather than being guessed at
+    from the symbol. A wrong guess would silently misallocate a budget,
+    which is worse than asking.
+    """
+    tagged = dict(UNIVERSES.get(name, {}).get("classes", {}) or {})
+    return {t: tagged.get(t, "Unclassified") for t in tickers}

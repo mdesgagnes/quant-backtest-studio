@@ -32,6 +32,7 @@ from qbt import returns_input as RS
 from qbt import presets as PRESETS
 from qbt import formula as FORMULA
 from qbt import excel_export as XL
+from qbt import allocation as ALLOC
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -918,6 +919,79 @@ if mode == "builtin":
             unsafe_allow_html=True)
     st.sidebar.write("")
 
+# --- Portfolio construction -------------------------------------------
+# Sleeves sit above the model: the model still picks holdings, the sleeve
+# decides how much of the portfolio it gets to pick for.
+construction = "Single strategy"
+class_map: Dict[str, str] = {}
+class_budgets: Dict[str, float] = {}
+core_spec, core_budget = "", 0.5
+
+if mode == "builtin":
+    construction = st.sidebar.selectbox(
+        "Portfolio construction", ["Single strategy", "By asset class",
+                                   "Core + strategy"],
+        help="\u201cBy asset class\u201d gives each class a fixed budget and "
+             "runs the model inside each one, so it picks the best bonds "
+             "among bonds. \u201cCore + strategy\u201d holds a fixed sleeve "
+             "permanently and runs the model on the rest.")
+
+    if construction == "By asset class":
+        with st.sidebar.expander("Asset classes", expanded=True):
+            _preset_name = st.session_state.get("_preset_applied", "")
+            _default_cls = PRESETS.classes_for(_preset_name, sel_universe)
+            _opts = ALLOC.DEFAULT_CLASSES + ["Unclassified"]
+            st.markdown('<div class="note">Assign each instrument, then set '
+                        'a budget per class.</div>', unsafe_allow_html=True)
+            for t in sel_universe:
+                d = _default_cls.get(t, "Unclassified")
+                class_map[t] = st.selectbox(
+                    t, _opts, index=_opts.index(d) if d in _opts else len(_opts) - 1,
+                    key=f"cls_{t}")
+
+            _used = sorted({c for c in class_map.values() if c != "Unclassified"})
+            if _used:
+                st.markdown('<div class="eyebrow" style="margin:.7rem 0 .3rem;">'
+                            'Budgets</div>', unsafe_allow_html=True)
+                _even = round(100.0 / len(_used))
+                for c in _used:
+                    class_budgets[c] = st.number_input(
+                        f"{c} (%)", 0.0, 100.0, float(_even), 5.0,
+                        key=f"bud_{c}") / 100.0
+                _tot = sum(class_budgets.values())
+                _msg = (f'<div class="flag">Budgets total {_tot*100:.0f}%. '
+                        f'The remainder stays in cash.</div>' if _tot < 0.999
+                        else f'<div class="note">Budgets total {_tot*100:.0f}%.</div>')
+                st.markdown(_msg, unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="flag">Assign at least one instrument '
+                            'to a class.</div>', unsafe_allow_html=True)
+
+    elif construction == "Core + strategy":
+        with st.sidebar.expander("Core sleeve", expanded=True):
+            core_budget = st.slider("Core share (%)", 0, 100, 50, 5,
+                                    key="corebud") / 100.0
+            core_spec = st.text_area(
+                "Core holdings", value=st.session_state.get(
+                    "corespec", ", ".join(f"{t}:{round(100/max(len(sel_universe[:2]),1))}"
+                                          for t in sel_universe[:2])),
+                height=70, key="corespec",
+                help="One per line or comma separated, as TICKER:WEIGHT. "
+                     "Percentages or fractions both work; only the ratios "
+                     "matter, since the sleeve is scaled to its share.")
+            _parsed = ALLOC.parse_fixed(core_spec, sel_universe)
+            if _parsed:
+                _t = sum(abs(v) for v in _parsed.values()) or 1.0
+                st.markdown(
+                    '<div class="note">Core: ' + ", ".join(
+                        f"{k} {abs(v)/_t*core_budget*100:.1f}%"
+                        for k, v in _parsed.items())
+                    + f' \u00b7 strategy gets {(1-core_budget)*100:.0f}%.</div>',
+                    unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="flag">No valid holding parsed. Use '
+                            'TICKER:WEIGHT.</div>', unsafe_allow_html=True)
+
 params: Dict[str, Any] = {}
 for p in (strategy.params if mode == "builtin" else []):
     key = f"p_{strat_key}_{p.key}"
@@ -1000,7 +1074,9 @@ run_clicked = st.sidebar.button("Run backtest")
 # ----------------------------------------------------------------------
 # Configuration assembly
 # ----------------------------------------------------------------------
-run_label = (strategy.label if mode == "builtin"
+_suffix = {"By asset class": " by class",
+           "Core + strategy": " + core"}.get(construction, "")
+run_label = ((strategy.label + _suffix) if mode == "builtin"
              else (f"Imported weights \u2014 {w_source}" if w_source else "Imported weights"))
 
 cfg = RunConfig(
@@ -1096,7 +1172,7 @@ if run_clicked and not blocking:
             exog_aligned = prepare_exog(exog_raw, universe.index, exog_lag)
             ex_rep = exog_report(exog_raw, exog_aligned, exog_lag, universe.index)
 
-        w_report, rebal_dates = None, None
+        w_report, rebal_dates, sleeve_report = None, None, None
         with st.spinner("Generating signals and running simulation..."):
             if mode == "external_weights":
                 if weights_raw is None or weights_raw.empty:
@@ -1111,7 +1187,33 @@ if run_clicked and not blocking:
                     # between two file rows is corrected.
                     rebal_dates = None
             else:
-                weights = strategy.generate(universe, params, exog_aligned)
+                # Sleeves resolve to an ordinary weight frame; from here the
+                # engine cannot tell whether sleeves were involved.
+                if construction == "By asset class" and class_budgets:
+                    sleeves = ALLOC.sleeves_from_classes(
+                        {t: c for t, c in class_map.items() if t in universe.columns},
+                        class_budgets, strat_key, params)
+                    weights, sleeve_report = ALLOC.resolve(
+                        universe, sleeves, REGISTRY, exog_aligned,
+                        float(cfg.engine.max_leverage))
+                elif construction == "Core + strategy":
+                    core = ALLOC.parse_fixed(core_spec, list(universe.columns))
+                    sleeves = []
+                    if core and core_budget > 0:
+                        sleeves.append(ALLOC.Sleeve(
+                            "Core", float(core_budget), list(core),
+                            mode="fixed", fixed=core))
+                    sat = 1.0 - float(core_budget)
+                    if sat > 1e-9:
+                        sleeves.append(ALLOC.Sleeve(
+                            "Strategy", sat, list(universe.columns),
+                            mode="strategy", strategy_key=strat_key,
+                            params=dict(params)))
+                    weights, sleeve_report = ALLOC.resolve(
+                        universe, sleeves, REGISTRY, exog_aligned,
+                        float(cfg.engine.max_leverage))
+                else:
+                    weights = strategy.generate(universe, params, exog_aligned)
 
             cols = list(universe.columns)
             open_px = None
@@ -1162,6 +1264,8 @@ if run_clicked and not blocking:
             "exog": exog_aligned, "exog_raw": exog_raw, "exog_report": ex_rep,
             "weights_report": w_report, "rebalance_dates": rebal_dates,
             "weights": weights,
+            "sleeves": sleeve_report,
+            "construction": construction,
             "market": market,
             "bench_mode": bench_mode,
             "raw_start": raw_start,
@@ -1224,6 +1328,7 @@ run_mode = run.get("mode", "builtin")
 exog_used = run.get("exog")
 ex_rep = run.get("exog_report")
 w_report = run.get("weights_report")
+sleeve_report = run.get("sleeves")
 run_rebal = run.get("rebalance_dates")
 
 bench_r = bench.returns if bench is not None else None
@@ -1380,6 +1485,25 @@ with tabs[1]:
         with st.expander("First rows retained, after calendaring onto trading days"):
             st.dataframe((w_report.preview * 100).round(2),
                          use_container_width=True)
+
+    if sleeve_report is not None and not sleeve_report.rows.empty:
+        eyebrow("Sleeves")
+        _sr = sleeve_report.rows.copy()
+        for _c in ("Budget", "Average weight", "Cash within sleeve"):
+            _sr[_c] = _sr[_c].map(lambda v: f"{v*100:.1f}%")
+        st.dataframe(_sr, use_container_width=True, hide_index=True)
+        for _w in sleeve_report.warnings:
+            st.markdown(f'<div class="flag">{_w}</div>', unsafe_allow_html=True)
+        note("A sleeve holds at most its budget. Whatever its model leaves "
+             "in cash stays inside that sleeve rather than being handed to "
+             "another, so a defensive signal in one class cannot quietly "
+             "become extra risk in another.")
+        if sleeve_report.by_sleeve is not None and not sleeve_report.by_sleeve.empty:
+            st.plotly_chart(
+                C.weights_area(sleeve_report.by_sleeve,
+                               (1.0 - sleeve_report.by_sleeve.sum(axis=1)).clip(lower=0),
+                               "Weight held by sleeve"),
+                use_container_width=True, config={"displaylogo": False})
 
     eyebrow("Composition over time")
     st.plotly_chart(C.weights_area(res.weights, res.cash_weight),

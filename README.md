@@ -421,6 +421,55 @@ They are explicit because they determine how credible the result is.
 
 ---
 
+## 4 quinquies. Asset-class budgets and sleeves
+
+Under **Portfolio construction** in the sidebar. The model still picks the
+holdings; a sleeve decides how much of the portfolio it gets to pick for.
+
+### By asset class
+
+Assign each instrument a class, give each class a budget, and the model runs
+*inside* each class separately. Sixty in equities, thirty in fixed income,
+ten in real assets means the model picks the best bonds among bonds rather
+than discovering that equities out-ranked every bond and putting everything
+there.
+
+Preset universes arrive already tagged. A hand-typed universe comes back as
+"Unclassified" for every symbol, which is deliberate: guessing a class from
+a ticker would silently misallocate a budget, and being asked is better than
+being wrong.
+
+### Core + strategy
+
+A fixed sleeve held permanently, and the model running on the rest. Set the
+core share and list its holdings as `XIC.TO:60, XBB.TO:40`. Percentages or
+fractions both work, since only the ratios matter -- the sleeve is scaled to
+its share either way.
+
+### Two rules that decide how this behaves
+
+**Cash inside a sleeve stays in that sleeve.** If the bond model rejects
+every bond, that thirty percent sits in cash. It is not handed to equities.
+Spilling it over would convert a defensive signal into extra equity risk at
+exactly the wrong moment, and would mean the bond budget was never a budget.
+
+**Budgets are ceilings, not floors.** A sleeve holds at most its share. A
+model that goes half to cash leaves the portfolio under-invested rather than
+levering the rest -- which is what "no more than sixty percent in equities"
+has to mean to mean anything.
+
+Budgets summing above the leverage ceiling are scaled back proportionally
+and flagged. Budgets summing below one hundred leave the remainder in cash,
+also flagged. The Positions tab reports each sleeve's budget, what it
+actually held on average, and how much of its own budget sat in cash.
+
+Nothing downstream changes: sleeves resolve to an ordinary weight frame
+before the engine sees it, so drift, execution lag, frictions, dividends and
+warm-up behave exactly as they do for a single strategy. A single sleeve at
+one hundred percent reproduces the plain strategy to the last decimal.
+
+---
+
 ## 5 bis. Building a strategy in the app
 
 The **Builder** tab writes a strategy as an expression, with no Python and
@@ -552,6 +601,7 @@ qbt/
   data.py                  loading, cleaning, diagnostics
   exog.py                  exogenous series, publication lag
   external.py              imported target weights
+  allocation.py            sleeves: asset-class budgets and composition
   excel_export.py          complete multi-sheet workbook export
   formula.py               sandboxed expression evaluator
   presets.py               preset universes
