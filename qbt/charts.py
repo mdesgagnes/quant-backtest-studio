@@ -88,12 +88,18 @@ def equity_curve(curves: pd.DataFrame, log: bool = True,
         color = colors[i % len(colors)]
         fig.add_trace(go.Scatter(
             x=curves.index, y=curves[col], name=str(col), mode="lines",
-            line=dict(color=color, width=2.2 if i == 0 else 1.4),
+            line=dict(color=color, width=2.2 if i == 0 else 1.4,
+                      shape="linear"),
             hovertemplate="%{y:,.1f}<extra>" + str(col) + "</extra>",
         ))
     _base(fig, 420, title, theme)
     fig.update_yaxes(type="log" if log else "linear",
                      tickformat=",.0f" if not log else None)
+    # A vertical spike on hover: reading two curves against each other at the
+    # same date is the whole point of putting them on one chart.
+    fig.update_xaxes(showspikes=True, spikemode="across", spikesnap="cursor",
+                     spikecolor=pal["muted"], spikethickness=1, spikedash="dot")
+    fig.update_layout(hoverdistance=60, spikedistance=-1)
     return fig
 
 

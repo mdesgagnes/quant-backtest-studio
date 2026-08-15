@@ -42,50 +42,177 @@ st.set_page_config(page_title="Quant Backtest Studio",
 # ----------------------------------------------------------------------
 CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap');
 
-html, body, [class*="css"] { font-family:'IBM Plex Sans',sans-serif; }
-.stApp { background:#0E1116; }
-section[data-testid="stSidebar"] { background:#12171F; border-right:1px solid #2A323D; }
+/* ---------------------------------------------------------------
+   Ink and brass. Ink carries the page, brass marks what matters,
+   teal and rust are reserved for sign -- never decoration.
+   --------------------------------------------------------------- */
+:root{
+  --ink:#0E1116; --panel:#161B22; --panel-2:#12171F;
+  --rule:#232B35; --rule-soft:#1C222B;
+  --text:#E3E8EF; --muted:#7D8A9C; --dim:#5B6675;
+  --brass:#C9A227; --brass-lift:#DDB63A; --brass-dim:#8A701C;
+  --teal:#4C9A8F; --rust:#B4553F;
+  --mono:'IBM Plex Mono',SFMono-Regular,Consolas,monospace;
+  --sans:'IBM Plex Sans',-apple-system,Segoe UI,sans-serif;
+  --cond:'IBM Plex Sans Condensed',sans-serif;
+}
 
-.masthead { border-bottom:1px solid #2A323D; padding:.2rem 0 .9rem; margin-bottom:1.1rem; }
-.masthead h1 { font-family:'IBM Plex Sans Condensed',sans-serif; font-weight:700;
-  font-size:1.85rem; letter-spacing:-.015em; color:#E3E8EF; margin:0; }
-.masthead .sub { font-family:'IBM Plex Mono',monospace; font-size:.72rem;
-  letter-spacing:.16em; text-transform:uppercase; color:#7D8A9C; margin-top:.35rem; }
+html, body, [class*="css"] { font-family:var(--sans); }
+.stApp { background:var(--ink); }
 
-.eyebrow { font-family:'IBM Plex Mono',monospace; font-size:.68rem; letter-spacing:.18em;
-  text-transform:uppercase; color:#7D8A9C; margin:1.5rem 0 .55rem; }
+/* Tabular figures everywhere numbers appear: columns of returns must
+   align on the decimal or they cannot be scanned down. */
+.dial .v,.dial .d,[data-testid="stDataFrame"],.stTabs [data-baseweb="tab"],
+table,code { font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1; }
 
-.dial { background:#161B22; border:1px solid #232B35; border-left:2px solid #C9A227;
-  padding:.62rem .8rem; height:100%; }
-.dial .k { font-family:'IBM Plex Mono',monospace; font-size:.63rem; letter-spacing:.11em;
-  text-transform:uppercase; color:#7D8A9C; display:block; margin-bottom:.28rem; }
-.dial .v { font-family:'IBM Plex Mono',monospace; font-size:1.22rem; font-weight:600;
-  color:#E3E8EF; line-height:1.1; }
-.dial .d { font-family:'IBM Plex Mono',monospace; font-size:.68rem; color:#7D8A9C; }
-.dial.pos { border-left-color:#4C9A8F; } .dial.pos .v { color:#4C9A8F; }
-.dial.neg { border-left-color:#B4553F; } .dial.neg .v { color:#B4553F; }
+/* ---------------- Sidebar ---------------- */
+section[data-testid="stSidebar"]{ background:var(--panel-2); border-right:1px solid var(--rule); }
+section[data-testid="stSidebar"] > div{ padding-top:.7rem; }
+section[data-testid="stSidebar"] .stSlider,
+section[data-testid="stSidebar"] .stSelectbox,
+section[data-testid="stSidebar"] .stNumberInput,
+section[data-testid="stSidebar"] .stTextArea,
+section[data-testid="stSidebar"] .stRadio{ margin-bottom:-.35rem; }
+section[data-testid="stSidebar"] label p{ font-size:.79rem !important; color:#B9C3D0 !important; }
 
-.note { border-left:2px solid #2A323D; padding:.15rem 0 .15rem .75rem;
-  color:#7D8A9C; font-size:.83rem; }
-.flag { border-left:2px solid #C9A227; padding:.3rem 0 .3rem .75rem;
-  color:#C9A227; font-size:.82rem; font-family:'IBM Plex Mono',monospace; }
+/* Sidebar sections fold away: the panel holds sixty controls and only a
+   handful change between runs. */
+section[data-testid="stSidebar"] [data-testid="stExpander"]{
+  border:0; border-top:1px solid var(--rule-soft); background:transparent; }
+section[data-testid="stSidebar"] [data-testid="stExpander"] summary{
+  font-family:var(--mono); font-size:.66rem; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--muted); padding:.5rem 0; }
+section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{ color:var(--brass); }
 
-.stTabs [data-baseweb="tab-list"] { gap:1.6rem; border-bottom:1px solid #2A323D; }
-.stTabs [data-baseweb="tab"] { font-family:'IBM Plex Mono',monospace; font-size:.72rem;
-  letter-spacing:.13em; text-transform:uppercase; color:#7D8A9C; padding:.4rem 0; }
-.stTabs [aria-selected="true"] { color:#C9A227 !important; }
-.stTabs [data-baseweb="tab-highlight"] { background:#C9A227; }
+/* ---------------- Masthead ---------------- */
+.masthead{ border-bottom:1px solid var(--rule); padding:.1rem 0 .85rem; margin-bottom:.4rem; }
+.masthead h1{ font-family:var(--cond); font-weight:700; font-size:1.9rem;
+  letter-spacing:-.015em; color:var(--text); margin:0; line-height:1.1; }
+.masthead .sub{ font-family:var(--mono); font-size:.7rem; letter-spacing:.17em;
+  text-transform:uppercase; color:var(--muted); margin-top:.32rem; }
 
-.stButton>button { font-family:'IBM Plex Mono',monospace; font-size:.75rem;
-  letter-spacing:.1em; text-transform:uppercase; background:#C9A227; color:#0E1116;
-  border:0; border-radius:2px; font-weight:600; width:100%; padding:.55rem; }
-.stButton>button:hover { background:#DDB63A; color:#0E1116; }
-.stDownloadButton>button { background:transparent; color:#C9A227; border:1px solid #C9A227; }
+/* ---------------- Section rules ---------------- */
+.eyebrow{ font-family:var(--mono); font-size:.67rem; letter-spacing:.18em;
+  text-transform:uppercase; color:var(--muted); margin:1.7rem 0 .6rem;
+  display:flex; align-items:center; gap:.7rem; }
+.eyebrow::after{ content:""; flex:1; height:1px; background:var(--rule-soft); }
 
-[data-testid="stDataFrame"] { font-family:'IBM Plex Mono',monospace; }
-#MainMenu, footer { visibility:hidden; }
+/* ---------------- Dials ---------------- */
+.dial{ background:var(--panel); border:1px solid var(--rule);
+  border-left:2px solid var(--brass); padding:.6rem .8rem; height:100%;
+  transition:border-color .16s ease, background .16s ease; }
+.dial:hover{ background:#1A2029; border-left-color:var(--brass-lift); }
+.dial .k{ font-family:var(--mono); font-size:.62rem; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--muted); display:block; margin-bottom:.26rem; }
+.dial .v{ font-family:var(--mono); font-size:1.24rem; font-weight:600;
+  color:var(--text); line-height:1.1; }
+.dial .d{ font-family:var(--mono); font-size:.67rem; color:var(--dim); margin-top:.1rem; }
+.dial.pos{ border-left-color:var(--teal); } .dial.pos .v{ color:var(--teal); }
+.dial.neg{ border-left-color:var(--rust); } .dial.neg .v{ color:var(--rust); }
+
+/* ---------------- Notes and flags ---------------- */
+.note{ border-left:2px solid var(--rule); padding:.2rem 0 .2rem .8rem;
+  color:var(--muted); font-size:.83rem; line-height:1.55; }
+.flag{ border-left:2px solid var(--brass); padding:.35rem 0 .35rem .8rem;
+  color:var(--brass); font-size:.81rem; font-family:var(--mono);
+  line-height:1.5; margin:.3rem 0; }
+
+/* ---------------- Tabs: stay reachable ---------------- */
+.stTabs [data-baseweb="tab-list"]{
+  gap:1.7rem; border-bottom:1px solid var(--rule);
+  position:sticky; top:0; z-index:99;
+  background:rgba(14,17,22,.94); backdrop-filter:blur(8px);
+  padding-top:.45rem; }
+.stTabs [data-baseweb="tab"]{ font-family:var(--mono); font-size:.71rem;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--muted);
+  padding:.42rem 0; transition:color .14s ease; }
+.stTabs [data-baseweb="tab"]:hover{ color:#A8B4C4; }
+.stTabs [aria-selected="true"]{ color:var(--brass) !important; }
+.stTabs [data-baseweb="tab-highlight"]{ background:var(--brass); height:2px; }
+.stTabs [data-baseweb="tab-border"]{ background:transparent; }
+
+/* ---------------- Controls ---------------- */
+.stButton>button{ font-family:var(--mono); font-size:.74rem; letter-spacing:.1em;
+  text-transform:uppercase; background:var(--brass); color:var(--ink);
+  border:0; border-radius:2px; font-weight:600; width:100%; padding:.56rem;
+  transition:background .16s ease, transform .1s ease; }
+.stButton>button:hover{ background:var(--brass-lift); color:var(--ink); }
+.stButton>button:active{ transform:translateY(1px); }
+.stDownloadButton>button{ background:transparent; color:var(--brass);
+  border:1px solid var(--brass-dim); font-weight:500; }
+.stDownloadButton>button:hover{ background:rgba(201,162,39,.1);
+  border-color:var(--brass); color:var(--brass-lift); }
+
+/* Keyboard focus must stay visible: brass ring, never the browser default. */
+:focus-visible{ outline:2px solid var(--brass) !important; outline-offset:2px !important; }
+
+/* ---------------- Tables ---------------- */
+[data-testid="stDataFrame"]{ font-family:var(--mono); }
+[data-testid="stDataFrame"] [role="columnheader"]{
+  font-size:.66rem !important; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--muted) !important; }
+
+/* ---------------- Charts ---------------- */
+.js-plotly-plot{ border:1px solid var(--rule-soft); border-radius:2px;
+  background:rgba(22,27,34,.35); }
+
+/* ---------------- Expanders ---------------- */
+[data-testid="stExpander"]{ border:1px solid var(--rule); border-radius:2px;
+  background:var(--panel); }
+[data-testid="stExpander"] summary{ font-family:var(--mono); font-size:.72rem;
+  letter-spacing:.06em; color:#A8B4C4; }
+[data-testid="stExpander"] summary:hover{ color:var(--brass); }
+
+/* ---------------- Run context strip ---------------- */
+/* Six tabs deep, it stops being obvious which run is on screen. */
+.runbar{ display:flex; flex-wrap:wrap; gap:.15rem 1.6rem; align-items:baseline;
+  border-left:2px solid var(--brass); padding:.4rem 0 .4rem .8rem;
+  margin:.2rem 0 .3rem; background:linear-gradient(90deg,rgba(201,162,39,.06),transparent 55%); }
+.runbar .item{ font-family:var(--mono); font-size:.72rem; color:var(--muted); }
+.runbar .item b{ color:var(--text); font-weight:600; }
+.runbar .lead{ font-family:var(--cond); font-size:.98rem; font-weight:700;
+  color:var(--text); letter-spacing:-.01em; margin-right:.3rem; }
+
+/* ---------------- Empty state ---------------- */
+.startcard{ border:1px solid var(--rule); border-left:2px solid var(--brass);
+  background:var(--panel); padding:.85rem 1rem; height:100%; }
+.startcard .n{ font-family:var(--mono); font-size:.62rem; letter-spacing:.14em;
+  color:var(--brass); text-transform:uppercase; }
+.startcard .t{ font-family:var(--cond); font-size:1.02rem; font-weight:700;
+  color:var(--text); margin:.3rem 0 .25rem; }
+.startcard .b{ font-size:.81rem; color:var(--muted); line-height:1.5; }
+
+.strat{ border-top:1px solid var(--rule-soft); padding:.55rem 0; }
+.strat .nm{ font-family:var(--mono); font-size:.79rem; color:var(--brass); }
+.strat .ds{ font-size:.81rem; color:var(--muted); line-height:1.5; margin-top:.15rem; }
+
+/* ---------------- Scrollbars ---------------- */
+::-webkit-scrollbar{ width:9px; height:9px; }
+::-webkit-scrollbar-track{ background:var(--ink); }
+::-webkit-scrollbar-thumb{ background:#2A323D; border-radius:0; }
+::-webkit-scrollbar-thumb:hover{ background:#3A4553; }
+
+/* ---------------- Chrome ---------------- */
+[data-testid="stHeader"]{ background:transparent; }
+.stSpinner > div{ border-top-color:var(--brass) !important; }
+[data-testid="stToolbar"]{ right:.6rem; }
+hr{ border-color:var(--rule-soft); }
+#MainMenu, footer{ visibility:hidden; }
+
+/* A person who has asked the system to stop moving things gets that. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{ animation-duration:.001ms !important;
+    transition-duration:.001ms !important; }
+}
+
+/* ---------------- Narrow screens ---------------- */
+@media (max-width: 640px){
+  .masthead h1{ font-size:1.45rem; }
+  .dial .v{ font-size:1.05rem; }
+  .stTabs [data-baseweb="tab-list"]{ gap:1rem; overflow-x:auto; }
+}
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
@@ -127,6 +254,54 @@ def require_password() -> None:
             st.markdown('<div class="flag">Incorrect password.</div>',
                         unsafe_allow_html=True)
     st.stop()
+
+
+TEAL, RUST, DIM = "#4C9A8F", "#B4553F", "#7D8A9C"
+
+
+def _sign_color(v) -> str:
+    """Colour a value by its sign. Works on the pre-formatted strings the
+    tables already carry ("+3.45%", "-2.10%") as well as raw numbers, so
+    formatting and colouring stay independent of each other."""
+    if v is None:
+        return f"color:{DIM}"
+    if isinstance(v, str):
+        t = v.strip()
+        if t in ("", "\u2014", "nan", "None"):
+            return f"color:{DIM}"
+        if t.startswith("-"):
+            return f"color:{RUST}"
+        if t.startswith("+") or (t[:1].isdigit() and float(
+                t.replace("%", "").replace(",", "") or 0) > 0):
+            return f"color:{TEAL}"
+        return ""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return ""
+    if f != f:
+        return f"color:{DIM}"
+    return f"color:{TEAL}" if f > 0 else (f"color:{RUST}" if f < 0 else f"color:{DIM}")
+
+
+def signed(df, cols=None, emphasise=None):
+    """Returns a Styler that colours the given columns by sign.
+
+    Scanning a column of returns is the single most common thing done with
+    these tables, and sign is what the eye is looking for. Colour carries
+    it without adding a glyph or a second column.
+    """
+    if df is None or getattr(df, "empty", True):
+        return df
+    use = [c for c in (cols or df.columns) if c in df.columns]
+    if not use:
+        return df
+    st_ = df.style.map(_sign_color, subset=use)
+    if emphasise:
+        keep = [c for c in emphasise if c in df.columns]
+        if keep:
+            st_ = st_.set_properties(subset=keep, **{"font-weight": "600"})
+    return st_
 
 
 def dial(label: str, value: str, sub: str = "", tone: str = ""):
@@ -321,6 +496,17 @@ if source == "Return stream":
     for w in rrep.warnings:
         st.markdown(f'<div class="flag">{w}</div>', unsafe_allow_html=True)
 
+    _rb = [f'<span class="lead">{main_col}</span>',
+           f'<span class="item">{rrep.start.date()} &rarr; {rrep.end.date()}</span>'
+           if rrep.start is not None else "",
+           f'<span class="item">{rrep.n_periods:,} {rrep.frequency} periods</span>']
+    if bench_col:
+        _rb.append(f'<span class="item">vs <b>{bench_col}</b></span>')
+    _rc = stats.get("CAGR", float("nan"))
+    if _rc == _rc:
+        _rb.append(f'<span class="item">CAGR <b>{M.format_metric("CAGR", _rc)}</b></span>')
+    st.markdown(f'<div class="runbar">{"".join(_rb)}</div>', unsafe_allow_html=True)
+
     rs_tabs = st.tabs(["Results", "Robustness", "Export"])
 
     with rs_tabs[0]:
@@ -382,13 +568,19 @@ if source == "Return stream":
         rfmt = _fmt_period_tables(rp, str(main_col),
                                   str(bench_col) if bench_col else None)
         if not rfmt["trailing"].empty:
-            st.dataframe(rfmt["trailing"], use_container_width=True, hide_index=True)
+            _rc = [c for c in rfmt["trailing"].columns
+                   if c not in ("Period", "Annualized", "From", "To")]
+            st.dataframe(signed(rfmt["trailing"], _rc, emphasise=["Excess"]),
+                         use_container_width=True, hide_index=True)
             note("Periods longer than one year are annualized; shorter ones "
                  "are cumulative.")
 
         eyebrow("Calendar years")
         if not rfmt["calendar"].empty:
-            st.dataframe(rfmt["calendar"], use_container_width=True, hide_index=True)
+            _rc = [c for c in rfmt["calendar"].columns
+                   if c not in ("Year", "Partial")]
+            st.dataframe(signed(rfmt["calendar"], _rc, emphasise=["Excess"]),
+                         use_container_width=True, hide_index=True)
             cyr = rp["calendar"]
             if str(main_col) in cyr.columns:
                 st.plotly_chart(
@@ -402,12 +594,13 @@ if source == "Return stream":
         if not dd.empty:
             dd["Drawdown"] = dd["Drawdown"].map(lambda v: f"{v*100:.2f}%")
             dd["Recovery"] = dd["Recovery"].astype(str)
-        st.dataframe(dd, use_container_width=True, hide_index=True)
+        st.dataframe(signed(dd, ["Drawdown"]), use_container_width=True,
+                     hide_index=True)
 
         eyebrow("Period returns")
         pr = M.monthly_returns(r_main, ppy)
         if not pr.empty:
-            st.dataframe((pr * 100).round(2), use_container_width=True)
+            st.dataframe(signed((pr * 100).round(2)), use_container_width=True)
 
     with rs_tabs[1]:
         note("A track record is one sample. These tests ask how much of it "
@@ -422,7 +615,8 @@ if source == "Return stream":
             for cc in ("CAGR", "Volatility", "Max Drawdown"):
                 disp[cc] = disp[cc].map(lambda v: f"{v*100:.2f}%")
             disp["Sharpe"] = disp["Sharpe"].map(lambda v: f"{v:.2f}")
-            st.dataframe(disp, use_container_width=True, hide_index=True)
+            st.dataframe(signed(disp, ["CAGR", "Sharpe", "Max Drawdown"]),
+                         use_container_width=True, hide_index=True)
             st.plotly_chart(C.bar_series(wf["Fold"], wf["Sharpe"], "Sharpe by fold"),
                             use_container_width=True, config={"displaylogo": False})
 
@@ -449,7 +643,8 @@ if source == "Return stream":
                 for cc in ("CAGR", "Max Drawdown"):
                     sdf[cc] = sdf[cc].map(lambda v: f"{v*100:.2f}%")
                 sdf["Sharpe"] = sdf["Sharpe"].map(lambda v: f"{v:.2f}")
-                st.dataframe(sdf, use_container_width=True, hide_index=True)
+                st.dataframe(signed(sdf, ["CAGR", "Max Drawdown", "Sharpe"]),
+                             use_container_width=True, hide_index=True)
             else:
                 note("Not enough observations to resample meaningfully.")
 
@@ -758,43 +953,47 @@ for p in (strategy.params if mode == "builtin" else []):
         params[p.key] = st.sidebar.text_input(p.label, str(default or ""),
                                               help=p.help or None, key=key)
 
-# --- Execution ---
-st.sidebar.markdown('<div class="eyebrow">Execution</div>', unsafe_allow_html=True)
-rb_keys = list(REBALANCE_RULES.keys())
-rebalance = st.sidebar.selectbox(
-    "Rebalance", rb_keys, index=rb_keys.index(e0.rebalance),
-    format_func=lambda k: REBALANCE_RULES[k])
-lag = st.sidebar.slider("Execution lag (days)", 0, 5, int(e0.execution_lag),
-                        help="1 = signal at the close, executed the next session. "
-                             "0 assumes execution at the price that produced the signal.")
-exec_price = st.sidebar.selectbox(
-    "Execution price", ["Close", "Open (marked at the close)"],
-    index=1 if e0.execute_at_open else 0,
-    help="Trading at the open splits the day in two: the overnight move is "
-         "earned on the old weights, the intraday move on the new ones. It is "
-         "the more realistic assumption for an order placed after a "
-         "prior-close signal. Only available with Yahoo Finance data.")
-exec_at_open = exec_price.startswith("Open")
-if exec_at_open and source != "Yahoo Finance":
-    st.sidebar.markdown('<div class="flag">Opening prices come from Yahoo '
-                        'Finance only. Uploaded files fall back to close '
-                        'execution.</div>', unsafe_allow_html=True)
-trim_warm = st.sidebar.checkbox(
-    "Trim the warm-up period", value=bool(e0.trim_warmup),
-    help="Indicators are blind until they have enough history. Those early "
-         "sessions sit in cash and still earn the cash rate, which lifts the "
-         "reported return and dilutes volatility. Trimming starts the record "
-         "on the first day capital is actually at risk, for the strategy and "
-         "the benchmark alike.")
-capital = st.sidebar.number_input("Initial capital ($)", 1_000, 1_000_000_000,
-                                  int(e0.initial_capital), 10_000)
-max_lev = st.sidebar.slider("Max leverage", 0.5, 2.0, float(e0.max_leverage), 0.1)
+# --- Execution and frictions ---
+# Folded by default: these hold steady across runs, while the universe and
+# the signal are what actually get changed between one backtest and the next.
+with st.sidebar.expander("Execution", expanded=False):
+    rb_keys = list(REBALANCE_RULES.keys())
+    rebalance = st.selectbox(
+        "Rebalance", rb_keys, index=rb_keys.index(e0.rebalance),
+        format_func=lambda k: REBALANCE_RULES[k])
+    lag = st.slider("Execution lag (days)", 0, 5, int(e0.execution_lag),
+                    help="1 = signal at the close, executed the next session. "
+                         "0 assumes execution at the price that produced the signal.")
+    exec_price = st.selectbox(
+        "Execution price", ["Close", "Open (marked at the close)"],
+        index=1 if e0.execute_at_open else 0,
+        help="Trading at the open splits the day in two: the overnight move is "
+             "earned on the old weights, the intraday move on the new ones. It is "
+             "the more realistic assumption for an order placed after a "
+             "prior-close signal. Only available with Yahoo Finance data.")
+    exec_at_open = exec_price.startswith("Open")
+    if exec_at_open and source != "Yahoo Finance":
+        st.markdown('<div class="flag">Opening prices come from Yahoo '
+                    'Finance only. Uploaded files fall back to close '
+                    'execution.</div>', unsafe_allow_html=True)
+    trim_warm = st.checkbox(
+        "Trim the warm-up period", value=bool(e0.trim_warmup),
+        help="Indicators are blind until they have enough history. Those early "
+             "sessions sit in cash and still earn the cash rate, which lifts the "
+             "reported return and dilutes volatility. Trimming starts the record "
+             "on the first day capital is actually at risk, for the strategy and "
+             "the benchmark alike.")
+    capital = st.number_input("Initial capital ($)", 1_000, 1_000_000_000,
+                              int(e0.initial_capital), 10_000)
+    max_lev = st.slider("Max leverage", 0.5, 2.0, float(e0.max_leverage), 0.1)
 
-st.sidebar.markdown('<div class="eyebrow">Frictions</div>', unsafe_allow_html=True)
-comm = st.sidebar.number_input("Commission (bps)", 0.0, 200.0, float(c0.commission_bps), 1.0)
-slip = st.sidebar.number_input("Slippage (bps)", 0.0, 500.0, float(c0.slippage_bps), 5.0)
-cash_rate = st.sidebar.number_input("Cash rate (annual %)", 0.0, 15.0,
-                                    float(c0.cash_rate_pa * 100), 0.25) / 100.0
+with st.sidebar.expander("Frictions", expanded=False):
+    comm = st.number_input("Commission (bps)", 0.0, 200.0, float(c0.commission_bps), 1.0)
+    slip = st.number_input("Slippage (bps)", 0.0, 500.0, float(c0.slippage_bps), 5.0)
+    cash_rate = st.number_input("Cash rate (annual %)", 0.0, 15.0,
+                                float(c0.cash_rate_pa * 100), 0.25) / 100.0
+
+st.sidebar.markdown("")
 
 run_clicked = st.sidebar.button("Run backtest")
 
@@ -979,21 +1178,36 @@ run = st.session_state.get("run")
 
 if run is None:
     st.markdown(
-        '<div class="note">Choose a data source and a strategy in the panel '
-        'on the left, then run the backtest. Results, data diagnostics, and '
-        'robustness tests will appear here.<br><br>'
-        'Two optional inputs: <b>exogenous series</b> (economic data, '
-        'fundamental ratios, signals computed elsewhere) that feed certain '
-        'models, and a <b>target weights</b> file that entirely replaces '
-        'the signal generator.</div>',
+        '<div class="note">Pick a source on the left, then run the backtest. '
+        'Everything below fills in from that one action.</div>',
         unsafe_allow_html=True)
-    eyebrow("Available strategies")
+
+    eyebrow("Three ways in")
+    routes = [
+        ("Prices", "Simulate a strategy",
+         "Pull ETFs from Yahoo Finance or upload a price file, choose a model, "
+         "and the engine handles drift, frictions and execution."),
+        ("Weights", "Test an allocation you already have",
+         "Upload target weights from a spreadsheet or committee and measure "
+         "them under the same frictions as any built-in model."),
+        ("Returns", "Analyse a track record",
+         "Upload a stream of periodic returns and get the full statistics with "
+         "no simulation at all."),
+    ]
+    cols = st.columns(3)
+    for col, (tag, title, body) in zip(cols, routes):
+        with col:
+            st.markdown(
+                f'<div class="startcard"><div class="n">{tag}</div>'
+                f'<div class="t">{title}</div><div class="b">{body}</div></div>',
+                unsafe_allow_html=True)
+
+    eyebrow("Models available")
     for k in sorted(REGISTRY, key=lambda x: REGISTRY[x].label):
-        s = REGISTRY[k]
+        sx = REGISTRY[k]
         st.markdown(
-            f'<div style="margin-bottom:.7rem;"><span style="font-family:IBM Plex Mono,'
-            f'monospace;color:#C9A227;font-size:.8rem;">{s.label}</span>'
-            f'<div class="note" style="margin-top:.2rem;">{s.description}</div></div>',
+            f'<div class="strat"><div class="nm">{sx.label}</div>'
+            f'<div class="ds">{sx.description}</div></div>',
             unsafe_allow_html=True)
     st.stop()
 
@@ -1017,6 +1231,22 @@ stats = M.summary(res.returns, res.equity, bench_r, res.turnover,
                   res.exposure, rcfg.costs.cash_rate_pa, ppy)
 bstats = M.summary(bench.returns, bench.equity, None, None, None,
                    rcfg.costs.cash_rate_pa, ppy) if bench is not None else {}
+
+# Context strip: which run is on screen, visible from every tab.
+_bits = [f'<span class="lead">{rcfg.label}</span>']
+_bits.append(f'<span class="item">{res.equity.index[0].date()} '
+             f'&rarr; {res.equity.index[-1].date()}</span>')
+_bits.append(f'<span class="item">{len(universe.columns)} instrument'
+             f'{"s" if len(universe.columns) != 1 else ""}</span>')
+_bits.append(f'<span class="item">{REBALANCE_RULES.get(rcfg.engine.rebalance, "").lower()}</span>')
+if bench is not None:
+    _bits.append(f'<span class="item">vs <b>{bench.label}</b></span>')
+_cagr = stats.get("CAGR", float("nan"))
+if _cagr == _cagr:
+    _bits.append(f'<span class="item">CAGR <b>{M.format_metric("CAGR", _cagr)}</b></span>')
+if run.get("trimmed"):
+    _bits.append('<span class="item">warm-up trimmed</span>')
+st.markdown(f'<div class="runbar">{"".join(_bits)}</div>', unsafe_allow_html=True)
 
 tabs = st.tabs(["Results", "Positions", "Robustness", "Data", "Builder", "Export"])
 
@@ -1094,7 +1324,10 @@ with tabs[0]:
     fmt = _fmt_period_tables(ptabs, rcfg.label,
                              bench.label if bench is not None else None)
     if not fmt["trailing"].empty:
-        st.dataframe(fmt["trailing"], use_container_width=True, hide_index=True)
+        _cols = [c for c in fmt["trailing"].columns
+                 if c not in ("Period", "Annualized", "From", "To")]
+        st.dataframe(signed(fmt["trailing"], _cols, emphasise=["Excess"]),
+                     use_container_width=True, hide_index=True)
         note("Periods longer than one year are annualized; shorter ones are "
              "cumulative, as the <b>Annualized</b> column records. A window "
              "the history does not cover is omitted rather than measured "
@@ -1102,7 +1335,10 @@ with tabs[0]:
 
     eyebrow("Calendar years")
     if not fmt["calendar"].empty:
-        st.dataframe(fmt["calendar"], use_container_width=True, hide_index=True)
+        _cols = [c for c in fmt["calendar"].columns
+                 if c not in ("Year", "Partial")]
+        st.dataframe(signed(fmt["calendar"], _cols, emphasise=["Excess"]),
+                     use_container_width=True, hide_index=True)
         cy = ptabs["calendar"]
         if rcfg.label in cy.columns:
             st.plotly_chart(
@@ -1121,7 +1357,8 @@ with tabs[0]:
         # "Recovery" mixes date objects with the string "ongoing"; Arrow
         # (Streamlit's serialization layer) rejects a mixed-type column.
         dd_tbl["Recovery"] = dd_tbl["Recovery"].astype(str)
-    st.dataframe(dd_tbl, use_container_width=True, hide_index=True)
+    st.dataframe(signed(dd_tbl, ["Drawdown"]), use_container_width=True,
+                 hide_index=True)
 
 # --------------------------- POSITIONS ----------------------------------
 with tabs[1]:
@@ -1237,7 +1474,8 @@ with tabs[2]:
         for c in ("CAGR", "Volatility", "Max Drawdown"):
             disp[c] = disp[c].map(lambda v: f"{v*100:.2f}%")
         disp["Sharpe"] = disp["Sharpe"].map(lambda v: f"{v:.2f}")
-        st.dataframe(disp, use_container_width=True, hide_index=True)
+        st.dataframe(signed(disp, ["CAGR", "Sharpe", "Max Drawdown"]),
+                     use_container_width=True, hide_index=True)
         st.plotly_chart(C.bar_series(wf["Fold"], wf["Sharpe"],
                                      "Sharpe by fold"),
                         use_container_width=True, config={"displaylogo": False})
@@ -1254,7 +1492,8 @@ with tabs[2]:
         for c in ("CAGR", "Max Drawdown"):
             d[c] = d[c].map(lambda v: f"{v*100:.2f}%")
         d["Sharpe"] = d["Sharpe"].map(lambda v: f"{v:.2f}")
-        st.dataframe(d, use_container_width=True, hide_index=True)
+        st.dataframe(signed(d, ["CAGR", "Sharpe", "Max Drawdown"]),
+                     use_container_width=True, hide_index=True)
 
     eyebrow("2. Parameter stability")
     numeric = [] if is_external else [p for p in strategy_obj.params
@@ -1333,7 +1572,8 @@ with tabs[2]:
     for c in ("CAGR", "Max Drawdown"):
         cd[c] = cd[c].map(lambda v: f"{v*100:.2f}%")
     cd["Sharpe"] = cd["Sharpe"].map(lambda v: f"{v:.2f}")
-    st.dataframe(cd, use_container_width=True, hide_index=True)
+    st.dataframe(signed(cd, ["CAGR", "Sharpe", "Max Drawdown"]),
+                 use_container_width=True, hide_index=True)
 
     eyebrow("4. Sampling uncertainty")
     c1, c2 = st.columns(2)
@@ -1359,7 +1599,8 @@ with tabs[2]:
             for cname in ("CAGR", "Max Drawdown"):
                 s[cname] = s[cname].map(lambda v: f"{v*100:.2f}%")
             s["Sharpe"] = s["Sharpe"].map(lambda v: f"{v:.2f}")
-            st.dataframe(s, use_container_width=True, hide_index=True)
+            st.dataframe(signed(s, ["CAGR", "Max Drawdown", "Sharpe"]),
+                         use_container_width=True, hide_index=True)
 
 # --------------------------- DATA ----------------------------------------
 with tabs[3]:
