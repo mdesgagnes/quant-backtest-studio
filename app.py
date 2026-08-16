@@ -33,6 +33,7 @@ from qbt import presets as PRESETS
 from qbt import formula as FORMULA
 from qbt import excel_export as XL
 from qbt import allocation as ALLOC
+from qbt import schedule as SCHED
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -1080,6 +1081,58 @@ with st.sidebar.expander("Execution", expanded=False):
     rebalance = st.selectbox(
         "Rebalance", rb_keys, index=rb_keys.index(e0.rebalance),
         format_func=lambda k: REBALANCE_RULES[k])
+
+    # Trading day. The default reproduces the period-end calendar, so
+    # leaving this alone changes nothing.
+    day_rule, day_of_month, weekday, nth = "last", 15, 4, 1
+    anchor_month = int(getattr(e0, "anchor_month", 12))
+    if rebalance != "D":
+        _RULE_LABELS = {
+            "last": "Last trading day", "first": "First trading day",
+            "day": "A day of the month", "nth_weekday": "Nth weekday",
+            "last_weekday": "Last weekday",
+        }
+        _keys = list(_RULE_LABELS)
+        day_rule = st.selectbox(
+            "Trading day", _keys,
+            index=_keys.index(getattr(e0, "day_rule", "last")),
+            format_func=lambda k: _RULE_LABELS[k],
+            help="Which day inside the period the trade happens. A strategy "
+                 "that only works on month-end has been tested on one day "
+                 "out of twenty, not on a month.")
+        if day_rule == "day":
+            day_of_month = st.slider("Day of month", 1, 31,
+                                     int(getattr(e0, "day_of_month", 15)),
+                                     help="Clamped to the month's length, then "
+                                          "moved to the nearest session inside "
+                                          "the same month.")
+        elif day_rule in ("nth_weekday", "last_weekday"):
+            weekday = SCHED.WEEKDAYS.index(st.selectbox(
+                "Weekday", SCHED.WEEKDAYS,
+                index=int(getattr(e0, "weekday", 4))))
+            if day_rule == "nth_weekday":
+                nth = st.selectbox("Which one", [1, 2, 3, 4],
+                                   index=int(getattr(e0, "nth", 1)) - 1,
+                                   format_func=lambda n: ["1st","2nd","3rd","4th"][n-1])
+        if rebalance == "A":
+            anchor_month = SCHED.MONTHS.index(st.selectbox(
+                "Month", SCHED.MONTHS, index=anchor_month - 1,
+                help="Rebalance every year in this month.")) + 1
+        elif rebalance == "Q":
+            _q = {12: "Mar / Jun / Sep / Dec", 1: "Jan / Apr / Jul / Oct",
+                  2: "Feb / May / Aug / Nov"}
+            _qk = list(_q)
+            anchor_month = st.selectbox(
+                "Quarter months", _qk,
+                index=_qk.index(anchor_month) if anchor_month in _qk else 0,
+                format_func=lambda k: _q[k],
+                help="Calendar quarters, or the same cadence started a month "
+                     "or two later.")
+        _preview = SCHED.RebalanceSpec(
+            frequency=rebalance, day_rule=day_rule, day_of_month=day_of_month,
+            weekday=weekday, nth=nth, anchor_month=anchor_month)
+        st.markdown(f'<div class="note">{_preview.label()}</div>',
+                    unsafe_allow_html=True)
     lag = st.slider("Execution lag (days)", 0, 5, int(e0.execution_lag),
                     help="1 = signal at the close, executed the next session. "
                          "0 assumes execution at the price that produced the signal.")
@@ -1148,7 +1201,10 @@ cfg = RunConfig(
     engine=EngineConfig(initial_capital=float(capital), rebalance=rebalance,
                         execution_lag=int(lag), max_leverage=float(max_lev),
                         execute_at_open=bool(exec_at_open and source == "Yahoo Finance"),
-                        trim_warmup=bool(trim_warm)),
+                        trim_warmup=bool(trim_warm),
+                        day_rule=day_rule, day_of_month=int(day_of_month),
+                        weekday=int(weekday), nth=int(nth),
+                        anchor_month=int(anchor_month)),
     costs=CostConfig(commission_bps=comm, slippage_bps=slip, cash_rate_pa=cash_rate),
 )
 
@@ -1781,7 +1837,56 @@ with tabs[2]:
                             f'by pure chance. Net edge of the model: '
                             f'{dsr["haircut"]:+.2f}.</div>', unsafe_allow_html=True)
 
-    eyebrow("3. Cost sensitivity")
+    eyebrow("3. Trading-day sensitivity")
+    note("The day a strategy rebalances is a parameter that usually goes "
+         "unexamined. A monthly system tested only on month-end has been "
+         "tested on one day out of twenty. Read the spread, not the best "
+         "row: a tight band is evidence the edge is real, a wide one means "
+         "the headline figure partly belonged to the calendar.")
+    if rcfg.engine.rebalance == "D":
+        note("Daily rebalancing has no trading day to vary.")
+    elif st.button("Sweep trading days", key="daybtn"):
+        with st.spinner("Running every trading day..."):
+            st.session_state["daysweep"] = R.rebalance_day_sweep(
+                universe, strategy_obj, params_run, rcfg.engine, rcfg.costs,
+                run["cash"], exog=exog_used, weights=fixed_w)
+    if "daysweep" in st.session_state:
+        ds = st.session_state["daysweep"]
+        if not ds.empty and "CAGR" in ds.columns:
+            d = ds.dropna(subset=["CAGR"]).sort_values("CAGR", ascending=False)
+            a, b, c = st.columns(3)
+            with a:
+                dial("CAGR spread", f"{ds.attrs.get('cagr_spread', float('nan'))*100:.2f}%",
+                     "best day minus worst")
+            with b:
+                dial("Standard deviation", f"{ds.attrs.get('cagr_std', float('nan'))*100:.2f}%",
+                     "across trading days")
+            with c:
+                dial("Sharpe spread", f"{ds.attrs.get('sharpe_spread', float('nan')):.2f}")
+            st.plotly_chart(
+                C.bar_series(d["Trading day"], (d["CAGR"] * 100).tolist(),
+                             "CAGR by trading day", "%"),
+                use_container_width=True, config={"displaylogo": False})
+            disp = d.copy()
+            for cc in ("CAGR", "Volatility", "Max Drawdown"):
+                if cc in disp:
+                    disp[cc] = disp[cc].map(lambda v: f"{v*100:+.2f}%")
+            for cc in ("Sharpe", "Sortino", "Calmar", "Annual Turnover"):
+                if cc in disp:
+                    disp[cc] = disp[cc].map(lambda v: f"{v:.2f}")
+            st.dataframe(signed(disp, ["CAGR", "Sharpe", "Max Drawdown"]),
+                         use_container_width=True, hide_index=True)
+            _sp = ds.attrs.get("cagr_spread", float("nan"))
+            _md = ds.attrs.get("cagr_median", float("nan"))
+            if _sp == _sp and _md == _md and _md != 0 and abs(_sp) > abs(_md) * 0.5:
+                st.markdown(
+                    f'<div class="flag">The gap between the best and worst '
+                    f'trading day is {_sp*100:.2f}%, against a median CAGR of '
+                    f'{_md*100:.2f}%. That is a large share of the result to '
+                    f'owe to a date nobody chose deliberately.</div>',
+                    unsafe_allow_html=True)
+
+    eyebrow("4. Cost sensitivity")
     cs = R.cost_sensitivity(universe, strategy_obj, params_run, rcfg.engine,
                             rcfg.costs, None, **kw)
     st.plotly_chart(C.sweep_line(cs, "Costs (bps round-trip)", "CAGR",
@@ -1794,7 +1899,7 @@ with tabs[2]:
     st.dataframe(signed(cd, ["CAGR", "Sharpe", "Max Drawdown"]),
                  use_container_width=True, hide_index=True)
 
-    eyebrow("4. Sampling uncertainty")
+    eyebrow("5. Sampling uncertainty")
     c1, c2 = st.columns(2)
     n_sims = c1.slider("Simulations", 100, 2000, 500, 100)
     blk = c2.slider("Block size (days)", 5, 63, 21, 1)

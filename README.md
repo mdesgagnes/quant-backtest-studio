@@ -386,13 +386,26 @@ They are explicit because they determine how credible the result is.
    day *t*; the engine executes them at *t + lag*, one business day by
    default. The no-look-ahead property is verifiable: changing the last
    price in the history does not change any earlier return.
-2. **Rebalance dates are signal dates.** A monthly or quarterly calendar
+2. **The trading day is a choice.** Under Execution, a monthly rebalance
+   can land on the last trading day, the first, the 15th, the third Friday
+   or the last Monday. Quarterly can run Mar/Jun/Sep/Dec, Jan/Apr/Jul/Oct
+   or Feb/May/Aug/Nov; annual can run in any month, so "every July" is one
+   selection. Defaults reproduce the period-end calendar exactly, and
+   stored configurations keep their dates to the day.
+
+   This exists to be varied. The Robustness tab runs the same strategy
+   across every plausible trading day and reports the spread. A monthly
+   system tested only on month-end has been tested on one day out of
+   twenty; if moving to the 15th materially changes the answer, the answer
+   partly belonged to the calendar.
+
+3. **Rebalance dates are signal dates.** A monthly or quarterly calendar
    marks the day the signal is *derived*, at that session's close. The trade
    lands `execution_lag` sessions later: with the default of one, a
    quarter-end signal trades on the first session of the next quarter. The
    trade log shows execution dates, so a quarterly strategy shows trades on
    the 1st, not the 31st.
-3. **Execution price.** By default trades settle at the close. Switching to
+4. **Execution price.** By default trades settle at the close. Switching to
    "Open (marked at the close)" splits the day in two: the overnight move
    from the prior close to the open is earned on the old weights, the
    intraday move from open to close on the new ones. That is the more
@@ -400,7 +413,7 @@ They are explicit because they determine how credible the result is.
    it stops the trade day from silently capturing an overnight gap the
    portfolio was never positioned for. Opening prices come from Yahoo
    Finance; uploaded files fall back to close execution.
-4. **Warm-up.** Indicators are blind until they have enough history: a
+5. **Warm-up.** Indicators are blind until they have enough history: a
    200-day average produces nothing for its first 200 sessions. Those
    sessions are not neutral - the portfolio sits in cash *earning the cash
    rate*, which lifts the reported return, stretches the measured period and
@@ -409,7 +422,7 @@ They are explicit because they determine how credible the result is.
    benchmark is cut to the same date so the comparison stays honest. Only
    the leading stretch is removed: a deliberate move to cash mid-period is a
    decision and is kept.
-5. **Dividends.** Two conventions, chosen under Price convention. *Total
+6. **Dividends.** Two conventions, chosen under Price convention. *Total
    return* uses dividend-adjusted prices, so payments are folded into the
    price series and compound inside the position from the moment they are
    paid. *Price return + cash dividends* keeps prices ex-dividend and
@@ -419,18 +432,18 @@ They are explicit because they determine how credible the result is.
    real. The two are mutually exclusive by construction: crediting dividends
    on top of adjusted prices would count every payment twice, and the app
    refuses that combination rather than silently producing it.
-6. **Weights drift between rebalances.** Positions evolve with prices.
+7. **Weights drift between rebalances.** Positions evolve with prices.
    Assuming an implicit daily rebalance is the mistake that most often
    inflates published results.
-7. **Frictions on actual turnover.** Cost = sum(|target weight - current
+8. **Frictions on actual turnover.** Cost = sum(|target weight - current
    weight|) x (commission + slippage). Default: 5 bps + 25 bps, a
    conservative blended assumption for Canadian ETFs.
-8. **Cash is remunerated.** Either at a fixed rate, or by the return of a
+9. **Cash is remunerated.** Either at a fixed rate, or by the return of a
    cash-equivalent ETF (PSA.TO, BIL): the opportunity cost of sitting out of
    the market is counted.
-9. **Adjustments under 0.5% of weight are ignored** (`min_trade_weight`), so
+10. **Adjustments under 0.5% of weight are ignored** (`min_trade_weight`), so
    the engine does not charge for trades no manager would place.
-10. **Survivorship bias is not handled automatically.** A universe built
+11. **Survivorship bias is not handled automatically.** A universe built
    today from ETFs that exist today carries that bias. The "Data" diagnostic
    flags histories shorter than the tested period.
 
@@ -554,6 +567,31 @@ as below.
 
 ---
 
+## 5 ter. Published strategies included
+
+Alongside the generic models, four systems from the literature. Each
+docstring in `qbt/strategies/library.py` records where the implementation
+departs from the source, because a strategy that quietly differs from the
+paper it names is worse than one that admits it.
+
+| Model | Idea |
+|---|---|
+| Quantitative Momentum (Gray & Vogel) | Rank on 12-2 momentum, keep the leaders, then prefer those whose gain arrived as a smooth drift rather than a few jumps. Smooth momentum has been found to persist where jumpy momentum reverses. |
+| Turtle Breakout (Donchian) | Buy a break to a new N-day high, exit on a break to an M-day low, size each position by its recent range so every holding carries similar risk. |
+| Time-Series Momentum (Moskowitz, Ooi & Pedersen) | Judge each instrument against itself rather than against the others, and scale positions to a common volatility. |
+| Accelerating Dual Momentum | Blend short, medium and long lookbacks instead of trusting one, with an absolute threshold that moves to cash when nothing clears it. |
+
+Two honest caveats. The Turtle rule sizes on average true range, which needs
+daily highs and lows; this app carries closes only, so the range is
+approximated from close-to-close moves. That understates the range on wide
+intraday days and leaves positions slightly larger than the published rule
+would give -- the behaviour is unaffected, the leverage is a touch higher.
+And Quantitative Momentum in the book is a stock-selection system run over
+hundreds of names; applied to a handful of ETFs it is the same logic on a
+universe far too small to sort into deciles.
+
+---
+
 ## 6. Adding a strategy
 
 A strategy is a pure function `(prices, params) -> target weights`. Open
@@ -618,6 +656,7 @@ the link between exploring on screen and reproducing in a script.
 | In-sample / out-of-sample | Does the second half resemble the first? |
 | Parameter surface | Is the result a plateau or a lone spike? |
 | Cost sensitivity | At what cost level does the strategy stop paying off? |
+| Trading-day sweep | Does the result survive rebalancing on a different day of the period? |
 | Block-resampled Monte Carlo | How much of the result depends on the order of returns? |
 | Expected Sharpe by chance | What Sharpe would *n* trials produce with no real edge? |
 

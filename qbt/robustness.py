@@ -251,3 +251,63 @@ def _norm_ppf(p: float) -> float:
     q = p - 0.5
     r = q * q
     return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q / (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1)
+
+
+# ----------------------------------------------------------------------
+def rebalance_day_sweep(prices: pd.DataFrame, strategy, params: Dict[str, Any],
+                        engine: EngineConfig, costs: CostConfig,
+                        cash_prices: Optional[pd.Series] = None,
+                        exog: Optional[pd.DataFrame] = None,
+                        weights: Optional[pd.DataFrame] = None,
+                        include_months: bool = True) -> pd.DataFrame:
+    """Runs the same strategy on every plausible trading day.
+
+    The day a strategy rebalances is a parameter like any other, and one
+    that is almost never examined. A monthly system tested only on
+    month-end has been tested on one twelfth of the available start dates.
+    If moving to the 15th, or to the first Friday, materially changes the
+    outcome, the result was partly a property of the calendar rather than
+    of the signal.
+
+    Read the spread, not the best row. A tight band across days is
+    evidence the edge is real; a wide one means the reported figure
+    depended on a date nobody chose deliberately.
+    """
+    from .schedule import RebalanceSpec, day_variants, month_variants
+    from .engine import spec_from_engine
+    from dataclasses import replace as _replace
+
+    base = spec_from_engine(engine)
+    specs = list(day_variants(base))
+    if include_months and base.frequency in ("Q", "A"):
+        specs += [s for s in month_variants(base) if s.label() != base.label()]
+
+    seen, rows = set(), []
+    for spec in specs:
+        if spec.label() in seen:
+            continue
+        seen.add(spec.label())
+        eng = _replace(engine, day_rule=spec.day_rule,
+                       day_of_month=spec.day_of_month, weekday=spec.weekday,
+                       nth=spec.nth, anchor_month=spec.anchor_month)
+        try:
+            w = weights if weights is not None else strategy.generate(prices, params, exog)
+            res = run_backtest(prices, w, eng, costs, cash_prices)
+            row = {"Trading day": spec.label()}
+            row.update(_stats(res, engine.periods_per_year))
+            rows.append(row)
+        except Exception as exc:
+            rows.append({"Trading day": spec.label(), "error": str(exc)[:100]})
+
+    df = pd.DataFrame(rows)
+    if not df.empty and "CAGR" in df.columns:
+        good = df["CAGR"].dropna()
+        if len(good) > 1:
+            df.attrs["cagr_spread"] = float(good.max() - good.min())
+            df.attrs["cagr_std"] = float(good.std(ddof=1))
+            df.attrs["cagr_median"] = float(good.median())
+        sh = df["Sharpe"].dropna()
+        if len(sh) > 1:
+            df.attrs["sharpe_spread"] = float(sh.max() - sh.min())
+            df.attrs["sharpe_std"] = float(sh.std(ddof=1))
+    return df

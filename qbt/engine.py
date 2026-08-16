@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 from .config import EngineConfig, CostConfig
+from .schedule import RebalanceSpec, build_calendar
 
 _RESAMPLE = {"D": None, "W": "W-FRI", "M": "ME", "Q": "QE", "A": "YE"}
 
@@ -60,12 +61,29 @@ class BacktestResult:
 
 # ----------------------------------------------------------------------
 def rebalance_calendar(index: pd.DatetimeIndex, rule: str) -> pd.DatetimeIndex:
-    """Last available business day of each period."""
+    """Last available business day of each period.
+
+    Kept for callers that only care about the frequency. The engine itself
+    goes through `spec_from_engine`, which also honours the trading-day
+    rule.
+    """
     if rule == "D" or _RESAMPLE.get(rule) is None:
         return pd.DatetimeIndex(index)
     s = pd.Series(index, index=index)
     dates = s.resample(_RESAMPLE[rule]).last().dropna()
     return pd.DatetimeIndex(sorted(set(dates.values))).intersection(index)
+
+
+def spec_from_engine(engine: EngineConfig) -> RebalanceSpec:
+    """The trading-day rule carried by an EngineConfig."""
+    return RebalanceSpec(
+        frequency=engine.rebalance,
+        day_rule=getattr(engine, "day_rule", "last"),
+        day_of_month=int(getattr(engine, "day_of_month", 15)),
+        weekday=int(getattr(engine, "weekday", 4)),
+        nth=int(getattr(engine, "nth", 1)),
+        anchor_month=int(getattr(engine, "anchor_month", 12)),
+    )
 
 
 def _cash_returns(index: pd.DatetimeIndex, cash_prices: Optional[pd.Series],
@@ -133,7 +151,7 @@ def run_backtest(prices: pd.DataFrame,
     if rebalance_dates is not None and len(rebalance_dates):
         sig = pd.DatetimeIndex(rebalance_dates).intersection(idx)
     else:
-        sig = rebalance_calendar(idx, engine.rebalance)
+        sig = build_calendar(idx, spec_from_engine(engine))
     pos = idx.get_indexer(pd.DatetimeIndex(sig)) + lag
     rebal = idx[pos[(pos >= 0) & (pos < len(idx))]]
     rebal_set = set(rebal)

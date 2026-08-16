@@ -54,6 +54,12 @@ class EngineConfig:
     periods_per_year: int = 252
     execute_at_open: bool = False          # trade at the open, mark at the close
     trim_warmup: bool = True               # drop the leading uninvested stretch
+    # Trading-day rule. Defaults reproduce the period-end calendar exactly.
+    day_rule: str = "last"                 # last | first | day | nth_weekday | last_weekday
+    day_of_month: int = 15
+    weekday: int = 4                       # 0=Monday .. 4=Friday
+    nth: int = 1
+    anchor_month: int = 12                 # A: month; Q: month + every third
 
 
 @dataclass

@@ -497,3 +497,224 @@ def _custom_formula(px: pd.DataFrame, p: Dict[str, Any],
     return size_inverse_vol(mask, px, int(p["vol_window"]), gross=gross,
                             downside=sizing.startswith("Inverse Downside"),
                             slots=slots)
+
+
+# ======================================================================
+# Published systematic strategies
+# ----------------------------------------------------------------------
+# Faithful to the published logic where the data allows. Each docstring
+# says where it departs, because a strategy that quietly differs from the
+# paper it names is worse than one that admits it.
+# ======================================================================
+
+def _frog_in_the_pan(px: pd.DataFrame, n: int) -> pd.DataFrame:
+    """Information discreteness, from Da, Gurun and Warachka (2014).
+
+    ID = sign(cumulative return) x (%negative days - %positive days).
+
+    Momentum that arrived in a smooth drift scores *low*, momentum that
+    arrived in a few violent jumps scores high. The finding is that
+    continuous momentum persists and discrete momentum reverses: markets
+    under-react to a steady stream of small news and over-react to a
+    headline. Lower is better.
+    """
+    r = px.pct_change()
+    pos = (r > 0).rolling(n, min_periods=max(20, n // 2)).mean()
+    neg = (r < 0).rolling(n, min_periods=max(20, n // 2)).mean()
+    cum = px / px.shift(n) - 1.0
+    return np.sign(cum) * (neg - pos)
+
+
+@register(
+    key="quant_momentum",
+    label="Quantitative Momentum (Gray & Vogel)",
+    description="Generic momentum screened for path quality. Ranks on the "
+                "12-2 return, keeps the leaders, then prefers the ones whose "
+                "gain arrived as a smooth drift rather than a few jumps. "
+                "Smooth momentum has been found to persist where jumpy "
+                "momentum reverses.",
+    params=[
+        Param("lookback", "Momentum Window (days)", "int", 252, 120, 504, 5,
+              help="12 months in the original."),
+        Param("skip", "Skip Days", "int", 21, 0, 63, 1,
+              help="The most recent month is excluded, which is standard in "
+                   "momentum work to avoid short-term reversal."),
+        Param("screen_pct", "Momentum Screen (top %)", "float", 50.0, 10.0, 100.0, 5.0,
+              help="Only this share of the universe passes to the quality "
+                   "stage."),
+        Param("fip_window", "Path Quality Window", "int", 252, 60, 504, 5),
+        Param("fip_weight", "Weight on Path Quality", "float", 0.5, 0.0, 1.0, 0.1,
+              help="0 = pure momentum. 1 = rank only on smoothness among "
+                   "those that passed the screen."),
+        Param("top_n", "Number of Positions", "int", 3, 1, 30, 1),
+        Param("trend_filter", "Trend Filter (0 = none)", "int", 0, 0, 400, 10,
+              help="The published version is long-only and always invested; "
+                   "a filter here makes it defensive."),
+        Param("sizing", "Sizing", "choice", "Equal Weight",
+              choices=["Equal Weight", "Inverse Volatility"]),
+        Param("vol_window", "Volatility Window", "int", 60, 20, 250, 5),
+    ],
+)
+def _quant_momentum(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    lb, sk = int(p["lookback"]), int(p["skip"])
+    base = px.shift(sk)
+    mom = base / base.shift(lb) - 1.0
+
+    mom_rank = mom.rank(axis=1, pct=True, na_option="keep")
+    passed = mom_rank >= (1.0 - float(p["screen_pct"]) / 100.0)
+
+    # Lower information discreteness is better, so the rank is inverted.
+    fip = _frog_in_the_pan(base, int(p["fip_window"]))
+    fip_rank = (-fip).rank(axis=1, pct=True, na_option="keep")
+
+    wgt = float(p["fip_weight"])
+    score = ((1 - wgt) * mom_rank + wgt * fip_rank.fillna(mom_rank)).where(passed)
+
+    if int(p["trend_filter"]) > 0:
+        score = score.where(px > sma(px, int(p["trend_filter"])))
+
+    ranks = score.rank(axis=1, ascending=False, na_option="keep", method="first")
+    mask = (ranks <= p["top_n"]).astype(float).where(score.notna(), 0.0)
+
+    if p["sizing"] == "Inverse Volatility":
+        return size_inverse_vol(mask, px, int(p["vol_window"]), slots=p["top_n"])
+    return mask / float(p["top_n"])
+
+
+def _true_range(px: pd.DataFrame, n: int) -> pd.DataFrame:
+    """Average true range, approximated from closes.
+
+    The original uses daily high, low and close. This app carries closes
+    only, so the true range collapses to the absolute close-to-close move.
+    That understates the range on wide intraday days, which makes the
+    resulting position sizes slightly larger than the published rule would
+    give. The behaviour of the system is unaffected; the leverage is a
+    touch higher.
+    """
+    return px.diff().abs().rolling(n, min_periods=max(5, n // 2)).mean()
+
+
+@register(
+    key="turtle",
+    label="Turtle Breakout (Donchian)",
+    description="The Turtle rule: buy a breakout to a new N-day high, exit "
+                "on a break to an M-day low, and size each position by its "
+                "recent range so that every holding contributes a similar "
+                "amount of risk. Long only here.",
+    params=[
+        Param("entry", "Entry Breakout (days)", "int", 55, 10, 300, 5,
+              help="The original System 1 used 20 days, System 2 used 55."),
+        Param("exit", "Exit Breakout (days)", "int", 20, 5, 200, 5,
+              help="System 1 exited on a 10-day low, System 2 on 20."),
+        Param("atr_window", "Range Window (N)", "int", 20, 5, 100, 1),
+        Param("risk_per_unit", "Risk per Position (% of portfolio)", "float",
+              1.0, 0.1, 5.0, 0.1,
+              help="The Turtles risked a fixed fraction per unit and let the "
+                   "range set the size. A wide-ranging instrument therefore "
+                   "gets a smaller weight."),
+        Param("max_weight", "Max Weight per Position", "float", 0.34, 0.05, 1.0, 0.01),
+        Param("trend_filter", "Trend Filter (0 = none)", "int", 0, 0, 400, 10),
+    ],
+)
+def _turtle(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    ent, ex = int(p["entry"]), int(p["exit"])
+
+    # Prior extremes only: comparing today's close to a window that includes
+    # today would make every new high its own breakout signal.
+    hi = px.shift(1).rolling(ent, min_periods=ent).max()
+    lo = px.shift(1).rolling(ex, min_periods=ex).min()
+
+    enter = px > hi
+    leave = px < lo
+    state = pd.DataFrame(np.nan, index=px.index, columns=px.columns)
+    state = state.mask(enter, 1.0).mask(leave, 0.0).ffill().fillna(0.0)
+
+    if int(p["trend_filter"]) > 0:
+        state = state.where(px > sma(px, int(p["trend_filter"])), 0.0)
+
+    # Position size from the range: risk budget divided by volatility per
+    # unit, which is the Turtle unit rule expressed as a weight.
+    atr = _true_range(px, int(p["atr_window"]))
+    unit = (float(p["risk_per_unit"]) / 100.0) / (atr / px).replace(0, np.nan)
+    w = (state * unit).clip(upper=float(p["max_weight"])).fillna(0.0)
+
+    gross = w.sum(axis=1)
+    over = gross > 1.0
+    if over.any():
+        w.loc[over] = w.loc[over].div(gross[over], axis=0)
+    return w
+
+
+@register(
+    key="tsmom",
+    label="Time-Series Momentum (Moskowitz, Ooi & Pedersen)",
+    description="Each instrument is judged against itself, not against the "
+                "others: hold it while its own trailing return is positive, "
+                "stand aside when it is not. Positions are scaled so each "
+                "contributes a similar volatility, which is what makes the "
+                "published version work across very different assets.",
+    params=[
+        Param("lookback", "Lookback (days)", "int", 252, 20, 504, 5,
+              help="12 months in the paper."),
+        Param("vol_window", "Volatility Window", "int", 60, 20, 250, 5),
+        Param("target_vol", "Volatility Target per Position (%)", "float",
+              10.0, 2.0, 40.0, 0.5,
+              help="Each holding is sized to this annualized volatility, so "
+                   "a quiet bond and a violent equity carry comparable risk."),
+        Param("allow_short", "Allow short positions", "bool", False,
+              help="The paper is long-short. Long-only is the usual "
+                   "constraint in a retail or mandate setting."),
+        Param("max_weight", "Max Weight per Position", "float", 0.34, 0.05, 1.0, 0.01),
+    ],
+)
+def _tsmom(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    sig = np.sign(px / px.shift(int(p["lookback"])) - 1.0)
+    if not bool(p["allow_short"]):
+        sig = sig.clip(lower=0.0)
+
+    vol = realized_vol(px, int(p["vol_window"]))
+    scale = (float(p["target_vol"]) / 100.0) / vol.replace(0, np.nan)
+    w = (sig * scale).clip(lower=-float(p["max_weight"]),
+                           upper=float(p["max_weight"])).fillna(0.0)
+
+    gross = w.abs().sum(axis=1)
+    over = gross > 1.0
+    if over.any():
+        w.loc[over] = w.loc[over].div(gross[over], axis=0)
+    return w
+
+
+@register(
+    key="accelerating_momentum",
+    label="Accelerating Dual Momentum",
+    description="Averages several momentum windows instead of trusting one. "
+                "A single lookback is a parameter chosen after the fact; "
+                "blending short and long windows favours trends that are "
+                "strengthening and reduces how much the result depends on "
+                "any one choice. Cash when nothing clears the bar.",
+    params=[
+        Param("w1", "Short Window (days)", "int", 21, 5, 126, 1),
+        Param("w2", "Medium Window (days)", "int", 63, 21, 252, 1),
+        Param("w3", "Long Window (days)", "int", 126, 42, 504, 5),
+        Param("top_n", "Number of Positions", "int", 1, 1, 20, 1),
+        Param("abs_threshold", "Absolute Threshold (%)", "float", 0.0, -20.0, 20.0, 0.5,
+              help="The blended score must clear this or the slot stays in "
+                   "cash. This is what makes it dual momentum rather than "
+                   "pure rotation."),
+        Param("sizing", "Sizing", "choice", "Equal Weight",
+              choices=["Equal Weight", "Inverse Volatility"]),
+        Param("vol_window", "Volatility Window", "int", 60, 20, 250, 5),
+    ],
+)
+def _accelerating_momentum(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    windows = [int(p["w1"]), int(p["w2"]), int(p["w3"])]
+    score = sum(px / px.shift(w) - 1.0 for w in windows) / float(len(windows))
+
+    eligible = score > float(p["abs_threshold"]) / 100.0
+    ranked = score.where(eligible)
+    ranks = ranked.rank(axis=1, ascending=False, na_option="keep", method="first")
+    mask = (ranks <= p["top_n"]).astype(float).where(ranked.notna(), 0.0)
+
+    if p["sizing"] == "Inverse Volatility":
+        return size_inverse_vol(mask, px, int(p["vol_window"]), slots=p["top_n"])
+    return mask / float(p["top_n"])
