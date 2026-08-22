@@ -53,9 +53,16 @@ class Strategy:
 
     @property
     def needs_exog(self) -> bool:
-        """A strategy that declares a third argument consumes exogenous
-        series. Others keep the two-argument signature."""
-        return len(inspect.signature(self.fn).parameters) >= 3
+        """Whether this strategy consumes exogenous series.
+
+        Counted on the arguments other than `cash`, which is an optional
+        extra any strategy may ask for. Counting every argument would mark a
+        cash-aware, exog-blind model as needing an upload it never reads,
+        and the interface would warn about a missing file for no reason.
+        """
+        names = [n for n in inspect.signature(self.fn).parameters
+                 if n != "cash"]
+        return len(names) >= 3
 
     @property
     def needs_cash(self) -> bool:

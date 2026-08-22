@@ -961,6 +961,29 @@ if mode == "builtin":
             '<div class="flag">This model reads exogenous series. Upload a '
             'file above, or it will have no signal.</div>',
             unsafe_allow_html=True)
+    if strategy.needs_cash:
+        # Say out loud what the hurdle resolves to. "Compare against cash"
+        # is only meaningful if it is obvious which cash.
+        # Frictions render later in the script, so read the stored widget
+        # value rather than the not-yet-assigned local.
+        _rate = float(st.session_state.get("cashrate_pct",
+                                           c0.cash_rate_pa * 100)) / 100.0
+        if cash_proxy:
+            _src = f"the {cash_proxy} return over the same window"
+        elif _rate != 0.0:
+            _src = f"a fixed cash rate of {_rate*100:.2f}% per year"
+        else:
+            _src = None
+        if _src:
+            st.sidebar.markdown(
+                f'<div class="note">Excess-return tests in this model measure '
+                f'against {_src}.</div>', unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown(
+                '<div class="flag">No cash proxy and a cash rate of zero, so '
+                'an excess-return test is the same as comparing against zero. '
+                'Pick a proxy (BIL, PSA.TO) or set a cash rate under '
+                'Frictions.</div>', unsafe_allow_html=True)
     st.sidebar.write("")
 
 # --- Portfolio construction -------------------------------------------
@@ -1241,7 +1264,8 @@ with st.sidebar.expander("Frictions", expanded=False):
     comm = st.number_input("Commission (bps)", 0.0, 200.0, float(c0.commission_bps), 1.0)
     slip = st.number_input("Slippage (bps)", 0.0, 500.0, float(c0.slippage_bps), 5.0)
     cash_rate = st.number_input("Cash rate (annual %)", 0.0, 15.0,
-                                float(c0.cash_rate_pa * 100), 0.25) / 100.0
+                                float(c0.cash_rate_pa * 100), 0.25,
+                                key="cashrate_pct") / 100.0
 
 st.sidebar.markdown("")
 

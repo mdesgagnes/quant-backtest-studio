@@ -742,17 +742,21 @@ def _accelerating_momentum(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
                    "full risk, half risk, risk-off. A single signal gives "
                    "only full or flat."),
         Param("benchmark_rate", "Momentum measured against",
-              "choice", "Cash proxy (excess return)",
-              choices=["Cash proxy (excess return)", "Zero (absolute return)",
-                       "Fixed rate"],
+              "choice", "Cash setting (from the Data panel)",
+              choices=["Cash setting (from the Data panel)",
+                       "Zero (absolute return)", "Fixed rate set here"],
               help="The published test is an excess-return test: the asset "
-                   "must beat the bill over the same window, not merely rise. "
-                   "With cash at 4%, an asset up 2% has lost against the "
-                   "alternative of holding cash, and the two tests disagree."),
+                   "must beat cash over the same window, not merely rise. "
+                   "The default follows whatever Cash remuneration is set to "
+                   "in the Data panel \u2014 a proxy ETF such as BIL, or the "
+                   "fixed cash rate when no proxy is chosen \u2014 so the "
+                   "hurdle and the cash the portfolio actually earns are the "
+                   "same thing."),
         Param("fixed_rate", "Fixed rate (% per year)", "float", 0.0, 0.0, 15.0, 0.25,
               help="Only used when the comparison above is set to a fixed "
-                   "rate. A single number cannot follow a rate cycle, which "
-                   "is why the cash proxy is the default."),
+                   "rate here, overriding the Data panel. A single number "
+                   "cannot follow a rate cycle, which is why the cash "
+                   "setting is the default."),
         Param("tmom_window", "Absolute Momentum Window (days)", "int", 252, 20, 504, 5,
               help="12 months. The asset is held if its return over this "
                    "window beats the comparison above."),
@@ -763,7 +767,7 @@ def _accelerating_momentum(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
     ],
 )
 def _trend_gated_weights(px: pd.DataFrame, p: Dict[str, Any],
-                         ex: pd.DataFrame, cash: pd.Series = None) -> pd.DataFrame:
+                         cash: pd.Series = None) -> pd.DataFrame:
     """Target weights gated per asset by trend.
 
     The published material describes the allocation (50/25/25) and the three
@@ -803,12 +807,12 @@ def _trend_gated_weights(px: pd.DataFrame, p: Dict[str, Any],
     asset_ret = px / px.shift(n) - 1.0
 
     # What the asset has to beat, over the same window.
-    mode_rate = p.get("benchmark_rate", "Cash proxy (excess return)")
-    if mode_rate.startswith("Cash proxy") and cash is not None:
+    mode_rate = p.get("benchmark_rate", "Cash setting (from the Data panel)")
+    if mode_rate.startswith("Cash setting") and cash is not None:
         c = pd.to_numeric(cash, errors="coerce").reindex(px.index).ffill()
         hurdle = (c / c.shift(n) - 1.0)
         hurdle = pd.DataFrame({col: hurdle for col in px.columns})
-    elif mode_rate.startswith("Fixed"):
+    elif mode_rate.startswith("Fixed rate set here"):
         per_period = (1.0 + float(p["fixed_rate"]) / 100.0) ** (n / 252.0) - 1.0
         hurdle = pd.DataFrame(per_period, index=px.index, columns=px.columns)
     else:

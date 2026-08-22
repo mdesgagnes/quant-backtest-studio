@@ -619,11 +619,22 @@ the absolute test while failing the excess one. A threshold typed in once is
 a guess at a number that moves through a rate cycle, which is exactly when a
 defensive strategy is being asked to earn its keep.
 
-The comparison is made against the **cash proxy** selected under Data --
-BIL in the HIDE preset. Set no proxy and the model falls back to the fixed
-cash rate; the comparison can also be set to zero or to a fixed rate
-explicitly, which is worth running once alongside the default just to see
-how much the choice moves the result.
+The hurdle follows **whatever Cash remuneration is set to in the Data
+panel** -- a proxy ETF such as BIL (the HIDE preset's default) or, when no
+proxy is chosen, the fixed cash rate under Frictions. The same series the
+portfolio earns on its idle cash is the series each asset has to beat, which
+is the point: the hurdle and the opportunity cost are one number, not two
+that can drift apart.
+
+The sidebar states which it resolved to, and warns when no proxy is set and
+the cash rate is zero -- in that case an excess-return test is arithmetically
+identical to comparing against zero, and the label would otherwise promise
+something it is not delivering.
+
+Two overrides remain: "Zero (absolute return)" for the plain test, and
+"Fixed rate set here" to pin a number independent of the Data panel. Worth
+running the default against zero once, just to see how much the choice moves
+the result over a period containing 2022.
 
 So: a faithful reconstruction of a documented *structure*, not a replica of
 the fund. It will not track HIDE's returns, and it is not meant to. The
