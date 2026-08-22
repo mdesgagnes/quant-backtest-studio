@@ -118,6 +118,20 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
         "note": "Momentum, quality, minimum volatility, value, size. Most "
                 "launched in 2013.",
     },
+    "HIDE target asset classes": {
+        "tickers": ["SCHR", "VNQ", "BCI"],
+        "classes": {
+            "SCHR": "Fixed income",
+            "VNQ": "Real assets",
+            "BCI": "Real assets",
+        },
+        "benchmark": "SCHR",
+        "cash": None,
+        "note": "The three asset classes behind Alpha Architect's HIDE: "
+                "intermediate Treasuries, REITs, commodities. Pair with the "
+                "Trend-Gated Target Weights model at 50/25/25. BCI launched "
+                "in 2017, so a start before that drops it.",
+    },
     "Sixty-forty building blocks": {
         "classes": {
             "XIC.TO": "Equities",

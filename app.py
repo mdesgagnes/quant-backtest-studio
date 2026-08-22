@@ -969,11 +969,13 @@ core_spec, core_budget = "", 0.5
 if mode == "builtin":
     construction = st.sidebar.selectbox(
         "Portfolio construction", ["Single strategy", "By asset class",
-                                   "Core + strategy"],
+                                   "Core + strategy", "Blend of strategies"],
         help="\u201cBy asset class\u201d gives each class a fixed budget and "
              "runs the model inside each one, so it picks the best bonds "
              "among bonds. \u201cCore + strategy\u201d holds a fixed sleeve "
-             "permanently and runs the model on the rest.")
+             "permanently and runs the model on the rest. \u201cBlend of "
+             "strategies\u201d splits the book between several models, each "
+             "with its own budget and parameters.")
 
     if construction == "By asset class":
         with st.sidebar.expander("Asset classes", expanded=True):
@@ -1037,6 +1039,76 @@ if mode == "builtin":
             else:
                 st.markdown('<div class="flag">No valid holding parsed. Use '
                             'TICKER:WEIGHT.</div>', unsafe_allow_html=True)
+
+blend_sleeves: List[Dict[str, Any]] = []
+if mode == "builtin" and construction == "Blend of strategies":
+    with st.sidebar.expander("Strategy blend", expanded=True):
+        st.markdown('<div class="note">Each sleeve runs its own model over '
+                    'the whole universe with its own budget. Whatever a '
+                    'model leaves in cash stays inside its own sleeve.</div>',
+                    unsafe_allow_html=True)
+        n_sleeves = st.number_input("How many strategies", 2, 4, 2, 1,
+                                    key="nblend")
+        _pool = sorted(REGISTRY.keys(), key=lambda k: REGISTRY[k].label)
+        _even = round(100.0 / int(n_sleeves))
+        for i in range(int(n_sleeves)):
+            st.markdown(
+                f'<div class="eyebrow" style="margin:.8rem 0 .25rem;">'
+                f'Sleeve {i+1}</div>', unsafe_allow_html=True)
+            key_i = st.selectbox(
+                "Model", _pool,
+                index=min(i, len(_pool) - 1) if i else _pool.index(strat_key),
+                format_func=lambda k: REGISTRY[k].label, key=f"bl_model_{i}")
+            bud_i = st.number_input("Budget (%)", 0.0, 100.0, float(_even), 5.0,
+                                    key=f"bl_bud_{i}") / 100.0
+            strat_i = REGISTRY[key_i]
+            params_i: Dict[str, Any] = {}
+            with st.expander(f"{strat_i.label} parameters", expanded=False):
+                for sp in strat_i.params:
+                    wkey = f"bl_{i}_{key_i}_{sp.key}"
+                    if sp.kind == "int":
+                        params_i[sp.key] = st.slider(
+                            sp.label, int(sp.min), int(sp.max), int(sp.default),
+                            int(sp.step), help=sp.help or None, key=wkey)
+                    elif sp.kind == "float":
+                        params_i[sp.key] = st.slider(
+                            sp.label, float(sp.min), float(sp.max),
+                            float(sp.default), float(sp.step),
+                            help=sp.help or None, key=wkey)
+                    elif sp.kind == "bool":
+                        params_i[sp.key] = st.checkbox(
+                            sp.label, bool(sp.default), help=sp.help or None,
+                            key=wkey)
+                    elif sp.kind == "series":
+                        opts = exog_columns or ["\u2014 no series imported \u2014"]
+                        pick = st.selectbox(sp.label, opts, key=wkey)
+                        params_i[sp.key] = "" if pick.startswith("\u2014") else pick
+                    elif sp.kind == "formula":
+                        params_i[sp.key] = st.text_area(
+                            sp.label, str(sp.default or ""), height=70,
+                            help=sp.help or None, key=wkey)
+                    elif sp.kind == "choice" and sp.choices:
+                        opts = list(sp.choices)
+                        params_i[sp.key] = st.selectbox(
+                            sp.label, opts,
+                            index=opts.index(sp.default) if sp.default in opts else 0,
+                            help=sp.help or None, key=wkey)
+                    else:
+                        params_i[sp.key] = st.text_input(
+                            sp.label, str(sp.default or ""),
+                            help=sp.help or None, key=wkey)
+            if strat_i.needs_exog and not exog_columns:
+                st.markdown('<div class="flag">This model reads exogenous '
+                            'series; none is loaded, so it will hold '
+                            'nothing.</div>', unsafe_allow_html=True)
+            blend_sleeves.append({"key": key_i, "budget": bud_i,
+                                  "params": params_i,
+                                  "label": strat_i.label})
+        _tot = sum(b["budget"] for b in blend_sleeves)
+        _msg = (f'<div class="flag">Budgets total {_tot*100:.0f}%. The '
+                f'remainder stays in cash.</div>' if _tot < 0.999
+                else f'<div class="note">Budgets total {_tot*100:.0f}%.</div>')
+        st.markdown(_msg, unsafe_allow_html=True)
 
 params: Dict[str, Any] = {}
 for p in (strategy.params if mode == "builtin" else []):
@@ -1172,10 +1244,15 @@ run_clicked = st.sidebar.button("Run backtest")
 # ----------------------------------------------------------------------
 # Configuration assembly
 # ----------------------------------------------------------------------
-_suffix = {"By asset class": " by class",
-           "Core + strategy": " + core"}.get(construction, "")
-run_label = ((strategy.label + _suffix) if mode == "builtin"
-             else (f"Imported weights \u2014 {w_source}" if w_source else "Imported weights"))
+_suffix = {"By asset class": " by class", "Core + strategy": " + core",
+           "Blend of strategies": " blend"}.get(construction, "")
+_blend_label = (" + ".join(b["label"] for b in blend_sleeves)
+                if (mode == "builtin" and construction == "Blend of strategies"
+                    and blend_sleeves) else None)
+run_label = (_blend_label if _blend_label else
+             ((strategy.label + _suffix) if mode == "builtin"
+             else (f"Imported weights \u2014 {w_source}" if w_source
+                   else "Imported weights")))
 
 cfg = RunConfig(
     label=run_label,
@@ -1297,6 +1374,17 @@ if run_clicked and not blocking:
                     sleeves = ALLOC.sleeves_from_classes(
                         {t: c for t, c in class_map.items() if t in universe.columns},
                         class_budgets, strat_key, params)
+                    weights, sleeve_report = ALLOC.resolve(
+                        universe, sleeves, REGISTRY, exog_aligned,
+                        float(cfg.engine.max_leverage))
+                elif construction == "Blend of strategies" and blend_sleeves:
+                    sleeves = [
+                        ALLOC.Sleeve(
+                            f"{b['label']}", float(b["budget"]),
+                            list(universe.columns), mode="strategy",
+                            strategy_key=b["key"], params=dict(b["params"]))
+                        for b in blend_sleeves if b["budget"] > 1e-9
+                    ]
                     weights, sleeve_report = ALLOC.resolve(
                         universe, sleeves, REGISTRY, exog_aligned,
                         float(cfg.engine.max_leverage))

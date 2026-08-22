@@ -467,6 +467,22 @@ Preset universes arrive already tagged. A hand-typed universe comes back as
 a ticker would silently misallocate a budget, and being asked is better than
 being wrong.
 
+### Blend of strategies
+
+Split the book between two to four models, each with its own budget and its
+own parameters. A sleeve holds at most its share, and whatever its model
+leaves in cash stays inside that sleeve rather than being handed to the
+others -- so a defensive signal in one model cannot become extra risk in
+another.
+
+Blending is not free diversification. Two momentum models on the same
+universe will hold many of the same names at the same time, and the blend
+will look a lot like either one. The gain comes from models that disagree:
+a breakout system and a mean-reversion system, or models on different
+horizons. The correlation matrix in the Data tab and the fold table in
+Robustness are the places to check whether the blend is doing anything the
+parts were not.
+
 ### Core + strategy
 
 A fixed sleeve held permanently, and the model running on the rest. Set the
@@ -580,6 +596,27 @@ paper it names is worse than one that admits it.
 | Turtle Breakout (Donchian) | Buy a break to a new N-day high, exit on a break to an M-day low, size each position by its recent range so every holding carries similar risk. |
 | Time-Series Momentum (Moskowitz, Ooi & Pedersen) | Judge each instrument against itself rather than against the others, and scale positions to a common volatility. |
 | Accelerating Dual Momentum | Blend short, medium and long lookbacks instead of trusting one, with an absolute threshold that moves to cash when nothing clears it. |
+| Trend-Gated Target Weights (HIDE-style) | Fixed target weights per asset class, each independently gated by two trend signals worth half its allocation each: full weight, half weight, or cash. Never short. |
+
+### On the HIDE-style model
+
+Alpha Architect's HIDE holds 50% intermediate Treasuries, 25% REITs and 25%
+commodities, rebalances monthly on trend signals, and goes to cash rather
+than short. Its published material states the allocation and the three
+exposure states -- full risk, half risk, risk-off -- but **not the signal
+rules themselves**.
+
+Two binary signals worth half the weight each is what produces exactly those
+three states, and time-series momentum paired with a long moving average is
+the combination Alpha Architect uses in its published trend research. That
+is what this model implements, with both windows and the momentum threshold
+exposed as parameters rather than fixed.
+
+So: a faithful reconstruction of a documented *structure*, not a replica of
+the fund. It will not track HIDE's returns, and it is not meant to. The
+"HIDE target asset classes" preset loads SCHR, VNQ and BCI to pair with it;
+note BCI launched in 2017, so an earlier start date drops it from the
+universe.
 
 Two honest caveats. The Turtle rule sizes on average true range, which needs
 daily highs and lows; this app carries closes only, so the range is

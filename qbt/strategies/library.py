@@ -718,3 +718,88 @@ def _accelerating_momentum(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
     if p["sizing"] == "Inverse Volatility":
         return size_inverse_vol(mask, px, int(p["vol_window"]), slots=p["top_n"])
     return mask / float(p["top_n"])
+
+
+@register(
+    key="trend_gated_weights",
+    label="Trend-Gated Target Weights (HIDE-style)",
+    description="Fixed target weights per asset class, each independently "
+                "gated by trend signals. Two signals per asset, each worth "
+                "half its target: both positive gives the full weight, one "
+                "gives half, neither goes to cash. Never short. Modelled on "
+                "the published Alpha Architect approach used by HIDE "
+                "(50% intermediate Treasuries, 25% REITs, 25% commodities).",
+    params=[
+        Param("base_weights", "Target weights (e.g. SCHR:50, VNQ:25, BCI:25)",
+              "choice", "SCHR:50, VNQ:25, BCI:25", choices=[],
+              help="The full-risk allocation. Percentages or fractions; only "
+                   "the ratios matter. Leave blank to weight the universe "
+                   "equally."),
+        Param("signals", "Signals", "choice", "Both (half weight each)",
+              choices=["Both (half weight each)", "Absolute momentum only",
+                       "Moving average only"],
+              help="Two signals give the three states the fund describes: "
+                   "full risk, half risk, risk-off. A single signal gives "
+                   "only full or flat."),
+        Param("tmom_window", "Absolute Momentum Window (days)", "int", 252, 20, 504, 5,
+              help="12 months. The asset is held if its own trailing return "
+                   "clears the threshold."),
+        Param("tmom_threshold", "Momentum Threshold (%)", "float", 0.0, -20.0, 20.0, 0.5,
+              help="0 compares against a flat return. Raising it toward the "
+                   "cash rate makes the test an excess-return test, which is "
+                   "the stricter and more common academic form."),
+        Param("ma_window", "Moving Average Window (days)", "int", 252, 20, 504, 5,
+              help="12 months. The asset is held while its price is above "
+                   "this average."),
+        Param("gross", "Gross Exposure at Full Risk", "float", 1.0, 0.1, 1.0, 0.05),
+    ],
+)
+def _trend_gated_weights(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    """Target weights gated per asset by trend.
+
+    The published material describes the allocation (50/25/25) and the three
+    exposure states, but not the signal rules themselves. Two binary signals
+    of half weight each is what produces exactly those three states, and
+    time-series momentum plus a long moving average is the pair Alpha
+    Architect uses in its published trend work. Both windows and the
+    threshold are exposed here rather than fixed, because this is a
+    reconstruction of a documented structure, not a copy of the fund.
+    """
+    spec = str(p.get("base_weights") or "").strip()
+    base = pd.Series(0.0, index=px.columns, dtype=float)
+    if spec:
+        for part in spec.replace(";", ",").replace("\n", ",").split(","):
+            token = part.replace(":", " ").replace("=", " ").split()
+            if len(token) < 2:
+                continue
+            key = token[0].strip().upper()
+            match = next((c for c in px.columns if str(c).upper() == key), None)
+            if match is None:
+                continue
+            try:
+                base[match] = abs(float(token[1].replace("%", "")))
+            except ValueError:
+                continue
+    if base.sum() <= 0:
+        base = pd.Series(1.0, index=px.columns, dtype=float)
+    base = base / base.sum() * float(p["gross"])
+
+    mode = p["signals"]
+    tmom = (px / px.shift(int(p["tmom_window"])) - 1.0) > float(p["tmom_threshold"]) / 100.0
+    above = px > sma(px, int(p["ma_window"]))
+
+    # A signal is only usable once its window has enough history; until then
+    # the asset scores zero rather than defaulting to "invested".
+    tmom_ok = px.shift(int(p["tmom_window"])).notna()
+    ma_ok = sma(px, int(p["ma_window"])).notna()
+
+    if mode == "Absolute momentum only":
+        score = tmom.where(tmom_ok).astype(float)
+    elif mode == "Moving average only":
+        score = above.where(ma_ok).astype(float)
+    else:
+        score = (tmom.where(tmom_ok).astype(float).fillna(0.0)
+                 + above.where(ma_ok).astype(float).fillna(0.0)) / 2.0
+        score = score.where(tmom_ok | ma_ok)
+
+    return (score.fillna(0.0) * base).where(px.notna(), 0.0)
