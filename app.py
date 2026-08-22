@@ -836,8 +836,14 @@ if source == "Yahoo Finance":
 else:
     adjusted, use_divs = True, False
 
-cash_choices = ["Fixed rate"] + univ_options
+# The cash proxy need not be part of the investable universe -- it usually
+# should not be, or the strategy could buy it as a position. Preset cash
+# tickers are therefore offered here even when absent from the universe,
+# and downloaded alongside it.
 _pc = st.session_state.get("_preset_cash")
+cash_choices = ["Fixed rate"] + univ_options
+if _pc and _pc not in cash_choices:
+    cash_choices.append(_pc)
 _cash_idx = cash_choices.index(_pc) if _pc in cash_choices else 0
 cash_proxy = st.sidebar.selectbox("Cash remuneration", cash_choices,
                                   index=_cash_idx,
@@ -1353,6 +1359,18 @@ if run_clicked and not blocking:
             exog_aligned = prepare_exog(exog_raw, universe.index, exog_lag)
             ex_rep = exog_report(exog_raw, exog_aligned, exog_lag, universe.index)
 
+        # The cash series strategies compare against. A proxy ETF when one
+        # is selected, otherwise a series compounding the fixed rate, so an
+        # excess-return test still has something real to measure against.
+        if cash_px is not None:
+            cash_series = cash_px
+        elif float(cfg.costs.cash_rate_pa) != 0.0:
+            cash_series = pd.Series(
+                100.0 * (1.0 + float(cfg.costs.cash_rate_pa) / 252.0)
+                ** np.arange(len(universe.index)), index=universe.index)
+        else:
+            cash_series = None
+
         w_report, rebal_dates, sleeve_report = None, None, None
         with st.spinner("Generating signals and running simulation..."):
             if mode == "external_weights":
@@ -1376,7 +1394,7 @@ if run_clicked and not blocking:
                         class_budgets, strat_key, params)
                     weights, sleeve_report = ALLOC.resolve(
                         universe, sleeves, REGISTRY, exog_aligned,
-                        float(cfg.engine.max_leverage))
+                        float(cfg.engine.max_leverage), cash=cash_series)
                 elif construction == "Blend of strategies" and blend_sleeves:
                     sleeves = [
                         ALLOC.Sleeve(
@@ -1387,7 +1405,7 @@ if run_clicked and not blocking:
                     ]
                     weights, sleeve_report = ALLOC.resolve(
                         universe, sleeves, REGISTRY, exog_aligned,
-                        float(cfg.engine.max_leverage))
+                        float(cfg.engine.max_leverage), cash=cash_series)
                 elif construction == "Core + strategy":
                     core = ALLOC.parse_fixed(core_spec, list(universe.columns))
                     sleeves = []
@@ -1411,9 +1429,10 @@ if run_clicked and not blocking:
                                 params=dict(params)))
                     weights, sleeve_report = ALLOC.resolve(
                         universe, sleeves, REGISTRY, exog_aligned,
-                        float(cfg.engine.max_leverage))
+                        float(cfg.engine.max_leverage), cash=cash_series)
                 else:
-                    weights = strategy.generate(universe, params, exog_aligned)
+                    weights = strategy.generate(universe, params, exog_aligned,
+                                                cash_series)
 
             cols = list(universe.columns)
             open_px = None
@@ -1500,6 +1519,7 @@ if run_clicked and not blocking:
             "weights_report": w_report, "rebalance_dates": rebal_dates,
             "weights": weights,
             "sleeves": sleeve_report,
+            "cash_series": cash_series,
             "construction": construction,
             "market": market,
             "bench_mode": bench_mode,
@@ -1825,8 +1845,9 @@ with tabs[2]:
     strategy_obj = None if is_external else REGISTRY[run["strategy_key"]]
     params_run = run["params"]
     fixed_w = run["weights"] if is_external else None
-    kw = dict(cash_prices=run["cash"], exog=exog_used,
-              weights=fixed_w, rebalance_dates=run_rebal)
+    kw = dict(cash_prices=run.get("cash_series") if run.get("cash_series")
+              is not None else run["cash"],
+              exog=exog_used, weights=fixed_w, rebalance_dates=run_rebal)
 
     eyebrow("1. Stability over time")
     n_folds = st.slider("Number of folds", 3, 10, 5, key="wf")

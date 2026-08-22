@@ -57,16 +57,33 @@ class Strategy:
         series. Others keep the two-argument signature."""
         return len(inspect.signature(self.fn).parameters) >= 3
 
+    @property
+    def needs_cash(self) -> bool:
+        """A strategy that declares a `cash` argument wants the cash proxy.
+
+        Comparing an asset against cash is not the same as comparing it
+        against zero, and the gap is not small: with cash at 4%, an asset
+        that returned 2% is up in absolute terms and down against the
+        alternative of holding the bill. Strategies that make that
+        comparison need the cash series itself, not a number typed once.
+        """
+        return "cash" in inspect.signature(self.fn).parameters
+
     def generate(self, prices: pd.DataFrame,
                  params: Dict[str, Any] | None = None,
-                 exog: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+                 exog: Optional[pd.DataFrame] = None,
+                 cash: Optional[pd.Series] = None) -> pd.DataFrame:
         p = self.defaults()
         p.update(params or {})
+        kwargs = {}
+        if self.needs_cash:
+            kwargs["cash"] = (cash.reindex(prices.index)
+                              if cash is not None else None)
         if self.needs_exog:
             e = exog if exog is not None else pd.DataFrame(index=prices.index)
-            w = self.fn(prices, p, e.reindex(prices.index))
+            w = self.fn(prices, p, e.reindex(prices.index), **kwargs)
         else:
-            w = self.fn(prices, p)
+            w = self.fn(prices, p, **kwargs)
         return sanitize_weights(w, prices)
 
 

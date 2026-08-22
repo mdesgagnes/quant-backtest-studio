@@ -609,8 +609,21 @@ rules themselves**.
 Two binary signals worth half the weight each is what produces exactly those
 three states, and time-series momentum paired with a long moving average is
 the combination Alpha Architect uses in its published trend research. That
-is what this model implements, with both windows and the momentum threshold
-exposed as parameters rather than fixed.
+is what this model implements, with both windows exposed as parameters.
+
+**The momentum leg is an excess-return test.** The asset must beat cash over
+the same window, not merely rise. This is not a refinement. Through 2010-21
+cash paid almost nothing and the two tests are indistinguishable; through
+2022-24 cash paid four to five percent, and an asset up three percent passes
+the absolute test while failing the excess one. A threshold typed in once is
+a guess at a number that moves through a rate cycle, which is exactly when a
+defensive strategy is being asked to earn its keep.
+
+The comparison is made against the **cash proxy** selected under Data --
+BIL in the HIDE preset. Set no proxy and the model falls back to the fixed
+cash rate; the comparison can also be set to zero or to a fixed rate
+explicitly, which is worth running once alongside the default just to see
+how much the choice moves the result.
 
 So: a faithful reconstruction of a documented *structure*, not a replica of
 the fund. It will not track HIDE's returns, and it is not meant to. The

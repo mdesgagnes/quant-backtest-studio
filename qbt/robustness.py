@@ -20,11 +20,11 @@ from . import metrics as M
 RunFn = Callable[[pd.DataFrame, Dict[str, Any], EngineConfig, CostConfig], BacktestResult]
 
 
-def _weights_for(strategy, prices, params, exog, weights):
+def _weights_for(strategy, prices, params, exog, weights, cash=None):
     """Weights supplied directly (imported mode) or produced by the strategy."""
     if weights is not None:
         return weights
-    return strategy.generate(prices, params, exog)
+    return strategy.generate(prices, params, exog, cash)
 
 
 def fold_stats(returns: pd.Series, n_folds: int, ppy: int) -> pd.DataFrame:
@@ -79,7 +79,7 @@ def parameter_sweep(prices: pd.DataFrame, strategy, base_params: Dict[str, Any],
         p = dict(base_params)
         p.update(dict(zip(keys, combo)))
         try:
-            w = strategy.generate(prices, p, exog)
+            w = strategy.generate(prices, p, exog, cash_prices)
             res = run_backtest(prices, w, engine, costs, cash_prices)
             row = dict(zip(keys, combo))
             row.update(_stats(res, engine.periods_per_year))
@@ -106,7 +106,7 @@ def walk_forward(prices: pd.DataFrame, strategy, params: Dict[str, Any],
     re-optimization. A sharp gap between folds signals a dependency on
     market regime.
     """
-    w = _weights_for(strategy, prices, params, exog, weights)
+    w = _weights_for(strategy, prices, params, exog, weights, cash_prices)
     res = run_backtest(prices, w, engine, costs, cash_prices,
                        rebalance_dates=rebalance_dates)
     return fold_stats(res.returns, n_folds, engine.periods_per_year)
@@ -119,7 +119,7 @@ def in_out_sample(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                   weights: Optional[pd.DataFrame] = None,
                   rebalance_dates=None) -> pd.DataFrame:
     """Compares the first portion of the history to the last."""
-    w = _weights_for(strategy, prices, params, exog, weights)
+    w = _weights_for(strategy, prices, params, exog, weights, cash_prices)
     res = run_backtest(prices, w, engine, costs, cash_prices,
                        rebalance_dates=rebalance_dates)
     cut = int(len(res.returns) * split)
@@ -149,7 +149,7 @@ def cost_sensitivity(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                      rebalance_dates=None) -> pd.DataFrame:
     """At what level of frictions does the strategy stop paying off?"""
     levels = levels_bps or [0, 5, 10, 20, 30, 50, 75, 100]
-    w = _weights_for(strategy, prices, params, exog, weights)
+    w = _weights_for(strategy, prices, params, exog, weights, cash_prices)
     rows = []
     for lv in levels:
         c = CostConfig(commission_bps=0.0, slippage_bps=float(lv),
@@ -291,7 +291,8 @@ def rebalance_day_sweep(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                        day_of_month=spec.day_of_month, weekday=spec.weekday,
                        nth=spec.nth, anchor_month=spec.anchor_month)
         try:
-            w = weights if weights is not None else strategy.generate(prices, params, exog)
+            w = (weights if weights is not None
+                 else strategy.generate(prices, params, exog, cash_prices))
             res = run_backtest(prices, w, eng, costs, cash_prices)
             row = {"Trading day": spec.label()}
             row.update(_stats(res, engine.periods_per_year))

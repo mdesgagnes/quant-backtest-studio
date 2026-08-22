@@ -76,7 +76,8 @@ def _fixed_frame(sleeve: Sleeve, index: pd.DatetimeIndex,
 
 def _strategy_frame(sleeve: Sleeve, prices: pd.DataFrame,
                     registry: Dict[str, Any],
-                    exog: Optional[pd.DataFrame]) -> pd.DataFrame:
+                    exog: Optional[pd.DataFrame],
+                    cash: Optional[pd.Series] = None) -> pd.DataFrame:
     """Runs the sleeve's model over its own members only.
 
     The model sees a universe of just this sleeve's instruments, so a
@@ -91,7 +92,7 @@ def _strategy_frame(sleeve: Sleeve, prices: pd.DataFrame,
     strat = registry[sleeve.strategy_key]
     sub = prices[members]
     sub_exog = exog if (exog is not None and not exog.empty) else None
-    w = strat.generate(sub, sleeve.params, sub_exog)
+    w = strat.generate(sub, sleeve.params, sub_exog, cash)
 
     # The model spends a budget of 1 inside its own universe; scale that to
     # the sleeve's share. Whatever it left in cash stays in cash.
@@ -106,7 +107,8 @@ def _strategy_frame(sleeve: Sleeve, prices: pd.DataFrame,
 def resolve(prices: pd.DataFrame, sleeves: List[Sleeve],
             registry: Dict[str, Any],
             exog: Optional[pd.DataFrame] = None,
-            max_leverage: float = 1.0) -> Tuple[pd.DataFrame, SleeveReport]:
+            max_leverage: float = 1.0,
+            cash: Optional[pd.Series] = None) -> Tuple[pd.DataFrame, SleeveReport]:
     """Turns sleeves into one target-weight frame, plus a report.
 
     The output is an ordinary weight frame; nothing downstream can tell it
@@ -155,7 +157,7 @@ def resolve(prices: pd.DataFrame, sleeves: List[Sleeve],
             if len(s.fixed) > 4:
                 detail += f", +{len(s.fixed)-4} more"
         else:
-            f = _strategy_frame(s, prices, registry, exog)
+            f = _strategy_frame(s, prices, registry, exog, cash)
             detail = registry[s.strategy_key].label if s.strategy_key in registry \
                 else "\u2014"
             if s.strategy_key not in registry:

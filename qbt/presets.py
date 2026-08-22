@@ -126,11 +126,13 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
             "BCI": "Real assets",
         },
         "benchmark": "SCHR",
-        "cash": None,
+        "cash": "BIL",
         "note": "The three asset classes behind Alpha Architect's HIDE: "
-                "intermediate Treasuries, REITs, commodities. Pair with the "
-                "Trend-Gated Target Weights model at 50/25/25. BCI launched "
-                "in 2017, so a start before that drops it.",
+                "intermediate Treasuries, REITs, commodities, with BIL as "
+                "the cash leg. Pair with the Trend-Gated Target Weights "
+                "model at 50/25/25; its momentum test measures each class "
+                "against BIL. BCI launched in 2017, so an earlier start "
+                "drops it.",
     },
     "Sixty-forty building blocks": {
         "classes": {

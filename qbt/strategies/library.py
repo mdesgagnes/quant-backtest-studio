@@ -741,29 +741,44 @@ def _accelerating_momentum(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
               help="Two signals give the three states the fund describes: "
                    "full risk, half risk, risk-off. A single signal gives "
                    "only full or flat."),
+        Param("benchmark_rate", "Momentum measured against",
+              "choice", "Cash proxy (excess return)",
+              choices=["Cash proxy (excess return)", "Zero (absolute return)",
+                       "Fixed rate"],
+              help="The published test is an excess-return test: the asset "
+                   "must beat the bill over the same window, not merely rise. "
+                   "With cash at 4%, an asset up 2% has lost against the "
+                   "alternative of holding cash, and the two tests disagree."),
+        Param("fixed_rate", "Fixed rate (% per year)", "float", 0.0, 0.0, 15.0, 0.25,
+              help="Only used when the comparison above is set to a fixed "
+                   "rate. A single number cannot follow a rate cycle, which "
+                   "is why the cash proxy is the default."),
         Param("tmom_window", "Absolute Momentum Window (days)", "int", 252, 20, 504, 5,
-              help="12 months. The asset is held if its own trailing return "
-                   "clears the threshold."),
-        Param("tmom_threshold", "Momentum Threshold (%)", "float", 0.0, -20.0, 20.0, 0.5,
-              help="0 compares against a flat return. Raising it toward the "
-                   "cash rate makes the test an excess-return test, which is "
-                   "the stricter and more common academic form."),
+              help="12 months. The asset is held if its return over this "
+                   "window beats the comparison above."),
         Param("ma_window", "Moving Average Window (days)", "int", 252, 20, 504, 5,
               help="12 months. The asset is held while its price is above "
                    "this average."),
         Param("gross", "Gross Exposure at Full Risk", "float", 1.0, 0.1, 1.0, 0.05),
     ],
 )
-def _trend_gated_weights(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+def _trend_gated_weights(px: pd.DataFrame, p: Dict[str, Any],
+                         ex: pd.DataFrame, cash: pd.Series = None) -> pd.DataFrame:
     """Target weights gated per asset by trend.
 
     The published material describes the allocation (50/25/25) and the three
     exposure states, but not the signal rules themselves. Two binary signals
     of half weight each is what produces exactly those three states, and
-    time-series momentum plus a long moving average is the pair Alpha
-    Architect uses in its published trend work. Both windows and the
-    threshold are exposed here rather than fixed, because this is a
-    reconstruction of a documented structure, not a copy of the fund.
+    time-series momentum against the risk-free rate paired with a long
+    moving average is the combination Alpha Architect uses in its published
+    trend work.
+
+    The momentum leg is an **excess** return test by default: the asset must
+    beat cash over the same window. That is not a refinement. Through 2010-21
+    cash paid almost nothing and the test is indistinguishable from "did it
+    rise"; through 2022-24 cash paid 4-5%, and an asset up 3% passes the
+    absolute test while failing the excess one. Any fixed threshold typed in
+    once is a guess at a number that moves.
     """
     spec = str(p.get("base_weights") or "").strip()
     base = pd.Series(0.0, index=px.columns, dtype=float)
@@ -784,15 +799,30 @@ def _trend_gated_weights(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
         base = pd.Series(1.0, index=px.columns, dtype=float)
     base = base / base.sum() * float(p["gross"])
 
-    mode = p["signals"]
-    tmom = (px / px.shift(int(p["tmom_window"])) - 1.0) > float(p["tmom_threshold"]) / 100.0
+    n = int(p["tmom_window"])
+    asset_ret = px / px.shift(n) - 1.0
+
+    # What the asset has to beat, over the same window.
+    mode_rate = p.get("benchmark_rate", "Cash proxy (excess return)")
+    if mode_rate.startswith("Cash proxy") and cash is not None:
+        c = pd.to_numeric(cash, errors="coerce").reindex(px.index).ffill()
+        hurdle = (c / c.shift(n) - 1.0)
+        hurdle = pd.DataFrame({col: hurdle for col in px.columns})
+    elif mode_rate.startswith("Fixed"):
+        per_period = (1.0 + float(p["fixed_rate"]) / 100.0) ** (n / 252.0) - 1.0
+        hurdle = pd.DataFrame(per_period, index=px.index, columns=px.columns)
+    else:
+        hurdle = pd.DataFrame(0.0, index=px.index, columns=px.columns)
+
+    tmom = asset_ret > hurdle
     above = px > sma(px, int(p["ma_window"]))
 
-    # A signal is only usable once its window has enough history; until then
-    # the asset scores zero rather than defaulting to "invested".
-    tmom_ok = px.shift(int(p["tmom_window"])).notna()
+    # A signal is only usable once its window has enough history, and the
+    # excess test additionally needs the cash series to reach back that far.
+    tmom_ok = px.shift(n).notna() & hurdle.notna()
     ma_ok = sma(px, int(p["ma_window"])).notna()
 
+    mode = p["signals"]
     if mode == "Absolute momentum only":
         score = tmom.where(tmom_ok).astype(float)
     elif mode == "Moving average only":
