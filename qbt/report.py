@@ -21,60 +21,62 @@ import pandas as pd
 
 from . import charts as C
 from . import metrics as M
+from .brand import BRAND
 from .config import RunConfig, REBALANCE_RULES
 from .engine import BacktestResult
 
-CSS = """
+CSS = ("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
   :root{
-    --ink:#1B2430; --muted:#6B7684; --rule:#DDE2E8; --panel:#F7F8FA;
-    --brass:#A9791E; --teal:#2E7A6E; --rust:#A2432F;
+    --ink:""" + BRAND["text"] + """; --muted:""" + BRAND["muted"] + """;
+    --rule:""" + BRAND["rule"] + """; --panel:""" + BRAND["panel"] + """;
+    --red:""" + BRAND["red"] + """; --sand:""" + BRAND["sand_light"] + """;
+    --gain:""" + BRAND["gain"] + """; --loss:""" + BRAND["loss"] + """;
   }
   *{box-sizing:border-box;}
   body{
     margin:0; padding:2.2rem 2.6rem 3rem; background:#fff; color:var(--ink);
-    font-family:'IBM Plex Sans',Arial,sans-serif; font-size:13px; line-height:1.5;
+    font-family:'Inter',Arial,sans-serif; font-size:13px; line-height:1.55;
     max-width:1080px; margin-left:auto; margin-right:auto;
+    font-variant-numeric:tabular-nums;
   }
-  .masthead{border-bottom:2px solid var(--ink); padding-bottom:.9rem; margin-bottom:1.4rem;
+  .masthead{border-bottom:2px solid var(--red); padding-bottom:.9rem; margin-bottom:1.4rem;
     display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:.5rem;}
-  .masthead h1{font-family:'IBM Plex Sans Condensed',sans-serif; font-weight:700;
-    font-size:1.5rem; letter-spacing:-.01em; margin:0;}
+  .masthead h1{font-weight:700; font-size:1.5rem; letter-spacing:-.025em; margin:0;}
   .masthead .meta{font-family:'IBM Plex Mono',monospace; font-size:.72rem;
     color:var(--muted); text-align:right; line-height:1.6;}
-  .eyebrow{font-family:'IBM Plex Mono',monospace; font-size:.68rem; letter-spacing:.14em;
-    text-transform:uppercase; color:var(--muted); margin:1.6rem 0 .6rem;
+  .eyebrow{font-family:'IBM Plex Mono',monospace; font-size:.66rem; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--muted); margin:1.6rem 0 .6rem; font-weight:600;
     border-top:1px solid var(--rule); padding-top:.9rem;}
   .eyebrow:first-of-type{border-top:none; margin-top:0;}
   .kpi-grid{display:grid; grid-template-columns:repeat(6,1fr); gap:.6rem;}
-  .kpi{background:var(--panel); border:1px solid var(--rule); border-left:3px solid var(--brass);
-    padding:.55rem .65rem;}
-  .kpi .k{font-family:'IBM Plex Mono',monospace; font-size:.6rem; letter-spacing:.08em;
-    text-transform:uppercase; color:var(--muted); display:block; margin-bottom:.25rem;}
+  .kpi{background:var(--panel); border:1px solid var(--rule); border-top:2px solid var(--red);
+    padding:.6rem .7rem; border-radius:2px;}
+  .kpi .k{font-family:'IBM Plex Mono',monospace; font-size:.58rem; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--muted); display:block; margin-bottom:.28rem; font-weight:600;}
   .kpi .v{font-family:'IBM Plex Mono',monospace; font-size:1.05rem; font-weight:600;}
-  .kpi .b{font-family:'IBM Plex Mono',monospace; font-size:.62rem; color:var(--muted); margin-top:.15rem;}
+  .kpi .b{font-family:'IBM Plex Mono',monospace; font-size:.6rem; color:var(--muted); margin-top:.16rem;}
   table{border-collapse:collapse; width:100%; font-size:.78rem;}
-  th,td{border-bottom:1px solid var(--rule); padding:.32rem .5rem; text-align:right;}
+  th,td{border-bottom:1px solid var(--rule); padding:.34rem .5rem; text-align:right;}
   th:first-child,td:first-child{text-align:left;}
-  th{font-family:'IBM Plex Mono',monospace; font-size:.62rem; letter-spacing:.06em;
-    text-transform:uppercase; color:var(--muted); font-weight:600;}
+  th{font-family:'IBM Plex Mono',monospace; font-size:.6rem; letter-spacing:.06em;
+    text-transform:uppercase; color:var(--muted); font-weight:600; background:var(--panel);}
   td{font-family:'IBM Plex Mono',monospace;}
   .note{color:var(--muted); font-size:.78rem; margin:.3rem 0 .8rem;}
   .two-col{display:grid; grid-template-columns:1fr 1fr; gap:1.4rem;}
-  .chart{border:1px solid var(--rule); padding:.4rem; margin-bottom:.9rem;}
+  .chart{border:1px solid var(--rule); border-radius:2px; padding:.4rem; margin-bottom:.9rem;}
   .footer{margin-top:2rem; padding-top:1rem; border-top:1px solid var(--rule);
     font-size:.72rem; color:var(--muted);}
-  .assumptions{font-family:'IBM Plex Mono',monospace; font-size:.72rem; color:var(--muted);
-    line-height:1.8;}
+  .assumptions{font-family:'IBM Plex Mono',monospace; font-size:.7rem; color:var(--muted);
+    line-height:1.85; background:var(--sand); padding:.6rem .8rem; border-radius:2px;}
   @media print{
     body{padding:0 .3in;}
-    .chart{break-inside:avoid;}
-    .kpi-grid{break-inside:avoid;}
+    .chart{break-inside:avoid;} .kpi-grid{break-inside:avoid;}
     a{color:inherit; text-decoration:none;}
   }
 </style>
-"""
+""")
 
 
 def _esc(x: Any) -> str:

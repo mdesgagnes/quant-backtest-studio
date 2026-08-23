@@ -17,38 +17,26 @@ import plotly.graph_objects as go
 
 from . import metrics as M
 
+from .brand import BRAND, SERIES
+
+# Every colour comes from qbt/brand.py. Correcting the three brand values
+# there restyles the interface, the charts and the exported report together.
 PALETTE = {
-    "ink": "#0E1116",
-    "panel": "#161B22",
-    "rule": "#2A323D",
-    "text": "#E3E8EF",
-    "muted": "#7D8A9C",
-    "brass": "#C9A227",
-    "teal": "#4C9A8F",
-    "rust": "#B4553F",
-    "slate": "#5B6B80",
+    "ink": BRAND["bg"],
+    "panel": BRAND["panel"],
+    "rule": BRAND["rule"],
+    "text": BRAND["text"],
+    "muted": BRAND["muted"],
+    "brass": BRAND["red"],
+    "teal": BRAND["gain"],
+    "rust": BRAND["loss"],
+    "slate": "#3F3A34",
 }
+PALETTE_PRINT = dict(PALETTE, ink="#FFFFFF", panel="#FFFFFF")
+SERIES_COLORS = list(SERIES)
+SERIES_COLORS_PRINT = list(SERIES)
 
-PALETTE_PRINT = {
-    "ink": "#FFFFFF",
-    "panel": "#FFFFFF",
-    "rule": "#DDE2E8",
-    "text": "#1B2430",
-    "muted": "#6B7684",
-    "brass": "#A9791E",
-    "teal": "#2E7A6E",
-    "rust": "#A2432F",
-    "slate": "#4E5C6E",
-}
-
-SERIES_COLORS = [PALETTE["brass"], PALETTE["teal"], PALETTE["slate"],
-                 PALETTE["rust"], "#8E7CC3", "#D08C4E", "#6FA8C7"]
-
-SERIES_COLORS_PRINT = [PALETTE_PRINT["brass"], PALETTE_PRINT["teal"],
-                       PALETTE_PRINT["slate"], PALETTE_PRINT["rust"],
-                       "#6E5FA3", "#B06E30", "#3E7FA0"]
-
-FONT = "IBM Plex Sans, Segoe UI, sans-serif"
+FONT = "Inter, Segoe UI, Helvetica Neue, sans-serif"
 MONO = "IBM Plex Mono, SFMono-Regular, Consolas, monospace"
 
 
@@ -59,9 +47,10 @@ def _colors(theme: str):
 def _base(fig: go.Figure, height: int = 380, title: str = "", theme: str = "dark") -> go.Figure:
     pal, _ = _colors(theme)
     fig.update_layout(
-        template="plotly_white" if theme == "print" else "plotly_dark",
+        template="plotly_white",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
+        colorway=SERIES_COLORS,
         font=dict(family=FONT, size=12, color=pal["text"]),
         title=dict(text=title, font=dict(family=FONT, size=14,
                                          color=pal["muted"]), x=0, xanchor="left"),
@@ -115,7 +104,7 @@ def underwater(equities: Dict[str, pd.Series],
             x=dd.index, y=dd, name=name, mode="lines",
             line=dict(color=color, width=1.4),
             fill="tozeroy" if i == 0 else None,
-            fillcolor="rgba(180,85,63,0.22)",
+            fillcolor="rgba(179,50,43,0.12)",
             hovertemplate="%{y:.2f}%<extra>" + name + "</extra>",
         ))
     _base(fig, 260, title, theme)
@@ -216,7 +205,7 @@ def monte_carlo_fan(bands: pd.DataFrame, actual: pd.Series,
                                  line=dict(width=0), showlegend=False))
         fig.add_trace(go.Scatter(x=bands.index, y=bands["p5"], name="5th-95th percentile",
                                  line=dict(width=0), fill="tonexty",
-                                 fillcolor="rgba(76,154,143,0.18)"))
+                                 fillcolor="rgba(201,184,150,0.30)"))
         fig.add_trace(go.Scatter(x=bands.index, y=bands["p50"], name="Simulated median",
                                  line=dict(color=pal["teal"], width=1.4, dash="dot")))
     base = actual / actual.iloc[0]
