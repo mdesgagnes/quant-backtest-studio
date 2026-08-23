@@ -6,6 +6,8 @@ Deployment:    see README.md
 from __future__ import annotations
 
 import io
+import json
+from dataclasses import asdict
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
@@ -35,6 +37,8 @@ from qbt import excel_export as XL
 from qbt import allocation as ALLOC
 from qbt import schedule as SCHED
 from qbt.brand import BRAND, css_variables
+from qbt import store as STORE
+from qbt import rules as RULES
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -60,8 +64,8 @@ CSS = ("""
   --slate:#3F3A34;
   --sans:'Inter',-apple-system,Segoe UI,sans-serif;
   --mono:'IBM Plex Mono',SFMono-Regular,Consolas,monospace;
-  --shadow:0 1px 2px rgba(26,26,26,.06), 0 1px 3px rgba(26,26,26,.04);
-  --shadow-lift:0 2px 8px rgba(26,26,26,.10), 0 1px 3px rgba(26,26,26,.05);
+  --shadow:0 1px 2px rgba(0,0,0,.35);
+  --shadow-lift:0 3px 10px rgba(0,0,0,.45);
 }
 
 html, body, [class*="css"]{ font-family:var(--sans); color:var(--ink); }
@@ -78,7 +82,7 @@ section[data-testid="stSidebar"]{
   background:var(--panel); border-right:1px solid var(--rule); }
 section[data-testid="stSidebar"] > div{ padding-top:.6rem; }
 section[data-testid="stSidebar"] label p{
-  font-size:.79rem !important; font-weight:500; color:#3D4A57 !important; }
+  font-size:.79rem !important; font-weight:500; color:#C4BDB1 !important; }
 section[data-testid="stSidebar"] .stSlider,
 section[data-testid="stSidebar"] .stSelectbox,
 section[data-testid="stSidebar"] .stNumberInput,
@@ -119,7 +123,7 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
   border-top:2px solid var(--nb-black); border-radius:3px;
   padding:.7rem .85rem; height:100%; box-shadow:var(--shadow);
   transition:box-shadow .16s ease, transform .16s ease; }
-.dial:hover{ box-shadow:var(--shadow-lift); transform:translateY(-1px); }
+.dial:hover{ background:#232320; box-shadow:var(--shadow-lift); transform:translateY(-1px); }
 .dial .k{
   font-family:var(--mono); font-size:.6rem; letter-spacing:.1em;
   text-transform:uppercase; color:var(--faint); display:block;
@@ -139,14 +143,14 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
   color:var(--muted); font-size:.83rem; line-height:1.6; }
 .flag{
   background:var(--nb-red-wash); border-left:2px solid var(--nb-red);
-  border-radius:0 2px 2px 0; padding:.5rem .8rem; color:var(--nb-red-dark);
+  border-radius:0 2px 2px 0; padding:.5rem .8rem; color:#F2A6A2;
   font-size:.81rem; line-height:1.55; margin:.35rem 0; }
 
 /* ---------------- Run context strip ---------------- */
 .runbar{
   display:flex; flex-wrap:wrap; gap:.2rem 1.7rem; align-items:baseline;
-  background:var(--nb-sand-light); border:1px solid var(--nb-sand-dark);
-  border-radius:3px;
+  background:var(--panel); border:1px solid var(--rule);
+  border-left:3px solid var(--nb-red); border-radius:3px;
   padding:.55rem .9rem; margin:.35rem 0 .2rem; }
 .runbar .item{ font-family:var(--mono); font-size:.72rem; color:var(--muted); }
 .runbar .item b{ color:var(--ink); font-weight:600; }
@@ -158,7 +162,7 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
 .stTabs [data-baseweb="tab-list"]{
   gap:.35rem; border-bottom:1px solid var(--rule);
   position:sticky; top:0; z-index:99;
-  background:rgba(255,255,255,.95); backdrop-filter:blur(8px);
+  background:rgba(15,15,14,.94); backdrop-filter:blur(8px);
   padding-top:.4rem; }
 .stTabs [data-baseweb="tab"]{
   font-family:var(--sans); font-size:.79rem; font-weight:600;
@@ -181,10 +185,11 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
   color:#fff; box-shadow:var(--shadow-lift); }
 .stButton>button:active{ transform:translateY(1px); }
 .stDownloadButton>button{
-  background:#fff; color:var(--slate); border:1px solid var(--rule);
-  font-weight:500; }
+  background:transparent; color:var(--nb-sand-dark);
+  border:1px solid var(--rule); font-weight:500; }
 .stDownloadButton>button:hover{
-  background:var(--panel); border-color:var(--slate); color:var(--slate); }
+  background:var(--panel); border-color:var(--nb-sand-dark);
+  color:var(--nb-sand); }
 
 :focus-visible{ outline:2px solid var(--nb-red) !important; outline-offset:2px !important; }
 
@@ -192,7 +197,7 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
 [data-baseweb="select"] > div, .stTextInput input, .stNumberInput input,
 .stTextArea textarea{
   border-radius:3px !important; border-color:var(--rule) !important;
-  font-size:.84rem !important; }
+  background:var(--panel) !important; font-size:.84rem !important; }
 [data-baseweb="select"] > div:focus-within, .stTextInput input:focus,
 .stTextArea textarea:focus{ border-color:var(--nb-red) !important; }
 .stSlider [data-baseweb="slider"] [role="slider"]{ background:var(--nb-red) !important; }
@@ -208,21 +213,21 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
 
 /* ---------------- Charts ---------------- */
 .js-plotly-plot{
-  border:1px solid var(--rule); border-radius:3px; background:#fff;
+  border:1px solid var(--rule); border-radius:3px; background:var(--panel);
   box-shadow:var(--shadow); padding:.3rem; }
 
 /* ---------------- Expanders ---------------- */
 [data-testid="stExpander"]{
-  border:1px solid var(--rule); border-radius:3px; background:#fff;
+  border:1px solid var(--rule); border-radius:3px; background:var(--panel);
   box-shadow:var(--shadow); }
 [data-testid="stExpander"] summary{
   font-family:var(--sans); font-size:.82rem; font-weight:600;
-  color:var(--slate); }
+  color:var(--nb-sand-dark); }
 [data-testid="stExpander"] summary:hover{ color:var(--nb-red); }
 
 /* ---------------- Cards ---------------- */
 .startcard{
-  background:#fff; border:1px solid var(--rule);
+  background:var(--panel); border:1px solid var(--rule);
   border-top:2px solid var(--nb-red); border-radius:3px;
   padding:1rem 1.1rem; height:100%; box-shadow:var(--shadow);
   transition:box-shadow .16s ease, transform .16s ease; }
@@ -236,12 +241,13 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
 .startcard .b{ font-size:.82rem; color:var(--muted); line-height:1.55; }
 
 .strat{ border-top:1px solid var(--rule-soft); padding:.6rem 0; }
-.strat .nm{ font-size:.87rem; font-weight:600; color:var(--slate); }
+.strat .nm{ font-size:.87rem; font-weight:600; color:var(--nb-sand-dark); }
 .strat .ds{ font-size:.81rem; color:var(--muted); line-height:1.55; margin-top:.2rem; }
 
 /* ---------------- Rule chips (Builder) ---------------- */
 .rulecard{
-  background:#fff; border:1px solid var(--rule); border-left:3px solid var(--slate);
+  background:var(--panel); border:1px solid var(--rule);
+  border-left:3px solid var(--nb-red);
   border-radius:3px; padding:.55rem .8rem; margin-bottom:.4rem;
   box-shadow:var(--shadow); }
 .rulecard .idx{
@@ -256,10 +262,10 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
 
 /* ---------------- Scrollbars ---------------- */
 ::-webkit-scrollbar{ width:10px; height:10px; }
-::-webkit-scrollbar-track{ background:var(--panel); }
-::-webkit-scrollbar-thumb{ background:#C3CCD6; border-radius:5px;
-  border:2px solid var(--panel); }
-::-webkit-scrollbar-thumb:hover{ background:#A6B2BF; }
+::-webkit-scrollbar-track{ background:var(--bg); }
+::-webkit-scrollbar-thumb{ background:#3A3833; border-radius:5px;
+  border:2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover{ background:#4E4B44; }
 
 /* ---------------- Chrome ---------------- */
 [data-testid="stHeader"]{ background:transparent; }
@@ -380,6 +386,11 @@ def eyebrow(text: str):
     st.markdown(f'<div class="eyebrow">{text}</div>', unsafe_allow_html=True)
 
 
+def _cfg_as_dict(cfg: RunConfig) -> Dict[str, Any]:
+    """A RunConfig as plain data, for JSON storage."""
+    return asdict(cfg)
+
+
 def _pseudo_result(returns, equity, label):
     """Wraps a bare return stream in the structure the report expects."""
     from qbt.engine import BacktestResult
@@ -455,7 +466,54 @@ st.sidebar.markdown(
     'letter-spacing:.18em;text-transform:uppercase;color:#C9A227;'
     'padding:.2rem 0 .8rem;">Settings</div>', unsafe_allow_html=True)
 
-with st.sidebar.expander("Import a configuration", expanded=False):
+with st.sidebar.expander("Presets", expanded=False):
+    _saved = STORE.list_presets()
+    if _saved:
+        _names = [r["name"] for r in _saved]
+        _pick = st.selectbox("Saved presets", _names, key="preset_pick")
+        _meta = next((r for r in _saved if r["name"] == _pick), {})
+        st.markdown(
+            f'<div class="note">{_meta.get("strategy","")} \u00b7 saved '
+            f'{_meta.get("saved","")}'
+            + (f'<br>{_meta.get("note")}' if _meta.get("note") else "")
+            + "</div>", unsafe_allow_html=True)
+        pc1, pc2 = st.columns(2)
+        if pc1.button("Load", key="preset_load"):
+            _payload = STORE.load(_pick)
+            if _payload:
+                try:
+                    st.session_state["loaded_cfg"] = RunConfig.from_dict(
+                        _payload.get("config", {}))
+                    st.session_state["loaded_rules"] = _payload.get("rules", [])
+                    st.success(f"Loaded \u201c{_pick}\u201d.")
+                except Exception as exc:
+                    st.error(f"Could not load: {exc}")
+        if pc2.button("Delete", key="preset_del"):
+            ok, msg = STORE.delete(_pick)
+            (st.success if ok else st.error)(msg)
+            st.rerun()
+    else:
+        st.markdown('<div class="note">No presets saved yet. Run a backtest, '
+                    'then save it from the Export tab.</div>',
+                    unsafe_allow_html=True)
+
+    if STORE.is_ephemeral():
+        st.markdown(
+            '<div class="flag">This host rebuilds its disk on every deploy, '
+            'so saved presets do not survive a redeploy or a reboot. Export '
+            'the file below and keep it in the repository.</div>',
+            unsafe_allow_html=True)
+
+    st.download_button("Export all presets", STORE.export_all(),
+                       "qbt_presets.json", "application/json",
+                       key="preset_export")
+    _up = st.file_uploader("Restore from file", type=["json"], key="preset_import")
+    if _up is not None and st.button("Restore", key="preset_restore"):
+        ok, msg = STORE.import_all(_up.getvalue().decode("utf-8"))
+        (st.success if ok else st.error)(msg)
+        st.rerun()
+
+with st.sidebar.expander("Import a configuration file", expanded=False):
     up_cfg = st.file_uploader("YAML file", type=["yaml", "yml"], key="cfgup")
     if up_cfg is not None and st.button("Apply configuration"):
         try:
@@ -2190,114 +2248,172 @@ with tabs[3]:
 
 # --------------------------- BUILDER --------------------------------------
 with tabs[4]:
-    note("Write a strategy as an expression over the same indicators the "
-         "packaged models use. Test it here against the loaded universe, "
-         "then select <b>Custom Formula</b> as the model in the sidebar and "
-         "paste the expressions in to run a full backtest.")
+    note("Build a strategy from criteria. Each rule is an indicator, a "
+         "comparison and a value; rules combine into a filter that decides "
+         "what is eligible and a score that ranks it. The result compiles to "
+         "the same expression language the engine already runs, so nothing "
+         "here can do anything a typed formula could not.")
 
-    ref = FORMULA.available_names(list(universe.columns),
-                                  list(exog_used.columns) if exog_used is not None
-                                  else None)
-    with st.expander("Available indicators", expanded=False):
-        rc = st.columns(3)
-        for i, (group, items) in enumerate(ref.items()):
-            with rc[i % 3]:
-                st.markdown(
-                    f'<div style="font-family:IBM Plex Mono,monospace;'
-                    f'font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;'
-                    f'color:#C9A227;margin-top:.5rem;">{group}</div>',
-                    unsafe_allow_html=True)
-                for it in items:
-                    st.markdown(
-                        f'<div style="font-family:IBM Plex Mono,monospace;'
-                        f'font-size:.74rem;color:#E3E8EF;">{it}</div>',
-                        unsafe_allow_html=True)
-        st.markdown(
-            '<div class="note" style="margin-top:.8rem;">'
-            '<b>x</b> is any series, usually <code>price</code>. '
-            '<b>n</b> is a window in sessions. Expressions are applied to the '
-            'whole universe at once and produce one value per instrument per '
-            'day. Arithmetic, comparisons, <code>and</code>/<code>or</code> '
-            'and <code>ifelse</code> are available; nothing else is, by '
-            'design.</div>', unsafe_allow_html=True)
+    if "rule_list" not in st.session_state:
+        st.session_state["rule_list"] = RULES.from_dicts(
+            st.session_state.get("loaded_rules", [])) or [
+            RULES.Rule(kind="filter", indicator="Price",
+                       comparison="is above", target="another indicator",
+                       other_indicator="Moving average", other_window=200),
+            RULES.Rule(kind="score", indicator="Momentum (total return)",
+                       window=126,
+                       transform="Rank across universe (high is good)"),
+        ]
+    rlist: List[RULES.Rule] = st.session_state["rule_list"]
 
-    EXAMPLES = {
-        "Momentum rank": "pctrank(mom(price, 126))",
-        "Trend filter": "price > sma(price, 200)",
-        "Momentum, trend-filtered":
-            "ifelse(price > sma(price, 200), pctrank(mom(price, 126)), 0)",
-        "Momentum and low volatility":
-            "0.7 * pctrank(mom(price, 126)) + 0.3 * pctrank(-vol(price, 60))",
-        "Distance from the average": "price / sma(price, 100) - 1",
-        "Trend quality":
-            "pctrank(mom(price, 126)) * er(price, 20)",
-        "Oversold in an uptrend":
-            "ifelse(rsi(price, 14) < 35 and price > sma(price, 200), 1, 0)",
-        "Breakout": "price > mmax(shift(price, 1), 60)",
-    }
-    pick = st.selectbox("Start from an example", ["\u2014 blank \u2014"] + list(EXAMPLES))
-    if pick != st.session_state.get("_bld_pick"):
-        st.session_state["_bld_pick"] = pick
-        if not pick.startswith("\u2014"):
-            st.session_state["bld_expr"] = EXAMPLES[pick]
+    bc1, bc2, bc3 = st.columns([1, 1, 2])
+    if bc1.button("Add filter rule", key="add_filter"):
+        rlist.append(RULES.Rule(kind="filter")); st.rerun()
+    if bc2.button("Add score rule", key="add_score"):
+        rlist.append(RULES.Rule(kind="score")); st.rerun()
+    joiner = bc3.radio("Combine filters with", ["AND", "OR"], horizontal=True,
+                       key="rule_join",
+                       help="AND holds a name only if every filter passes. "
+                            "OR needs just one.")
 
-    st.session_state.setdefault("bld_expr", "pctrank(mom(price, 126))")
-    expr = st.text_area("Expression", key="bld_expr", height=90)
+    if not rlist:
+        note("No rules yet. Add a filter or a score rule above.")
+    for i, rule in enumerate(list(rlist)):
+        with st.container():
+            st.markdown(
+                f'<div class="rulecard"><span class="idx">'
+                f'{"Filter" if rule.kind == "filter" else "Score"} {i+1}</span>'
+                f'<div class="expr">{RULES.describe_rule(rule)}</div></div>',
+                unsafe_allow_html=True)
+            cols = st.columns([3, 2, 3, 2, 1, 1, 1])
+            names = list(RULES.INDICATORS)
+            rule.indicator = cols[0].selectbox(
+                "Indicator", names,
+                index=names.index(rule.indicator) if rule.indicator in names else 0,
+                key=f"ri_{i}", label_visibility="collapsed")
+            if RULES.INDICATORS[rule.indicator].get("n"):
+                rule.window = cols[1].number_input(
+                    "Window", 2, 1000,
+                    int(rule.window or RULES.INDICATORS[rule.indicator]
+                        .get("default_n", 60)), 1,
+                    key=f"rw_{i}", label_visibility="collapsed")
+            else:
+                cols[1].markdown("&nbsp;", unsafe_allow_html=True)
 
-    if expr and expr.strip():
+            if rule.kind == "filter":
+                comps = list(RULES.COMPARISONS)
+                rule.comparison = cols[2].selectbox(
+                    "Test", comps,
+                    index=comps.index(rule.comparison) if rule.comparison in comps else 0,
+                    key=f"rc_{i}", label_visibility="collapsed")
+                tgts = list(RULES.TARGETS)
+                rule.target = cols[3].selectbox(
+                    "Against", tgts,
+                    index=tgts.index(rule.target) if rule.target in tgts else 0,
+                    key=f"rt_{i}", label_visibility="collapsed")
+                if RULES.TARGETS[rule.target] == "indicator":
+                    sub = st.columns([3, 2, 7])
+                    rule.other_indicator = sub[0].selectbox(
+                        "Compared with", names,
+                        index=names.index(rule.other_indicator)
+                        if rule.other_indicator in names else 0, key=f"roi_{i}")
+                    if RULES.INDICATORS[rule.other_indicator].get("n"):
+                        rule.other_window = sub[1].number_input(
+                            "Window ", 2, 1000, int(rule.other_window or 200), 1,
+                            key=f"row_{i}")
+                else:
+                    rule.value = st.columns([3, 7])[0].number_input(
+                        "Value", -1e6, 1e6, float(rule.value), 1.0, key=f"rv_{i}")
+            else:
+                tf = list(RULES.SCORE_TRANSFORMS)
+                rule.transform = cols[2].selectbox(
+                    "Treatment", tf,
+                    index=tf.index(rule.transform) if rule.transform in tf else 0,
+                    key=f"rf_{i}", label_visibility="collapsed")
+                rule.weight = cols[3].number_input(
+                    "Weight", 0.0, 10.0, float(rule.weight), 0.1,
+                    key=f"rwt_{i}", label_visibility="collapsed")
+
+            rule.enabled = cols[4].checkbox("On", value=rule.enabled, key=f"re_{i}")
+            if cols[5].button("\u2191", key=f"ru_{i}", help="Move up"):
+                st.session_state["rule_list"] = RULES.move(rlist, i, -1); st.rerun()
+            if cols[6].button("\u2193", key=f"rd_{i}", help="Move down"):
+                st.session_state["rule_list"] = RULES.move(rlist, i, 1); st.rerun()
+            if st.button("Remove", key=f"rx_{i}"):
+                rlist.pop(i); st.rerun()
+
+    compiled = RULES.compile_rules(rlist, joiner)
+    eyebrow("Compiled expressions")
+    if compiled["filter"]:
+        st.markdown("**Filter**"); st.code(compiled["filter"], language="text")
+    if compiled["score"]:
+        st.markdown("**Score**"); st.code(compiled["score"], language="text")
+    if not compiled["filter"] and not compiled["score"]:
+        note("Nothing to compile yet.")
+
+    if compiled["filter"] or compiled["score"]:
+        eyebrow("Preview against the loaded universe")
         try:
-            d = FORMULA.describe(expr, universe, exog_used)
+            target = compiled["score"] or compiled["filter"]
+            d = FORMULA.describe(target, universe, exog_used)
             frame = d["frame"]
-            b1, b2, b3, b4 = st.columns(4)
-            with b1:
+            p1, p2, p3, p4 = st.columns(4)
+            with p1:
                 dial("Type", "Boolean" if d["is_boolean"] else "Continuous",
                      "0 / 1 filter" if d["is_boolean"] else "score to rank")
-            with b2:
-                dial("Coverage", f"{d['coverage']*100:.0f}%",
-                     "of the price grid")
-            with b3:
+            with p2:
+                dial("Coverage", f"{d['coverage']*100:.0f}%", "of the price grid")
+            with p3:
                 dial("First value",
                      str(d["first_valid"].date()) if d["first_valid"] is not None
                      else "\u2014", "warm-up needed")
-            with b4:
+            with p4:
                 dial("Median", f"{d['median']:.3f}",
                      f"range {d['min']:.2f} to {d['max']:.2f}")
-
-            eyebrow("Value over time")
             show = st.multiselect("Instruments", list(frame.columns),
                                   default=list(frame.columns)[:3], key="bld_show")
             if show:
                 st.plotly_chart(
                     C.equity_curve(frame[show].dropna(how="all"), False,
-                                   "Expression value"),
+                                   "Score value"),
                     use_container_width=True, config={"displaylogo": False})
-
-            eyebrow("Latest values")
-            last = frame.dropna(how="all")
-            if not last.empty:
-                tail = last.iloc[-1].sort_values(ascending=False)
-                st.dataframe(
-                    pd.DataFrame({"Instrument": tail.index,
-                                  "Value": [f"{v:,.4f}" for v in tail.values]}),
-                    use_container_width=True, hide_index=True)
-
+            if compiled["filter"]:
+                fmask = FORMULA.evaluate_frame(compiled["filter"], universe,
+                                               exog_used).astype(float)
+                st.plotly_chart(
+                    C.equity_curve(fmask.rolling(21).mean().dropna(how="all"),
+                                   False,
+                                   "Share of the last month each name passed "
+                                   "the filter"),
+                    use_container_width=True, config={"displaylogo": False})
             if d["coverage"] < 0.5:
                 st.markdown(
-                    f'<div class="flag">The expression only produces a value '
-                    f'on {d["coverage"]*100:.0f}% of the grid. A long window '
+                    f'<div class="flag">These rules only produce a value on '
+                    f'{d["coverage"]*100:.0f}% of the grid. A long window '
                     f'costs history: the backtest cannot start until it has '
                     f'one.</div>', unsafe_allow_html=True)
-
-            eyebrow("Use it")
-            note("Select <b>Custom Formula</b> as the model in the sidebar, "
-                 "then paste this into <b>Score expression</b> (higher is "
-                 "better) or into <b>Filter expression</b> if it is a "
-                 "boolean test.")
-            st.code(expr, language="text")
         except FORMULA.FormulaError as exc:
             st.markdown(f'<div class="flag">{exc}</div>', unsafe_allow_html=True)
-    else:
-        note("Enter an expression above, or pick an example.")
+
+        eyebrow("Use these rules")
+        note("Select <b>Custom Formula</b> as the model in the sidebar, then "
+             "paste the two expressions above into <b>Score expression</b> "
+             "and <b>Filter expression</b>. Saving a preset from the Export "
+             "tab stores these rules alongside the configuration.")
+        if st.button("Send to the Custom Formula model", key="push_rules"):
+            st.session_state[f"p_custom_formula_score"] = compiled["score"]
+            st.session_state[f"p_custom_formula_filter"] = compiled["filter"]
+            st.success("Copied into the model's parameters. Select Custom "
+                       "Formula in the sidebar and run.")
+
+    with st.expander("Indicator reference", expanded=False):
+        for name, spec in RULES.INDICATORS.items():
+            st.markdown(
+                f'<div style="margin-bottom:.45rem;">'
+                f'<span style="font-family:var(--mono);font-size:.8rem;'
+                f'color:{BRAND["red"]};">{name}</span>'
+                f'<div class="note" style="margin-top:.1rem;">{spec.get("help","")}'
+                f'</div></div>', unsafe_allow_html=True)
 
 
 # --------------------------- EXPORT ---------------------------------------
@@ -2324,6 +2440,30 @@ with tabs[5]:
     hc2.download_button("Holdings history (CSV)",
                         res.weights.to_csv().encode("utf-8"),
                         "holdings_history.csv", "text/csv", key="dlw")
+
+    eyebrow("Save as a preset")
+    note("Recall this setup by name from the sidebar, instead of exporting "
+         "and re-uploading a YAML file.")
+    sp1, sp2 = st.columns([2, 3])
+    _pname = sp1.text_input("Preset name", value=rcfg.label[:60], key="save_name")
+    _pnote = sp2.text_input("Note (optional)", key="save_note",
+                            placeholder="What this run was for")
+    if st.button("Save preset", key="save_preset"):
+        payload = {
+            "config": json.loads(json.dumps(_cfg_as_dict(rcfg))),
+            "label": rcfg.label,
+            "strategy_name": rcfg.strategy.name,
+            "rules": [r.to_dict() for r in
+                      st.session_state.get("rule_list", [])],
+        }
+        ok, msg = STORE.save(_pname, payload, _pnote)
+        (st.success if ok else st.error)(msg)
+    if STORE.is_ephemeral():
+        st.markdown(
+            '<div class="flag">Saved presets live on the server\u2019s disk, '
+            'which this host rebuilds on every deploy. Use <b>Export all '
+            'presets</b> in the sidebar and keep that file in the repository '
+            'if you want them to last.</div>', unsafe_allow_html=True)
 
     eyebrow("Configuration")
     note("This configuration exactly reproduces the backtest shown. Keep it "

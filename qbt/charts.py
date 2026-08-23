@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 
 from . import metrics as M
 
-from .brand import BRAND, SERIES
+from .brand import BRAND, PRINT, SERIES, SERIES_PRINT
 
 # Every colour comes from qbt/brand.py. Correcting the three brand values
 # there restyles the interface, the charts and the exported report together.
@@ -30,11 +30,25 @@ PALETTE = {
     "brass": BRAND["red"],
     "teal": BRAND["gain"],
     "rust": BRAND["loss"],
+    "slate": "#8C93A8",
+}
+
+# The report is printed and shared, so it stays light regardless of the
+# interface theme.
+PALETTE_PRINT = {
+    "ink": PRINT["bg"],
+    "panel": PRINT["panel"],
+    "rule": PRINT["rule"],
+    "text": PRINT["text"],
+    "muted": PRINT["muted"],
+    "brass": PRINT["red"],
+    "teal": PRINT["gain"],
+    "rust": PRINT["loss"],
     "slate": "#3F3A34",
 }
-PALETTE_PRINT = dict(PALETTE, ink="#FFFFFF", panel="#FFFFFF")
+
 SERIES_COLORS = list(SERIES)
-SERIES_COLORS_PRINT = list(SERIES)
+SERIES_COLORS_PRINT = list(SERIES_PRINT)
 
 FONT = "Inter, Segoe UI, Helvetica Neue, sans-serif"
 MONO = "IBM Plex Mono, SFMono-Regular, Consolas, monospace"
@@ -47,10 +61,10 @@ def _colors(theme: str):
 def _base(fig: go.Figure, height: int = 380, title: str = "", theme: str = "dark") -> go.Figure:
     pal, _ = _colors(theme)
     fig.update_layout(
-        template="plotly_white",
+        template="plotly_white" if theme == "print" else "plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        colorway=SERIES_COLORS,
+        colorway=(SERIES_COLORS_PRINT if theme == "print" else SERIES_COLORS),
         font=dict(family=FONT, size=12, color=pal["text"]),
         title=dict(text=title, font=dict(family=FONT, size=14,
                                          color=pal["muted"]), x=0, xanchor="left"),
@@ -104,7 +118,7 @@ def underwater(equities: Dict[str, pd.Series],
             x=dd.index, y=dd, name=name, mode="lines",
             line=dict(color=color, width=1.4),
             fill="tozeroy" if i == 0 else None,
-            fillcolor="rgba(179,50,43,0.12)",
+            fillcolor="rgba(232,112,92,0.18)",
             hovertemplate="%{y:.2f}%<extra>" + name + "</extra>",
         ))
     _base(fig, 260, title, theme)
@@ -205,7 +219,7 @@ def monte_carlo_fan(bands: pd.DataFrame, actual: pd.Series,
                                  line=dict(width=0), showlegend=False))
         fig.add_trace(go.Scatter(x=bands.index, y=bands["p5"], name="5th-95th percentile",
                                  line=dict(width=0), fill="tonexty",
-                                 fillcolor="rgba(201,184,150,0.30)"))
+                                 fillcolor="rgba(201,184,150,0.16)"))
         fig.add_trace(go.Scatter(x=bands.index, y=bands["p50"], name="Simulated median",
                                  line=dict(color=pal["teal"], width=1.4, dash="dot")))
     base = actual / actual.iloc[0]

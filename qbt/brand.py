@@ -28,34 +28,54 @@ SAND = "#E7DDCB"       # warm neutral ground
 BRAND: Dict[str, str] = {
     "red": RED,
     "red_dark": "#B01419",
-    "red_wash": "#FBEFEF",
+    "red_bright": "#FF3A41",     # lifts off a dark ground
+    "red_wash": "#2A1416",       # tinted panel, not a pale wash
     "black": BLACK,
-    "ink": "#1A1A1A",
     "sand": SAND,
-    "sand_light": "#F5F0E7",
+    "sand_light": "#F3ECDF",
     "sand_dark": "#CBBFA8",
 
-    # Working greys, warmed slightly toward the sand so the neutrals sit
-    # with the brand rather than against it.
+    # Dark ground. Black is a brand colour, so the interface sits on it
+    # rather than inverting into a generic grey. Neutrals are warmed toward
+    # the sand so they belong to the same family.
+    "bg": "#0F0F0E",
+    "panel": "#181816",
+    "panel_2": "#1E1E1B",
+    "rule": "#2E2C27",
+    "rule_soft": "#232320",
+    "text": "#EFE9DE",           # sand-tinted, easier than pure white
+    "muted": "#9A9389",
+    "faint": "#6E6960",
+
+    # Sign colours, tuned for a dark ground. Deliberately not the brand
+    # red: if "loss" and "brand" share a colour the chart cannot be read,
+    # and a brand-coloured "gain" flatters every result.
+    "gain": "#4FB79A",
+    "loss": "#E8705C",
+}
+
+# Light values for the exported tearsheet. A report is printed and shared,
+# and a dark page wastes ink and reads badly on paper.
+PRINT: Dict[str, str] = {
     "bg": "#FFFFFF",
     "panel": "#FAF8F4",
     "rule": "#DED8CC",
     "rule_soft": "#EDE8DF",
     "text": "#1A1A1A",
     "muted": "#6B655C",
-    "faint": "#9A9389",
-
-    # Sign colours. Deliberately not the brand red: a chart where "loss"
-    # and "brand" share a colour cannot be read, and one where "gain" is
-    # brand-coloured flatters every result.
+    "sand": "#F5F0E7",
+    "red": RED,
     "gain": "#1F6F5C",
     "loss": "#B3322B",
 }
 
-# Chart series order. Red leads because the first series is the subject;
-# everything after it is context and stays neutral.
-SERIES = [RED, "#3F3A34", "#1F6F5C", "#C9B896",
-          "#8C6D4F", "#5B7A8C", "#A8574E"]
+# Chart series. Red leads because the first series is the subject; the rest
+# are context and stay in the sand and neutral family so red keeps meaning.
+SERIES = [RED, "#C9B896", "#4FB79A", "#8C93A8",
+          "#D08C4E", "#7E6BA8", "#5B9EC7"]
+
+SERIES_PRINT = [RED, "#3F3A34", "#1F6F5C", "#C9B896",
+                "#8C6D4F", "#5B7A8C", "#A8574E"]
 
 
 def css_variables() -> str:
@@ -68,6 +88,8 @@ def css_variables() -> str:
         ("--nb-sand", BRAND["sand"]),
         ("--nb-sand-light", BRAND["sand_light"]),
         ("--nb-sand-dark", BRAND["sand_dark"]),
+        ("--nb-red-bright", BRAND["red_bright"]),
+        ("--panel-2", BRAND["panel_2"]),
         ("--bg", BRAND["bg"]),
         ("--panel", BRAND["panel"]),
         ("--rule", BRAND["rule"]),
@@ -83,7 +105,7 @@ def css_variables() -> str:
 
 def config_toml() -> str:
     """Streamlit's own theme block, so its widgets match the CSS."""
-    return (f'[theme]\nbase = "light"\n'
+    return (f'[theme]\nbase = "dark"\n'
             f'primaryColor = "{BRAND["red"]}"\n'
             f'backgroundColor = "{BRAND["bg"]}"\n'
             f'secondaryBackgroundColor = "{BRAND["panel"]}"\n'

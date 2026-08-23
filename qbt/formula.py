@@ -47,7 +47,39 @@ _ALLOWED_NODES = (
     ast.USub, ast.UAdd, ast.Not,
     ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
     ast.And, ast.Or, ast.IfExp,
+    ast.BitAnd, ast.BitOr, ast.Invert,
 )
+
+
+class _Elementwise(ast.NodeTransformer):
+    """Rewrites `and` / `or` / `not` into elementwise operations.
+
+    Python's `and` asks whether its left operand is true, and a DataFrame
+    refuses to answer -- "the truth value is ambiguous". Every combined
+    condition therefore fails at evaluation, which is not what anyone means
+    by `price > sma(price, 200) and rsi(price, 14) < 30`: they mean the two
+    masks intersected, row by row.
+
+    Rewriting the tree rather than asking users to type `&` keeps the
+    language readable and avoids the precedence trap that makes `a > b & c
+    > d` parse as `a > (b & c) > d`. Parentheses are implicit in the tree,
+    so the rewrite cannot introduce that bug.
+    """
+
+    def visit_BoolOp(self, node: ast.BoolOp):
+        self.generic_visit(node)
+        op = ast.BitAnd() if isinstance(node.op, ast.And) else ast.BitOr()
+        result = node.values[0]
+        for right in node.values[1:]:
+            result = ast.BinOp(left=result, op=op, right=right)
+        return ast.copy_location(result, node)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp):
+        self.generic_visit(node)
+        if isinstance(node.op, ast.Not):
+            return ast.copy_location(
+                ast.UnaryOp(op=ast.Invert(), operand=node.operand), node)
+        return node
 
 
 # ----------------------------------------------------------------------
@@ -219,6 +251,9 @@ def evaluate(expression: str, namespace: Dict[str, Any]) -> Any:
         raise FormulaError(f"Syntax error: {exc.msg}")
 
     _check(tree, set(namespace))
+    # Rewrite after the whitelist check, so the check still sees exactly
+    # what the user wrote.
+    tree = ast.fix_missing_locations(_Elementwise().visit(tree))
     code = compile(tree, "<formula>", "eval")
     try:
         # __builtins__ emptied: nothing from the interpreter is reachable,
