@@ -596,7 +596,25 @@ paper it names is worse than one that admits it.
 | Turtle Breakout (Donchian) | Buy a break to a new N-day high, exit on a break to an M-day low, size each position by its recent range so every holding carries similar risk. |
 | Time-Series Momentum (Moskowitz, Ooi & Pedersen) | Judge each instrument against itself rather than against the others, and scale positions to a common volatility. |
 | Accelerating Dual Momentum | Blend short, medium and long lookbacks instead of trusting one, with an absolute threshold that moves to cash when nothing clears it. |
+| MomentumOG | Cumulative return over the lookback, less how far the price sits above its own average over that window. A name that has run up but is stretched far above its mean scores below one that got there steadily. |
 | Trend-Gated Target Weights (HIDE-style) | Fixed target weights per asset class, each independently gated by two trend signals worth half its allocation each: full weight, half weight, or cash. Never short. |
+
+### On MomentumOG
+
+The score is `mom(price, n-1) - (price / sma(price, n) - 1)`: cumulative
+return over the window, minus the price's percentage distance above its own
+mean over that same window. The off-by-one is faithful to the source rather
+than incidental -- a rolling buffer of n prices yields n-1 returns for the
+momentum leg while the average uses all n.
+
+Both terms contain the latest price, so the score reduces to
+`last x (1/first - 1/mean)`. That is what gives it its character: it rewards
+a low starting point and penalises a high mean, so a name that has already
+run far ahead of its own average ranks below one that arrived steadily. It
+is momentum with the froth taken out.
+
+The implementation was checked against a literal transcription of the
+original loop at four lookbacks; the largest difference was 7e-15.
 
 ### On the HIDE-style model
 

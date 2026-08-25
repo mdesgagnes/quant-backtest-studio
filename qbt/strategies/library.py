@@ -837,3 +837,77 @@ def _trend_gated_weights(px: pd.DataFrame, p: Dict[str, Any],
         score = score.where(tmom_ok | ma_ok)
 
     return (score.fillna(0.0) * base).where(px.notna(), 0.0)
+
+
+@register(
+    key="momentum_og",
+    label="MomentumOG",
+    description="Cumulative return over the lookback, less how far the price "
+                "sits above its own average over that same window. A name "
+                "that has run up but is stretched well above its mean scores "
+                "below one that got there steadily, so the measure prefers "
+                "momentum that has not already spent itself.",
+    params=[
+        Param("lookback", "Lookback (price buffer length)", "int", 126, 5, 756, 1,
+              help="Number of prices in the window. The return leg spans the "
+                   "buffer's n-1 changes; the average is taken over all n "
+                   "prices, matching the original implementation."),
+        Param("top_n", "Number of Positions", "int", 3, 1, 30, 1),
+        Param("min_score", "Minimum Score (%)", "float", -1000.0, -1000.0, 100.0, 1.0,
+              help="A slot stays in cash unless the score clears this. Left "
+                   "at the floor the model is always fully invested, which "
+                   "is the original behaviour; raise it to make it "
+                   "defensive."),
+        Param("trend_filter", "Trend Filter (0 = none)", "int", 0, 0, 400, 10,
+              help="Optional: only hold a name while it is above this moving "
+                   "average. Not part of the original."),
+        Param("hold_cash", "Hold unfilled positions in cash", "bool", True,
+              help="If fewer names qualify than there are slots, the "
+                   "remaining capital stays in cash rather than "
+                   "concentrating into the survivors."),
+        Param("sizing", "Sizing", "choice", "Equal Weight",
+              choices=["Equal Weight", "Inverse Volatility",
+                       "Inverse Downside Volatility"]),
+        Param("vol_window", "Volatility Window", "int", 60, 20, 250, 5),
+    ],
+)
+def _momentum_og(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    """Momentum less extension from the mean.
+
+    The original computes, over a rolling buffer of `lookback` prices:
+
+        cumulative_return = last / first - 1
+        series_average    = (last - mean) / mean
+        score             = cumulative_return - series_average
+
+    which is exactly `mom(price, n-1) - (price / sma(price, n) - 1)`. The
+    off-by-one is faithful, not incidental: a buffer of n prices yields n-1
+    returns for the momentum leg while the average uses all n.
+
+    Both legs contain `last`, so the score is really
+    `last * (1/first - 1/mean)` -- it rises with a low starting price and
+    falls with a low mean, which is what makes it penalise a name that has
+    already run far ahead of its own average.
+    """
+    n = int(p["lookback"])
+    ret_span = max(1, n - 1)
+
+    cumulative = px / px.shift(ret_span) - 1.0
+    extension = px / sma(px, n) - 1.0
+    score = cumulative - extension
+
+    eligible = score > float(p["min_score"]) / 100.0
+    if int(p["trend_filter"]) > 0:
+        eligible &= px > sma(px, int(p["trend_filter"]))
+
+    ranked = score.where(eligible)
+    ranks = ranked.rank(axis=1, ascending=False, na_option="keep", method="first")
+    mask = (ranks <= p["top_n"]).astype(float).where(ranked.notna(), 0.0)
+
+    slots = int(p["top_n"]) if bool(p["hold_cash"]) else None
+    sizing = p["sizing"]
+    if sizing == "Equal Weight":
+        return mask / float(p["top_n"]) if slots else size_equal(mask)
+    return size_inverse_vol(mask, px, int(p["vol_window"]),
+                            downside=sizing.startswith("Inverse Downside"),
+                            slots=slots)

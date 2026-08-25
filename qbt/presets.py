@@ -118,6 +118,27 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
         "note": "Momentum, quality, minimum volatility, value, size. Most "
                 "launched in 2013.",
     },
+    "Canadian equity factor mix": {
+        "tickers": ["XIC.TO", "HCAL.TO", "WXM.TO", "XDV.TO", "XCV.TO",
+                    "XCG.TO", "XDIV.TO", "XEI.TO", "HXT.TO", "ZLB.TO"],
+        "classes": {
+            "XIC.TO": "Equities", "HCAL.TO": "Equities", "WXM.TO": "Equities",
+            "XDV.TO": "Equities", "XCV.TO": "Equities", "XCG.TO": "Equities",
+            "XDIV.TO": "Equities", "XEI.TO": "Equities", "HXT.TO": "Equities",
+            "ZLB.TO": "Equities",
+        },
+        "benchmark": "XIC.TO",
+        "cash": "PSA.TO",
+        "note": "Canadian equity styles for cross-sectional rotation: broad "
+                "market, banks, multifactor, dividend, value, growth, income "
+                "and low volatility. Three things to know before reading a "
+                "result. HCAL is leveraged, so it will win most momentum "
+                "rankings in a rising market and lose them badly otherwise. "
+                "HXT is a total-return swap structure that pays no "
+                "distributions, so it is unaffected by the dividend setting "
+                "while its peers are not. And several of these launched in "
+                "the mid-2010s, so an early start date quietly drops them.",
+    },
     "HIDE target asset classes": {
         "tickers": ["SCHR", "VNQ", "BCI"],
         "classes": {
