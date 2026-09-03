@@ -42,6 +42,7 @@ class CostConfig:
     slippage_bps: float = 25.0
     cash_rate_pa: float = 0.0              # used when no cash_proxy is provided
     borrow_rate_pa: float = 0.0            # cost of leverage beyond 100%
+    management_fee_pa: float = 0.0         # accrued daily, deducted monthly
 
 
 @dataclass
@@ -55,6 +56,7 @@ class EngineConfig:
     execute_at_open: bool = False          # trade at the open, mark at the close
     trim_warmup: bool = True               # drop the leading uninvested stretch
     # Trading-day rule. Defaults reproduce the period-end calendar exactly.
+    whole_shares: bool = False             # trade whole units only
     day_rule: str = "last"                 # last | first | day | nth_weekday | last_weekday
     day_of_month: int = 15
     weekday: int = 4                       # 0=Monday .. 4=Friday
@@ -130,6 +132,11 @@ class RunConfig:
             errs.append(f"Unknown strategy mode: {self.strategy.mode}")
         if self.exog.enabled and self.exog.publication_lag_days < 0:
             errs.append("Publication lag cannot be negative.")
+        if self.costs.management_fee_pa < 0:
+            errs.append("Management fee cannot be negative.")
+        if self.costs.management_fee_pa > 0.10:
+            errs.append("WARNING: a management fee above 10% per year is "
+                        "almost certainly a units error.")
         if self.data.use_dividends and self.data.adjusted:
             errs.append(
                 "Dividends cannot be credited on top of adjusted prices: they "

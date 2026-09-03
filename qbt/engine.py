@@ -53,6 +53,8 @@ class BacktestResult:
     label: str = "Backtest"
     dividend_income: Optional[pd.Series] = None   # daily, as a fraction of value
     warmup_start: Optional[pd.Timestamp] = None   # first day actually invested
+    shares: Optional[pd.DataFrame] = None         # units held, the real state
+    fees: Optional[pd.Series] = None              # management fee, as a fraction
 
     @property
     def nav(self) -> pd.Series:
@@ -156,144 +158,192 @@ def run_backtest(prices: pd.DataFrame,
     rebal = idx[pos[(pos >= 0) & (pos < len(idx))]]
     rebal_set = set(rebal)
 
-    # --- Return legs ---------------------------------------------------
-    # Without open prices the overnight leg is empty and the full day is
-    # earned before trading, which reproduces close-to-close execution.
+    # --- Prices used for marking and for trading ------------------------
+    # Two distinct things. `close` marks the book at the end of each day;
+    # `exec_px` is what a trade actually fills at. They differ only when
+    # trading at the open, which is the whole point of the option.
+    close_px = prices.to_numpy(dtype=float)
     trade_at_open = open_prices is not None
-    prev_close = prices.shift(1)
     if trade_at_open:
         op = open_prices.reindex(index=idx, columns=assets)
-        # A missing open falls back to the prior close, which collapses that
-        # day to close-to-close rather than inventing a price.
-        op = op.where(op.notna() & (op > 0), prev_close)
-        r_overnight = (op / prev_close - 1.0)
-        r_intraday = (prices / op - 1.0)
+        # A missing or nonsensical open falls back to that day's close
+        # rather than inventing a price out of a neighbouring bar.
+        op = op.where(op.notna() & (op > 0), prices)
+        exec_px = op.to_numpy(dtype=float)
     else:
-        r_overnight = pd.DataFrame(0.0, index=idx, columns=assets)
-        r_intraday = (prices / prev_close - 1.0)
+        exec_px = close_px
 
-    clean = lambda d: d.replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    R_on = clean(r_overnight).to_numpy(dtype=float)
-    R_id = clean(r_intraday).to_numpy(dtype=float)
-
-    # --- Dividends ------------------------------------------------------
-    # Expressed as a fraction of the prior close, so the cash credited is
-    # weight x (dividend per share / price per share).
-    if dividends is not None:
-        div_frac = dividends.reindex(index=idx, columns=assets).fillna(0.0) / prev_close
-        D = clean(div_frac).to_numpy(dtype=float)
-    else:
-        D = np.zeros((len(idx), len(assets)))
+    div_ps = (dividends.reindex(index=idx, columns=assets).fillna(0.0)
+              .to_numpy(dtype=float) if dividends is not None
+              else np.zeros((len(idx), len(assets))))
 
     cash_ret = _cash_returns(idx, cash_prices, costs.cash_rate_pa, engine.periods_per_year)
-    borrow_daily = costs.borrow_rate_pa / engine.periods_per_year
+    Rc = cash_ret.to_numpy(dtype=float)
+    ppy = max(1, int(engine.periods_per_year))
+    borrow_daily = costs.borrow_rate_pa / ppy
+    fee_daily = float(getattr(costs, "management_fee_pa", 0.0)) / ppy
     fric = (costs.commission_bps + costs.slippage_bps) / 10_000.0
     min_trade = float(engine.min_trade_weight)
+    whole = bool(getattr(engine, "whole_shares", False))
 
-    n = len(idx)
-    m = len(assets)
+    n, m = len(idx), len(assets)
     T = w_exec.to_numpy(dtype=float)
-    Rc = cash_ret.to_numpy(dtype=float)
 
-    nav = np.zeros(n)
-    gross_r = np.zeros(n)
-    net_r = np.zeros(n)
-    turn = np.zeros(n)
-    cost_arr = np.zeros(n)
-    div_arr = np.zeros(n)
-    W = np.zeros((n, m))
-    cash_w = np.zeros(n)
+    # Fee charge dates: the last session of each calendar month. Accrual is
+    # daily, the deduction is monthly, which is how a management fee is
+    # actually billed.
+    month_end = set()
+    if fee_daily > 0:
+        ser = pd.Series(idx, index=idx)
+        month_end = {np.datetime64(d, "ns")
+                     for d in ser.resample("ME").last().dropna()}
 
-    w = np.zeros(m)          # current risky weights
-    c = 1.0                  # current cash weight
-    value = float(engine.initial_capital)
+    nav = np.zeros(n); gross_r = np.zeros(n); net_r = np.zeros(n)
+    turn = np.zeros(n); cost_arr = np.zeros(n); div_arr = np.zeros(n)
+    fee_arr = np.zeros(n)
+    W = np.zeros((n, m)); cash_w = np.zeros(n); SH = np.zeros((n, m))
+
+    shares = np.zeros(m)              # units held, the actual state
+    cash = float(engine.initial_capital)
+    fee_accrued = 0.0
     trades = []
 
-    def _charge(w_now, tgt, i, date):
-        """Applies the target, returns (new weights, cost, turnover)."""
-        delta = tgt - w_now
-        delta[np.abs(delta) < min_trade] = 0.0
+    def _valid(row):
+        return np.isfinite(row) & (row > 0)
+
+    def _execute(i, date, price_row, portfolio_value):
+        """Moves the book to the target at `price_row`. Returns cost paid.
+
+        Everything here is in shares and currency. The target weight is
+        turned into a target *number of units at the execution price*, and
+        the trade log records that price, so what filled and at what is
+        auditable rather than implied.
+        """
+        nonlocal shares, cash
+        ok = _valid(price_row)
+        if portfolio_value <= 0 or not ok.any():
+            return 0.0, 0.0
+
+        target_val = T[i] * portfolio_value
+        target_sh = np.where(ok, target_val / np.where(ok, price_row, 1.0), shares)
+        if whole:
+            target_sh = np.trunc(target_sh)
+
+        delta = target_sh - shares
+        notional = np.abs(delta) * np.where(ok, price_row, 0.0)
+        # Ignore adjustments too small to be worth their own commission.
+        tiny = notional < min_trade * portfolio_value
+        delta = np.where(tiny, 0.0, delta)
+        notional = np.where(tiny, 0.0, notional)
         if not np.any(delta):
-            return w_now, 0.0, 0.0
-        new_w = w_now + delta
-        # The min-trade filter can leave a residual position that pushes the
-        # book over budget: scale back to the allowed leverage.
-        gross_new = np.abs(new_w).sum()
-        if gross_new > engine.max_leverage:
-            new_w = new_w / gross_new * engine.max_leverage
-            delta = new_w - w_now
-        tr = float(np.abs(delta).sum())
+            return 0.0, 0.0
+
+        cost = float(notional.sum()) * fric
+        buy_cost = float((delta * np.where(ok, price_row, 0.0)).sum())
+        if buy_cost + cost > cash + 1e-9:
+            # Never spend money the book does not have. Scale the whole
+            # order down rather than filling some legs and not others.
+            room = max(0.0, cash - cost)
+            scale = room / buy_cost if buy_cost > 1e-12 else 0.0
+            delta = delta * max(0.0, min(1.0, scale))
+            if whole:
+                delta = np.trunc(delta)
+            notional = np.abs(delta) * np.where(ok, price_row, 0.0)
+            cost = float(notional.sum()) * fric
+            buy_cost = float((delta * np.where(ok, price_row, 0.0)).sum())
+
         for j, a in enumerate(assets):
             if delta[j] != 0.0:
                 trades.append({
                     "Date": date, "Instrument": a,
-                    "Weight Before": w_now[j], "Weight After": new_w[j],
-                    "Change": delta[j],
+                    "Shares Before": shares[j], "Shares After": shares[j] + delta[j],
+                    "Change": delta[j], "Price": float(price_row[j]),
+                    "Notional": float(abs(delta[j]) * price_row[j]),
                 })
-        return new_w, tr * fric, tr
+        shares = shares + delta
+        cash -= buy_cost + cost
+        return cost, float(notional.sum()) / portfolio_value
 
+    # ------------------------------------------------------------------
+    # One day at a time. Nothing below reads a future row.
+    # ------------------------------------------------------------------
     for i, date in enumerate(idx):
+        prev_value = nav[i - 1] if i > 0 else float(engine.initial_capital)
         cost_i = 0.0
         div_i = 0.0
+        fee_i = 0.0
 
-        if i == 0:
-            r_port = 0.0
-        else:
-            # 1) Overnight leg, earned on the weights held overnight
-            w_start = w.copy()
-            w = w * (1.0 + R_on[i])
-            # Dividends go ex overnight: credited on the position held, and
-            # parked in cash rather than reinvested in the paying asset.
-            if D[i].any():
-                div_i = float((w_start * D[i]).sum())
-            cash_grown = c * (1.0 + Rc[i]) + div_i
-            lev = max(0.0, np.abs(w_start).sum() - 1.0)
-            cash_grown -= lev * borrow_daily
+        if i > 0:
+            # 1) Cash earns overnight; leverage is charged for.
+            cash *= (1.0 + Rc[i])
+            gross_prev = float(np.abs(shares * np.nan_to_num(close_px[i - 1])).sum())
+            lev = max(0.0, gross_prev - prev_value)
+            cash -= lev * borrow_daily
 
-            # 2) Trade at the open, before the intraday leg
-            if trade_at_open and date in rebal_set and i >= int(engine.execution_lag):
-                base_open = w.sum() + cash_grown
-                if base_open > 0:
-                    w_n = w / base_open
-                    c_n = cash_grown / base_open
-                    new_w, cost_i, tr = _charge(w_n, T[i], i, date)
-                    turn[i] = tr
-                    w = new_w * base_open * (1.0 - cost_i)
-                    cash_grown = (1.0 - new_w.sum()) * base_open * (1.0 - cost_i)
+            # 2) Dividends go ex at the open, on the units held into the day.
+            if div_ps[i].any():
+                div_i = float((shares * div_ps[i]).sum())
+                cash += div_i
 
-            # 3) Intraday leg, earned on the post-trade weights
-            w = w * (1.0 + R_id[i])
-            total = w.sum() + cash_grown
-            r_port = total - (w_start.sum() + c)
-            c = cash_grown
+        # 3) Trade. At the open the book is valued at open prices first, so
+        #    the order is sized on what it is worth when it is placed.
+        can_trade = (date in rebal_set) and (i >= int(engine.execution_lag))
+        if can_trade and trade_at_open:
+            mark_open = np.where(_valid(exec_px[i]), exec_px[i], 0.0)
+            value_at_open = float((shares * mark_open).sum()) + cash
+            cost_i, tr = _execute(i, date, exec_px[i], value_at_open)
+            turn[i] = tr
 
-        gross_r[i] = r_port + cost_i if i else 0.0
-        div_arr[i] = div_i
-        value *= (1.0 + r_port)
+        # 4) Mark to the close.
+        mark = np.where(_valid(close_px[i]), close_px[i], 0.0)
+        value = float((shares * mark).sum()) + cash
 
-        # Renormalize: weights are expressed as a fraction of value
-        base = w.sum() + c
-        if base > 0:
-            w, c = w / base, c / base
+        if can_trade and not trade_at_open:
+            cost_i, tr = _execute(i, date, close_px[i], value)
+            turn[i] = tr
+            value = float((shares * mark).sum()) + cash
 
-        # 4) Close-price execution, when trading at the open is off
-        if not trade_at_open and date in rebal_set and i >= int(engine.execution_lag):
-            new_w, cost_i, tr = _charge(w, T[i], i, date)
-            if tr:
-                turn[i] = tr
-                value *= (1.0 - cost_i)
-                w = new_w
-                c = 1.0 - w.sum()
+        # 5) Management fee: accrued every day on the marked value,
+        #    deducted once a month.
+        #
+        #    A fully invested book holds no cash, so the fee has to come out
+        #    of the holdings. Capping it at whatever cash happens to be
+        #    lying around would mean a fully invested strategy quietly pays
+        #    almost nothing, which is the opposite of the truth.
+        if fee_daily > 0 and i > 0:
+            fee_accrued += value * fee_daily
+            if (np.datetime64(date, "ns") in month_end) or i == n - 1:
+                fee_i = min(fee_accrued, max(0.0, value))
+                shortfall = fee_i - cash
+                if shortfall > 0:
+                    holdings_val = float((shares * mark).sum())
+                    if holdings_val > 1e-12:
+                        # Sell pro rata across the book, exactly as a fund
+                        # liquidates units to meet its own fee.
+                        keep = max(0.0, 1.0 - shortfall / holdings_val)
+                        proceeds = float((shares * mark).sum()) * (1.0 - keep)
+                        shares = shares * keep
+                        cash += proceeds
+                cash -= fee_i
+                fee_accrued -= fee_i
+                value = float((shares * mark).sum()) + cash
 
-        cost_arr[i] = cost_i
-        net_r[i] = (1.0 + r_port) * (1.0 - (cost_i if not trade_at_open else 0.0)) - 1.0
         nav[i] = value
-        W[i] = w
-        cash_w[i] = c
+        r_port = (value / prev_value - 1.0) if (i > 0 and prev_value > 0) else 0.0
+        net_r[i] = r_port
+        gross_r[i] = ((value + cost_i + fee_i) / prev_value - 1.0) if (i > 0 and prev_value > 0) else 0.0
+        cost_arr[i] = cost_i / prev_value if prev_value > 0 else 0.0
+        fee_arr[i] = fee_i / prev_value if prev_value > 0 else 0.0
+        div_arr[i] = div_i / prev_value if prev_value > 0 else 0.0
+        SH[i] = shares
+        if value > 0:
+            W[i] = shares * mark / value
+            cash_w[i] = cash / value
 
     weights = pd.DataFrame(W, index=idx, columns=assets)
     trades_df = pd.DataFrame(trades) if trades else pd.DataFrame(
-        columns=["Date", "Instrument", "Weight Before", "Weight After", "Change"])
+        columns=["Date", "Instrument", "Shares Before", "Shares After",
+                 "Change", "Price", "Notional"])
 
     exposure = weights.abs().sum(axis=1)
     active = exposure[exposure > 1e-9]
@@ -313,6 +363,8 @@ def run_backtest(prices: pd.DataFrame,
         label=label,
         dividend_income=pd.Series(div_arr, index=idx),
         warmup_start=active.index[0] if len(active) else None,
+        shares=pd.DataFrame(SH, index=idx, columns=assets),
+        fees=pd.Series(fee_arr, index=idx),
     )
 
 

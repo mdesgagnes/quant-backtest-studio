@@ -93,6 +93,8 @@ def workbook_from_backtest(res: BacktestResult,
     })
     if res.dividend_income is not None:
         series["Dividend income"] = res.dividend_income
+    if res.fees is not None and float(res.fees.sum()) > 0:
+        series["Management fee"] = res.fees
     if bench is not None:
         series["Benchmark value"] = bench.equity
         series["Benchmark return"] = bench.returns
@@ -117,6 +119,8 @@ def workbook_from_backtest(res: BacktestResult,
         "Commission (bps)": cfg.costs.commission_bps,
         "Slippage (bps)": cfg.costs.slippage_bps,
         "Cash rate (annual)": cfg.costs.cash_rate_pa,
+        "Management fee (annual)": getattr(cfg.costs, "management_fee_pa", 0.0),
+        "Whole units only": "Yes" if getattr(cfg.engine, "whole_shares", False) else "No",
         "Max leverage": cfg.engine.max_leverage,
         "Strategy": cfg.strategy.name,
         "Period start": res.equity.index[0].date(),
@@ -143,6 +147,8 @@ def workbook_from_backtest(res: BacktestResult,
         _write(xw, res.weights, "Holdings History", index=True)
         _write(xw, res.target_weights, "Target Weights", index=True)
         _write(xw, res.trades, "Trades")
+        if res.shares is not None:
+            _write(xw, res.shares, "Share Counts", index=True)
         _write(xw, rebal, "Rebalance Dates")
         if params is not None and not params.empty:
             _write(xw, params, "Parameters")

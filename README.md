@@ -380,6 +380,19 @@ the label says.
 
 ## 5. Engine assumptions
 
+The simulation holds **share counts and a cash balance in currency**, not
+weights, and steps through one session at a time. Nothing in the loop reads
+a future row. Weights are an output, derived from units times price over
+value, rather than the thing being simulated.
+
+That distinction is what makes the rest of this section checkable. Every
+fill in the trade log carries the units traded and the price they filled
+at, so the execution assumption can be audited instead of trusted; and the
+reported value reconciles to units times close plus cash to machine
+precision on every session.
+
+
+
 They are explicit because they determine how credible the result is.
 
 1. **No look-ahead.** The strategy produces target weights at the close of
@@ -438,12 +451,27 @@ They are explicit because they determine how credible the result is.
 8. **Frictions on actual turnover.** Cost = sum(|target weight - current
    weight|) x (commission + slippage). Default: 5 bps + 25 bps, a
    conservative blended assumption for Canadian ETFs.
-9. **Cash is remunerated.** Either at a fixed rate, or by the return of a
+9. **Management fees.** An annual rate accrues daily on the marked value
+   and is deducted at each month-end, which is how a fee is actually
+   billed. A fully invested book has no idle cash to pay from, so the
+   deduction sells holdings pro rata, exactly as a fund liquidates units to
+   meet its own fee. Capping the charge at whatever cash happened to be
+   lying around would let a fully invested strategy quietly pay almost
+   nothing. Realized drag runs a little above the headline rate, because the
+   fee compounds against a growing balance: 1.00% per year costs about
+   1.07% of CAGR over a decade at 8%.
+
+10. **Whole units are optional.** Off by default, since most brokers now
+   support fractional shares. Turned on, every order rounds down to a whole
+   unit, which leaves idle cash and stops the book sitting exactly on its
+   targets -- realistic for a small account, and visible in the cash weight.
+
+11. **Cash is remunerated.** Either at a fixed rate, or by the return of a
    cash-equivalent ETF (PSA.TO, BIL): the opportunity cost of sitting out of
    the market is counted.
-10. **Adjustments under 0.5% of weight are ignored** (`min_trade_weight`), so
+12. **Adjustments under 0.5% of weight are ignored** (`min_trade_weight`), so
    the engine does not charge for trades no manager would place.
-11. **Survivorship bias is not handled automatically.** A universe built
+13. **Survivorship bias is not handled automatically.** A universe built
    today from ETFs that exist today carries that bias. The "Data" diagnostic
    flags histories shorter than the tested period.
 

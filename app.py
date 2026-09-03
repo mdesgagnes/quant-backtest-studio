@@ -402,8 +402,9 @@ def _pseudo_result(returns, equity, label):
         weights=one, target_weights=one, turnover=zero, costs=zero,
         exposure=pd.Series(1.0, index=idx), cash_weight=zero,
         rebalance_dates=pd.DatetimeIndex([]),
-        trades=pd.DataFrame(columns=["Date", "Instrument", "Weight Before",
-                                     "Weight After", "Change"]),
+        trades=pd.DataFrame(columns=["Date", "Instrument", "Shares Before",
+                                     "Shares After", "Change", "Price",
+                                     "Notional"]),
         label=label)
 
 
@@ -1215,11 +1216,11 @@ if mode == "builtin" and construction == "Blend of strategies":
                 for sp in strat_i.params:
                     wkey = f"bl_{i}_{key_i}_{sp.key}"
                     if sp.kind == "int":
-                        params_i[sp.key] = st.slider(
+                        params_i[sp.key] = st.number_input(
                             sp.label, int(sp.min), int(sp.max), int(sp.default),
                             int(sp.step), help=sp.help or None, key=wkey)
                     elif sp.kind == "float":
-                        params_i[sp.key] = st.slider(
+                        params_i[sp.key] = st.number_input(
                             sp.label, float(sp.min), float(sp.max),
                             float(sp.default), float(sp.step),
                             help=sp.help or None, key=wkey)
@@ -1263,13 +1264,16 @@ for p in (strategy.params if mode == "builtin" else []):
     key = f"p_{strat_key}_{p.key}"
     default = s0.params.get(p.key, p.default) if s0.name == strat_key else p.default
     if p.kind == "int":
-        params[p.key] = st.sidebar.slider(p.label, int(p.min), int(p.max),
-                                          int(default), int(p.step),
-                                          help=p.help or None, key=key)
+        # A number box, not a slider. Lookbacks are typed from memory --
+        # 252, 126, 63 -- and dragging to land on an exact value is
+        # needlessly fiddly for the one parameter people change most.
+        params[p.key] = st.sidebar.number_input(
+            p.label, int(p.min), int(p.max), int(default), int(p.step),
+            help=p.help or None, key=key)
     elif p.kind == "float":
-        params[p.key] = st.sidebar.slider(p.label, float(p.min), float(p.max),
-                                          float(default), float(p.step),
-                                          help=p.help or None, key=key)
+        params[p.key] = st.sidebar.number_input(
+            p.label, float(p.min), float(p.max), float(default),
+            float(p.step), help=p.help or None, key=key)
     elif p.kind == "bool":
         params[p.key] = st.sidebar.checkbox(p.label, bool(default),
                                             help=p.help or None, key=key)
@@ -1378,6 +1382,12 @@ with st.sidebar.expander("Execution", expanded=False):
     capital = st.number_input("Initial capital ($)", 1_000, 1_000_000_000,
                               int(e0.initial_capital), 10_000)
     max_lev = st.slider("Max leverage", 0.5, 2.0, float(e0.max_leverage), 0.1)
+    whole_shares = st.checkbox(
+        "Trade whole units only", value=bool(getattr(e0, "whole_shares", False)),
+        help="Rounds every order down to a whole share. Realistic for a "
+             "small account, where indivisibility leaves idle cash and the "
+             "book cannot sit exactly on its targets. Leave off to allow "
+             "fractional units, which most brokers now support.")
 
 with st.sidebar.expander("Frictions", expanded=False):
     comm = st.number_input("Commission (bps)", 0.0, 200.0, float(c0.commission_bps), 1.0)
@@ -1385,6 +1395,15 @@ with st.sidebar.expander("Frictions", expanded=False):
     cash_rate = st.number_input("Cash rate (annual %)", 0.0, 15.0,
                                 float(c0.cash_rate_pa * 100), 0.25,
                                 key="cashrate_pct") / 100.0
+    mgmt_fee = st.number_input(
+        "Management fee (annual %)", 0.0, 10.0,
+        float(getattr(c0, "management_fee_pa", 0.0) * 100), 0.05,
+        key="mgmtfee_pct",
+        help="Accrued daily on the marked value and deducted at each "
+             "month-end, which is how a fee is actually billed. A fully "
+             "invested book has no idle cash to pay from, so the deduction "
+             "sells holdings pro rata, exactly as a fund liquidates units "
+             "to meet its own fee.") / 100.0
 
 st.sidebar.markdown("")
 
@@ -1428,10 +1447,12 @@ cfg = RunConfig(
                         execution_lag=int(lag), max_leverage=float(max_lev),
                         execute_at_open=bool(exec_at_open and source == "Yahoo Finance"),
                         trim_warmup=bool(trim_warm),
+                        whole_shares=bool(whole_shares),
                         day_rule=day_rule, day_of_month=int(day_of_month),
                         weekday=int(weekday), nth=int(nth),
                         anchor_month=int(anchor_month)),
-    costs=CostConfig(commission_bps=comm, slippage_bps=slip, cash_rate_pa=cash_rate),
+    costs=CostConfig(commission_bps=comm, slippage_bps=slip,
+                     cash_rate_pa=cash_rate, management_fee_pa=mgmt_fee),
 )
 
 # ----------------------------------------------------------------------
@@ -1924,6 +1945,22 @@ with tabs[1]:
         dial("Cumulative friction cost", f"{drag*100:,.2f}%",
              "compounded as a percentage of value", "neg")
 
+    if res.fees is not None and float(res.fees.sum()) > 0:
+        eyebrow("Management fee")
+        _yrs = max(len(res.fees) / ppy, 1e-9)
+        g1, g2, g3 = st.columns(3)
+        with g1:
+            dial("Cumulative fee", f"{float(res.fees.sum())*100:,.2f}%",
+                 "of value, summed", "neg")
+        with g2:
+            dial("Average per year", f"{float(res.fees.sum())/_yrs*100:,.2f}%",
+                 f"headline rate {rcfg.costs.management_fee_pa*100:.2f}%")
+        with g3:
+            dial("Charges", f"{int(res.fees.gt(0).sum()):,}", "monthly deductions")
+        note("Accrued daily, deducted at each month-end. The realized drag "
+             "runs slightly above the headline rate because the fee "
+             "compounds against a growing balance.")
+
     if res.dividend_income is not None and float(res.dividend_income.sum()) > 0:
         eyebrow("Dividends")
         di = res.dividend_income
@@ -1972,9 +2009,17 @@ with tabs[1]:
         note("No trades were generated.")
     else:
         t = res.trades.copy()
-        for c in ("Weight Before", "Weight After", "Change"):
-            t[c] = t[c].map(lambda v: f"{v*100:+.2f}%")
+        for c in ("Shares Before", "Shares After"):
+            if c in t: t[c] = t[c].map(lambda v: f"{v:,.4f}".rstrip("0").rstrip("."))
+        if "Change" in t:
+            t["Change"] = t["Change"].map(lambda v: f"{v:+,.4f}".rstrip("0").rstrip("."))
+        for c in ("Price", "Notional"):
+            if c in t: t[c] = t[c].map(lambda v: f"{v:,.2f}")
         st.dataframe(t.tail(400), use_container_width=True, hide_index=True, height=380)
+        note("Every fill records the units traded and the price they filled "
+             "at, so the execution assumption can be checked rather than "
+             "taken on trust. With execution set to the open, these prices "
+             "are that session's opens.")
         st.download_button("Download full trade log (CSV)",
                            res.trades.to_csv(index=False).encode("utf-8"),
                            "trades.csv", "text/csv")
