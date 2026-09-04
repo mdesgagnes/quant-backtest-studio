@@ -469,7 +469,19 @@ They are explicit because they determine how credible the result is.
 11. **Cash is remunerated.** Either at a fixed rate, or by the return of a
    cash-equivalent ETF (PSA.TO, BIL): the opportunity cost of sitting out of
    the market is counted.
-12. **Adjustments under 0.5% of weight are ignored** (`min_trade_weight`), so
+12. **Adjustments under 0.5% of weight are ignored** (`min_trade_weight`),
+   so the engine does not charge for trades no manager would place. **Full
+   exits are exempt.** Closing a position is not a micro adjustment: if the
+   threshold could block it, a residual the model no longer wants would
+   survive, and under rotation those residuals accumulate until the book
+   holds more names than the strategy ever selected -- a "top 3" quietly
+   drifting to eight positions.
+
+   For the same reason a rebalance **sells before it buys**, using the
+   proceeds to fund the purchases. Scaling a whole order down when cash is
+   short would shrink the sales too, leaving positions half-closed.
+
+ (`min_trade_weight`), so
    the engine does not charge for trades no manager would place.
 13. **Survivorship bias is not handled automatically.** A universe built
    today from ETFs that exist today carries that bias. The "Data" diagnostic

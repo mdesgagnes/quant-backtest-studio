@@ -231,26 +231,45 @@ def run_backtest(prices: pd.DataFrame,
 
         delta = target_sh - shares
         notional = np.abs(delta) * np.where(ok, price_row, 0.0)
-        # Ignore adjustments too small to be worth their own commission.
-        tiny = notional < min_trade * portfolio_value
+
+        # Ignore adjustments too small to be worth their own commission --
+        # but never block a full exit. Closing a position is not a micro
+        # adjustment: skipping it leaves a residual the model no longer
+        # wants, and under rotation those residuals accumulate until the
+        # book holds more names than the strategy ever selected. A "top 3"
+        # that drifts to eight positions is the symptom.
+        exiting = (target_sh == 0.0) & (shares != 0.0)
+        tiny = (notional < min_trade * portfolio_value) & ~exiting
         delta = np.where(tiny, 0.0, delta)
-        notional = np.where(tiny, 0.0, notional)
         if not np.any(delta):
             return 0.0, 0.0
 
+        # Sell first, then buy with the proceeds -- the order a desk would
+        # actually use. Scaling the whole order when cash is short would
+        # shrink the sales too, which is precisely what leaves a position
+        # half-closed and the book holding names it meant to exit.
+        sells = np.where(delta < 0, delta, 0.0)
+        buys = np.where(delta > 0, delta, 0.0)
+
+        sell_notional = float((np.abs(sells) * np.where(ok, price_row, 0.0)).sum())
+        cash_avail = cash + sell_notional - sell_notional * fric
+
+        buy_notional = float((buys * np.where(ok, price_row, 0.0)).sum())
+        if buy_notional > 0:
+            need = buy_notional * (1.0 + fric)
+            if need > cash_avail + 1e-9:
+                scale = max(0.0, cash_avail / need) if need > 1e-12 else 0.0
+                buys = buys * min(1.0, scale)
+                if whole:
+                    buys = np.trunc(buys)
+                buy_notional = float((buys * np.where(ok, price_row, 0.0)).sum())
+
+        delta = sells + buys
+        notional = np.abs(delta) * np.where(ok, price_row, 0.0)
+        if not np.any(delta):
+            return 0.0, 0.0
         cost = float(notional.sum()) * fric
-        buy_cost = float((delta * np.where(ok, price_row, 0.0)).sum())
-        if buy_cost + cost > cash + 1e-9:
-            # Never spend money the book does not have. Scale the whole
-            # order down rather than filling some legs and not others.
-            room = max(0.0, cash - cost)
-            scale = room / buy_cost if buy_cost > 1e-12 else 0.0
-            delta = delta * max(0.0, min(1.0, scale))
-            if whole:
-                delta = np.trunc(delta)
-            notional = np.abs(delta) * np.where(ok, price_row, 0.0)
-            cost = float(notional.sum()) * fric
-            buy_cost = float((delta * np.where(ok, price_row, 0.0)).sum())
+        net_spend = float((delta * np.where(ok, price_row, 0.0)).sum())
 
         for j, a in enumerate(assets):
             if delta[j] != 0.0:
@@ -261,7 +280,7 @@ def run_backtest(prices: pd.DataFrame,
                     "Notional": float(abs(delta[j]) * price_row[j]),
                 })
         shares = shares + delta
-        cash -= buy_cost + cost
+        cash -= net_spend + cost
         return cost, float(notional.sum()) / portfolio_value
 
     # ------------------------------------------------------------------
