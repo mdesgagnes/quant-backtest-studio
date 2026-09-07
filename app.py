@@ -40,6 +40,7 @@ from qbt.brand import BRAND, css_variables
 from qbt import store as STORE
 from qbt import rules as RULES
 from qbt import monitor as MON
+from qbt import tvchart as TV
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -475,9 +476,43 @@ require_password()
 # ----------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_market(tickers: tuple, start: str, end: Optional[str],
-                 adjusted: bool, want_open: bool, want_div: bool) -> MarketData:
+                 adjusted: bool, want_open: bool, want_div: bool,
+                 want_ohlc: bool = False) -> MarketData:
     return load_market_data(list(tickers), start, end, adjusted=adjusted,
-                            want_open=want_open, want_dividends=want_div)
+                            want_open=want_open, want_dividends=want_div,
+                            want_ohlc=want_ohlc)
+
+
+def tv(html: str, height: int) -> None:
+    """Renders a TradingView chart, plus the credit its licence requires.
+
+    Streamlit has marked `components.v1.html` for removal in favour of
+    `st.iframe`, which takes a source rather than raw markup. Rather than
+    bet on either, this tries the component API and falls back to serving
+    the same document through a data URL. Both render in a sandboxed
+    iframe, so the embedded script cannot reach the host page either way.
+    """
+    rendered = False
+    try:
+        import streamlit.components.v1 as _components
+        _components.html(html, height=height + 6, scrolling=False)
+        rendered = True
+    except Exception:
+        rendered = False
+    if not rendered:
+        try:
+            import base64
+            src = ("data:text/html;base64,"
+                   + base64.b64encode(html.encode("utf-8")).decode("ascii"))
+            st.iframe(src, height=height + 6)
+            rendered = True
+        except Exception as exc:
+            st.markdown(
+                f'<div class="flag">The interactive chart could not be '
+                f'rendered ({exc}). Turn off the interactive option to use '
+                f'the static chart.</div>', unsafe_allow_html=True)
+    if rendered:
+        st.markdown(TV.attribution_html(), unsafe_allow_html=True)
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -567,11 +602,11 @@ if workspace == "Markets":
         try:
             with st.spinner("Loading prices..."):
                 raw = fetch_market(tuple(mk_tickers), str(mk_start), str(mk_end),
-                                   True, False, False)
+                                   True, False, False, True)
                 mk_prices, mk_quality = clean_prices(raw.close, DataConfig(
                     tickers=mk_tickers, start=str(mk_start), end=str(mk_end)))
             st.session_state["mk_data"] = {
-                "prices": mk_prices, "quality": mk_quality,
+                "prices": mk_prices, "quality": mk_quality, "market": raw,
                 "base": mk_base, "window": int(mk_win),
                 "stamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
             }
@@ -623,11 +658,50 @@ if workspace == "Markets":
         f'<span class="item">loaded {mk["stamp"]}</span></div>',
         unsafe_allow_html=True)
 
-    mtabs = st.tabs(["Performance", "Risk", "Relationships", "Seasonality",
-                     "Data"])
+    mtabs = st.tabs(["Chart", "Performance", "Risk", "Relationships",
+                     "Seasonality", "Data"])
+
+    # ---------------- Chart ----------------
+    with mtabs[0]:
+        mkt = mk.get("market")
+        pick_one = st.selectbox("Instrument", list(prices.columns), key="mk_one")
+        cc1, cc2 = st.columns([1, 3])
+        style = cc1.radio("Style", ["Candles", "Line"], horizontal=True,
+                          key="mk_style")
+        show_vol = cc2.checkbox("Show volume", value=True, key="mk_vol")
+
+        have_ohlc = (mkt is not None and mkt.high is not None
+                     and mkt.low is not None and mkt.open is not None
+                     and pick_one in (mkt.high.columns if mkt.high is not None else []))
+        if style == "Candles" and have_ohlc:
+            frame = pd.DataFrame({
+                "Open": mkt.open[pick_one], "High": mkt.high[pick_one],
+                "Low": mkt.low[pick_one], "Close": prices[pick_one],
+            }).dropna()
+            vol = (mkt.volume[pick_one] if (show_vol and mkt.volume is not None
+                                            and pick_one in mkt.volume.columns)
+                   else None)
+            tv(TV.candles(frame, vol, pick_one, height=480), 480)
+        else:
+            if style == "Candles":
+                st.markdown('<div class="flag">High and low prices were not '
+                            'available for this instrument, so it is drawn as '
+                            'a line.</div>', unsafe_allow_html=True)
+            tv(TV.line({pick_one: prices[pick_one].dropna()}, pick_one,
+                       height=440), 440)
+
+        eyebrow("Compare")
+        cmp_pick = st.multiselect("Instruments", list(prices.columns),
+                                  default=list(prices.columns)[:3],
+                                  key="mk_cmp")
+        if cmp_pick:
+            sub = prices[cmp_pick].dropna(how="all")
+            rebased = sub.div(sub.bfill().iloc[0]).mul(100.0)
+            tv(TV.line({c: rebased[c].dropna() for c in cmp_pick},
+                       "Rebased to 100", height=420), 420)
 
     # ---------------- Performance ----------------
-    with mtabs[0]:
+    with mtabs[1]:
         eyebrow("Return by horizon")
         grid = MON.performance_grid(prices)
         hcols = [c for c in grid.columns if c != "Instrument"]
@@ -659,7 +733,7 @@ if workspace == "Markets":
                 use_container_width=True, config={"displaylogo": False})
 
     # ---------------- Risk ----------------
-    with mtabs[1]:
+    with mtabs[2]:
         eyebrow("Risk profile")
         rg = MON.risk_grid(prices, window=win)
         disp = rg.copy()
@@ -698,7 +772,7 @@ if workspace == "Markets":
                 use_container_width=True, config={"displaylogo": False})
 
     # ---------------- Relationships ----------------
-    with mtabs[2]:
+    with mtabs[3]:
         eyebrow(f"Relative to {base}")
         rel = MON.relative_strength(prices, base)
         rel = rel.drop(columns=[base], errors="ignore")
@@ -745,7 +819,7 @@ if workspace == "Markets":
                             config={"displaylogo": False})
 
     # ---------------- Seasonality ----------------
-    with mtabs[3]:
+    with mtabs[4]:
         eyebrow("Average return by calendar month")
         se = MON.seasonality(prices)
         if not se.empty:
@@ -766,7 +840,7 @@ if workspace == "Markets":
             'coincidence, not a pattern.</div>', unsafe_allow_html=True)
 
     # ---------------- Data ----------------
-    with mtabs[4]:
+    with mtabs[5]:
         eyebrow("Coverage")
         st.dataframe(mk["quality"].per_asset, use_container_width=True,
                      hide_index=True)
@@ -2117,16 +2191,39 @@ with tabs[0]:
             dial(k, M.format_metric(k, v), sub, tone)
 
     st.write("")
-    c1, c2 = st.columns([3, 1])
+    c1, c2, c3 = st.columns([2, 1, 1])
     log_scale = c2.toggle("Log scale", value=True,
                           help="A log scale makes relative changes comparable "
                                "across the whole period.")
+    interactive = c3.toggle(
+        "Interactive chart", value=True, key="tvtoggle",
+        help="Draws the curve with TradingView's charting library and marks "
+             "every fill on it. Turn off for the static Plotly version.")
     curves = {res.label: res.equity}
     if bench is not None:
         curves[bench.label] = bench.equity
     rebased = align_results(curves)
-    st.plotly_chart(C.equity_curve(rebased, log_scale), use_container_width=True,
-                    config={"displaylogo": False})
+
+    if interactive:
+        # Trades marked on the curve: a drawdown can be read against what
+        # the strategy was doing at the time, rather than inferred from a
+        # separate table.
+        tv(TV.equity_with_trades(
+            res.equity, res.trades,
+            bench.equity if bench is not None else None,
+            res.label, height=470, log=log_scale), 470)
+        _n = len(res.trades["Date"].unique()) if not res.trades.empty else 0
+        if _n > 400:
+            note(f"{_n:,} rebalance dates; the chart marks the most recent "
+                 f"400. The full log is in the Positions tab.")
+        else:
+            note("Green arrows are days with buys, red are sells, and the "
+                 "label counts the instruments traded. The full log, with "
+                 "units and fill prices, is in the Positions tab.")
+    else:
+        st.plotly_chart(C.equity_curve(rebased, log_scale),
+                        use_container_width=True,
+                        config={"displaylogo": False})
 
     st.plotly_chart(C.underwater({k: v for k, v in curves.items()}),
                     use_container_width=True, config={"displaylogo": False})

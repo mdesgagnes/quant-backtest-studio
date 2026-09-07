@@ -163,6 +163,9 @@ class MarketData:
     open: Optional[pd.DataFrame] = None
     dividends: Optional[pd.DataFrame] = None
     adj_close: Optional[pd.DataFrame] = None   # total-return prices, when distinct
+    high: Optional[pd.DataFrame] = None        # for candlesticks
+    low: Optional[pd.DataFrame] = None
+    volume: Optional[pd.DataFrame] = None
     adjusted: bool = True
     notes: List[str] = None
 
@@ -192,7 +195,8 @@ def _extract(raw: pd.DataFrame, field: str, tickers: List[str]) -> Optional[pd.D
 def load_market_data(tickers: List[str], start: str, end: Optional[str] = None,
                      adjusted: bool = True,
                      want_open: bool = False,
-                     want_dividends: bool = False) -> MarketData:
+                     want_dividends: bool = False,
+                     want_ohlc: bool = False) -> MarketData:
     """Downloads prices, and optionally opens and dividends, in one call.
 
     `adjusted=False` is required for dividends to mean anything: Yahoo's
@@ -223,8 +227,17 @@ def load_market_data(tickers: List[str], start: str, end: Optional[str] = None,
     if close is None:
         raise RuntimeError("No price column found in the downloaded data.")
 
+    hi = lo = vol = None
+    if want_ohlc:
+        hi = _extract(raw, "High", tickers)
+        lo = _extract(raw, "Low", tickers)
+        vol = _extract(raw, "Volume", tickers)
+        if hi is None or lo is None:
+            notes.append("High and low prices were unavailable, so "
+                         "candlesticks fall back to a line.")
+
     op = None
-    if want_open:
+    if want_open or want_ohlc:
         op = _extract(raw, "Open", tickers)
         if op is None:
             notes.append("No opening prices available: execution falls back "
@@ -251,6 +264,7 @@ def load_market_data(tickers: List[str], start: str, end: Optional[str] = None,
                              "these symbols.")
 
     return MarketData(close=close, open=op, dividends=div, adj_close=adj,
+                      high=hi, low=lo, volume=vol,
                       adjusted=bool(adjusted), notes=notes)
 
     # note: when adjusted=True, close IS the total-return series and

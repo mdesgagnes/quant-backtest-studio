@@ -30,6 +30,39 @@ screen showing a blank P/E for half a watchlist is worse than one that never
 promised it. Price-derived analytics either work for every instrument or
 fail visibly for all of them.
 
+### Charting
+
+Price and equity charts are drawn with **TradingView Lightweight Charts**,
+which is TradingView's own library, Apache 2.0 licensed, about 35 KB, loaded
+from a CDN into a sandboxed iframe. It is used because the crosshair, the
+synced price and time labels, and the pan-and-zoom behaviour over tens of
+thousands of bars are what a price chart is judged on, and a general-purpose
+plotting library does not match them.
+
+**Attribution is a licence condition.** Crediting TradingView as the product
+creator and linking to tradingview.com on any user-facing page is required.
+That is satisfied by the attribution logo in the chart corner and the credit
+line printed beneath every chart. Neither should be removed.
+
+The version is pinned to 4.2.3 on purpose. The series API changed between
+v4 and v5, so tracking "latest" would mean the charts silently stop
+rendering the day the CDN rolls forward.
+
+Where it appears:
+
+- **Markets, Chart tab** -- candlesticks with a volume pane, or a line, for
+  one instrument; plus a rebased comparison of several.
+- **Backtest, Results** -- the equity curve with **every fill marked on it**,
+  green for buy days and red for sell days, so a drawdown can be read
+  against what the strategy was doing at the time instead of inferred from a
+  separate table. Beyond 400 rebalance dates the most recent are kept and
+  the chart says so. A toggle returns the static Plotly version.
+
+Nothing is scraped. TradingView's terms prohibit it, and the unofficial
+libraries that pull their data work by impersonating a browser session,
+which breaks without warning and risks the address being blocked. Prices
+come from the same free source as the rest of the application.
+
 ---
 
 ## 1. Local setup
@@ -818,6 +851,7 @@ qbt/
   external.py              imported target weights
   allocation.py            sleeves: asset-class budgets and composition
   monitor.py               market monitor analytics
+  tvchart.py               TradingView Lightweight Charts integration
   excel_export.py          complete multi-sheet workbook export
   formula.py               sandboxed expression evaluator
   presets.py               preset universes
