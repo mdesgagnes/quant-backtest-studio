@@ -447,6 +447,31 @@ the label says.
 
 ---
 
+## 4 sexies. Signals: reading the model between trades
+
+The **Signals** tab shows the quantity the model ranks on, per instrument,
+through time. Weights say what was chosen; the score says how close the
+runner-up came and how a name is trending while it sits out of the book,
+which is what makes the next rebalance foreseeable rather than a surprise.
+
+It carries: where each name stands right now, with score, rank, target
+weight, held weight and status; the score and the rank through time; the
+current spread across the universe; and both tables as CSV.
+
+**Score decides the ranking. It does not decide eligibility.** Most models
+apply a filter as well -- an absolute threshold, a trend test, a
+percentile screen -- so a name can rank first and still be excluded.
+Quantitative Momentum screens on raw momentum before ranking on the blended
+score, so the second-highest blended score is routinely left out. That is
+the model working, and the status column is there so it reads as a decision
+rather than a contradiction.
+
+Seventeen of the nineteen models expose a score. Buy & Hold and Fixed
+Weights do not, because they rank nothing, and the tab says so instead of
+inventing one.
+
+---
+
 ## 5. Engine assumptions
 
 The simulation holds **share counts and a cash balance in currency**, not

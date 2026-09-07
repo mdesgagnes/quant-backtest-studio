@@ -911,3 +911,353 @@ def _momentum_og(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
     return size_inverse_vol(mask, px, int(p["vol_window"]),
                             downside=sizing.startswith("Inverse Downside"),
                             slots=slots)
+
+
+# ======================================================================
+# Scorers
+# ----------------------------------------------------------------------
+# The quantity each model ranks on, exposed so it can be read between
+# trades. Weights say what was chosen; the score says by how much, and how
+# close the name that missed out came.
+#
+# Each of these recomputes the same expression its strategy uses. That is a
+# duplication, and duplication can drift, so they are deliberately written
+# as one-liners over the same shared indicators rather than as independent
+# reimplementations. A strategy whose ranking cannot be reduced to one
+# number per instrument -- a fixed allocation, buy and hold -- registers
+# nothing, and the interface shows target weights instead of inventing a
+# score for it.
+# ======================================================================
+from .base import register_scorer  # noqa: E402
+
+
+@register_scorer("xs_momentum")
+def _sc_xs_momentum(px, p):
+    base = px.shift(int(p["skip"]))
+    return base / base.shift(int(p["lookback"])) - 1.0
+
+
+@register_scorer("dual_momentum")
+def _sc_dual_momentum(px, p):
+    base = px.shift(int(p["skip"]))
+    return base / base.shift(int(p["lookback"])) - 1.0
+
+
+@register_scorer("momentum_og")
+def _sc_momentum_og(px, p):
+    n = int(p["lookback"])
+    return (px / px.shift(max(1, n - 1)) - 1.0) - (px / sma(px, n) - 1.0)
+
+
+@register_scorer("accelerating_momentum")
+def _sc_accelerating(px, p):
+    w = [int(p["w1"]), int(p["w2"]), int(p["w3"])]
+    return sum(px / px.shift(x) - 1.0 for x in w) / float(len(w))
+
+
+@register_scorer("quant_momentum")
+def _sc_quant_momentum(px, p):
+    lb, sk = int(p["lookback"]), int(p["skip"])
+    base = px.shift(sk)
+    mom_rank = (base / base.shift(lb) - 1.0).rank(axis=1, pct=True,
+                                                  na_option="keep")
+    fip_rank = (-_frog_in_the_pan(base, int(p["fip_window"]))).rank(
+        axis=1, pct=True, na_option="keep")
+    wgt = float(p["fip_weight"])
+    return (1 - wgt) * mom_rank + wgt * fip_rank.fillna(mom_rank)
+
+
+@register_scorer("trend_quality")
+def _sc_trend_quality(px, p):
+    def _pr(df):
+        return df.rank(axis=1, pct=True, na_option="keep")
+    return (_pr(total_return(px, int(p["mom_window"])))
+            + _pr(efficiency_ratio(px, int(p["er_window"])))
+            + _pr(px / sma(px, int(p["ma_window"])) - 1.0)) / 3.0
+
+
+@register_scorer("sma_trend")
+def _sc_sma_trend(px, p):
+    ma = ema(px, int(p["window"])) if p["ma_type"] == "EMA" else sma(px, int(p["window"]))
+    return px / ma - 1.0
+
+
+@register_scorer("tsmom")
+def _sc_tsmom(px, p):
+    return px / px.shift(int(p["lookback"])) - 1.0
+
+
+@register_scorer("turtle")
+def _sc_turtle(px, p):
+    # Distance to the entry breakout: above zero means a new high is being
+    # made, below tells you how far the price still has to travel.
+    hi = px.shift(1).rolling(int(p["entry"]), min_periods=int(p["entry"])).max()
+    return px / hi - 1.0
+
+
+@register_scorer("rsi_reversion")
+def _sc_rsi(px, p):
+    return rsi(px, int(p["rsi_window"]))
+
+
+@register_scorer("risk_parity")
+def _sc_risk_parity(px, p):
+    v = (downside_vol(px, int(p["vol_window"])) if bool(p["downside"])
+         else realized_vol(px, int(p["vol_window"])))
+    return v
+
+
+@register_scorer("trend_gated_weights")
+def _sc_trend_gated(px, p, cash=None):
+    """The gate itself: 1 full risk, 0.5 half, 0 out."""
+    n = int(p["tmom_window"])
+    asset_ret = px / px.shift(n) - 1.0
+    mode = p.get("benchmark_rate", "Cash setting (from the Data panel)")
+    if mode.startswith("Cash setting") and cash is not None:
+        c = pd.to_numeric(cash, errors="coerce").reindex(px.index).ffill()
+        hurdle = pd.DataFrame({col: (c / c.shift(n) - 1.0) for col in px.columns})
+    elif mode.startswith("Fixed rate set here"):
+        per = (1.0 + float(p["fixed_rate"]) / 100.0) ** (n / 252.0) - 1.0
+        hurdle = pd.DataFrame(per, index=px.index, columns=px.columns)
+    else:
+        hurdle = pd.DataFrame(0.0, index=px.index, columns=px.columns)
+    tmom = (asset_ret > hurdle).where(px.shift(n).notna() & hurdle.notna())
+    above = (px > sma(px, int(p["ma_window"]))).where(
+        sma(px, int(p["ma_window"])).notna())
+    mode_s = p["signals"]
+    if mode_s == "Absolute momentum only":
+        return tmom.astype(float)
+    if mode_s == "Moving average only":
+        return above.astype(float)
+    return (tmom.astype(float).fillna(0.0) + above.astype(float).fillna(0.0)) / 2.0
+
+
+@register_scorer("factor_rank")
+def _sc_factor_rank(px, p, exog=None):
+    if exog is None or exog.empty:
+        return pd.DataFrame(np.nan, index=px.index, columns=px.columns)
+    f = _match_columns(exog, px.columns).astype(float)
+    if p["direction"] == "Low value = favorable":
+        f = -f
+    score = _pct_rank(f)
+    b = float(p["blend_momentum"])
+    if b > 0:
+        mom = _pct_rank(total_return(px, int(p["mom_window"])))
+        score = (1 - b) * score.fillna(mom) + b * mom.fillna(score)
+    return score
+
+
+@register_scorer("exog_signal")
+def _sc_exog_signal(px, p, exog=None):
+    if exog is None or exog.empty:
+        return pd.DataFrame(np.nan, index=px.index, columns=px.columns)
+    return _match_columns(exog, px.columns).astype(float)
+
+
+@register_scorer("macro_gate")
+def _sc_macro_gate(px, p, exog=None):
+    """The regime series, broadcast across the universe.
+
+    The gate is portfolio-wide, so every instrument carries the same value;
+    that is the honest representation rather than a per-name score the
+    model does not compute.
+    """
+    col = p.get("series")
+    if exog is None or exog.empty or not col or col not in exog.columns:
+        return pd.DataFrame(np.nan, index=px.index, columns=px.columns)
+    s = pd.to_numeric(exog[col], errors="coerce")
+    return pd.DataFrame({c: s for c in px.columns})
+
+
+@register_scorer("custom_formula")
+def _sc_custom_formula(px, p, exog=None):
+    from ..formula import evaluate_frame, FormulaError
+    try:
+        return evaluate_frame(str(p.get("score") or ""), px,
+                              exog if (exog is not None and not exog.empty) else None)
+    except FormulaError:
+        return pd.DataFrame(np.nan, index=px.index, columns=px.columns)
+
+
+# ======================================================================
+# Scores
+# ----------------------------------------------------------------------
+# The quantity each model ranks on, exposed so it can be read between
+# trades. A strategy's weights say what it chose; the score says how close
+# the runner-up came and how a name is trending while it sits out of the
+# book, which is what makes the next rebalance predictable rather than a
+# surprise.
+#
+# Not every strategy appears here. Buy & Hold and Fixed Weights rank
+# nothing, and inventing a score for them would be worse than reporting
+# that they have none.
+# ======================================================================
+
+@register_scorer("xs_momentum")
+@register_scorer("dual_momentum")
+def _score_momentum(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    """Skip-adjusted total return: the figure the ranking is done on."""
+    base = px.shift(int(p.get("skip", 0)))
+    return base / base.shift(int(p["lookback"])) - 1.0
+
+
+@register_scorer("momentum_og")
+def _score_momentum_og(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    n = int(p["lookback"])
+    return (px / px.shift(max(1, n - 1)) - 1.0) - (px / sma(px, n) - 1.0)
+
+
+@register_scorer("accelerating_momentum")
+def _score_accelerating(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    windows = [int(p["w1"]), int(p["w2"]), int(p["w3"])]
+    return sum(px / px.shift(w) - 1.0 for w in windows) / float(len(windows))
+
+
+@register_scorer("quant_momentum")
+def _score_quant_momentum(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    lb, sk = int(p["lookback"]), int(p["skip"])
+    base = px.shift(sk)
+    mom_rank = (base / base.shift(lb) - 1.0).rank(axis=1, pct=True,
+                                                  na_option="keep")
+    fip_rank = (-_frog_in_the_pan(base, int(p["fip_window"]))).rank(
+        axis=1, pct=True, na_option="keep")
+    w = float(p["fip_weight"])
+    return (1 - w) * mom_rank + w * fip_rank.fillna(mom_rank)
+
+
+@register_scorer("trend_quality")
+def _score_trend_quality(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    mom = total_return(px, int(p["mom_window"]))
+    er = efficiency_ratio(px, int(p["er_window"]))
+    dist = px / sma(px, int(p["ma_window"])) - 1.0
+    r = lambda d: d.rank(axis=1, pct=True, na_option="keep")
+    return (r(mom) + r(er) + r(dist)) / 3.0
+
+
+@register_scorer("sma_trend")
+def _score_sma_trend(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    """Distance above the average. Positive means the filter is satisfied,
+    and the size says by how much -- a name at +0.2% is one bad day from
+    being sold, which a binary in-or-out signal would not show."""
+    ma = ema(px, int(p["window"])) if p["ma_type"] == "EMA" else sma(px, int(p["window"]))
+    return px / ma - 1.0
+
+
+@register_scorer("tsmom")
+def _score_tsmom(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    return px / px.shift(int(p["lookback"])) - 1.0
+
+
+@register_scorer("turtle")
+def _score_turtle(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    """Distance to the entry breakout. Zero is the trigger; negative is how
+    far the price still has to travel to reach a new high."""
+    hi = px.shift(1).rolling(int(p["entry"]), min_periods=int(p["entry"])).max()
+    return px / hi - 1.0
+
+
+@register_scorer("rsi_reversion")
+def _score_rsi(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    return rsi(px, int(p["rsi_window"]))
+
+
+@register_scorer("risk_parity")
+def _score_risk_parity(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    """Inverse volatility, the quantity weights are proportional to."""
+    v = (downside_vol(px, int(p["vol_window"])) if bool(p["downside"])
+         else realized_vol(px, int(p["vol_window"])))
+    return 1.0 / v.replace(0, np.nan)
+
+
+@register_scorer("vol_target")
+def _score_vol_target(px: pd.DataFrame, p: Dict[str, Any]) -> pd.DataFrame:
+    """Realized volatility against the target. Above 1 means the model is
+    scaling exposure down."""
+    rv = realized_vol(px, int(p["vol_window"]))
+    return rv / (float(p["target_vol"]) / 100.0)
+
+
+@register_scorer("trend_gated_weights")
+def _score_gated(px: pd.DataFrame, p: Dict[str, Any],
+                 cash: pd.Series = None) -> pd.DataFrame:
+    """The gate itself: 1 full risk, 0.5 half, 0 out."""
+    n = int(p["tmom_window"])
+    asset_ret = px / px.shift(n) - 1.0
+    mode_rate = p.get("benchmark_rate", "Cash setting (from the Data panel)")
+    if mode_rate.startswith("Cash setting") and cash is not None:
+        c = pd.to_numeric(cash, errors="coerce").reindex(px.index).ffill()
+        hurdle = pd.DataFrame({col: (c / c.shift(n) - 1.0) for col in px.columns})
+    elif mode_rate.startswith("Fixed rate set here"):
+        per = (1.0 + float(p["fixed_rate"]) / 100.0) ** (n / 252.0) - 1.0
+        hurdle = pd.DataFrame(per, index=px.index, columns=px.columns)
+    else:
+        hurdle = pd.DataFrame(0.0, index=px.index, columns=px.columns)
+    tmom = (asset_ret > hurdle).where(px.shift(n).notna() & hurdle.notna())
+    above = (px > sma(px, int(p["ma_window"]))).where(
+        sma(px, int(p["ma_window"])).notna())
+    mode = p["signals"]
+    if mode == "Absolute momentum only":
+        return tmom.astype(float)
+    if mode == "Moving average only":
+        return above.astype(float)
+    return (tmom.astype(float).fillna(0.0) + above.astype(float).fillna(0.0)) / 2.0
+
+
+@register_scorer("factor_rank")
+def _score_factor(px: pd.DataFrame, p: Dict[str, Any],
+                  exog: pd.DataFrame = None) -> pd.DataFrame:
+    ex = exog if exog is not None else pd.DataFrame(index=px.index)
+    f = _match_columns(ex, px.columns).astype(float)
+    if p["direction"] == "Low value = favorable":
+        f = -f
+    score = _pct_rank(f)
+    b = float(p["blend_momentum"])
+    if b > 0:
+        mom = _pct_rank(total_return(px, int(p["mom_window"])))
+        score = (1 - b) * score.fillna(mom) + b * mom.fillna(score)
+    return score
+
+
+@register_scorer("exog_signal")
+def _score_exog_signal(px: pd.DataFrame, p: Dict[str, Any],
+                       exog: pd.DataFrame = None) -> pd.DataFrame:
+    ex = exog if exog is not None else pd.DataFrame(index=px.index)
+    return _match_columns(ex, px.columns).astype(float)
+
+
+@register_scorer("macro_gate")
+def _score_macro_gate(px: pd.DataFrame, p: Dict[str, Any],
+                      exog: pd.DataFrame = None) -> pd.DataFrame:
+    """The regime switch, broadcast across the universe. It is one number
+    for the whole portfolio, repeated per column so it plots alongside the
+    others."""
+    ex = exog if exog is not None else pd.DataFrame(index=px.index)
+    col = p.get("series")
+    if not col or col not in ex.columns:
+        return pd.DataFrame(1.0, index=px.index, columns=px.columns)
+    s = pd.to_numeric(ex[col], errors="coerce")
+    n = int(p["window"])
+    rule = p["rule"]
+    if rule == "Above its moving average":
+        on = s > s.rolling(n, min_periods=max(5, n // 4)).mean()
+    elif rule == "Positive change":
+        on = s.diff(n) > 0
+    else:
+        mu = s.rolling(n, min_periods=max(5, n // 4)).mean()
+        sd = s.rolling(n, min_periods=max(5, n // 4)).std(ddof=1)
+        z = (s - mu) / sd.replace(0, np.nan)
+        on = z > p["threshold"] if rule == "Z-score above threshold" else z < p["threshold"]
+    expo = on.map({True: 1.0, False: float(p["risk_off"])}).astype(float)
+    expo = expo.reindex(px.index).ffill()
+    return pd.DataFrame({c: expo for c in px.columns})
+
+
+@register_scorer("custom_formula")
+def _score_custom(px: pd.DataFrame, p: Dict[str, Any],
+                  exog: pd.DataFrame = None) -> pd.DataFrame:
+    from ..formula import evaluate_frame, FormulaError
+    try:
+        return evaluate_frame(str(p.get("score") or ""), px,
+                              exog if exog is not None and not exog.empty else None)
+    except FormulaError:
+        return pd.DataFrame(np.nan, index=px.index, columns=px.columns)

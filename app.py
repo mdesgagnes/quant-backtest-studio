@@ -2178,7 +2178,8 @@ if run.get("trimmed"):
     _bits.append('<span class="item">warm-up trimmed</span>')
 st.markdown(f'<div class="runbar">{"".join(_bits)}</div>', unsafe_allow_html=True)
 
-tabs = st.tabs(["Results", "Positions", "Robustness", "Data", "Builder", "Export"])
+tabs = st.tabs(["Results", "Signals", "Positions", "Robustness", "Data",
+                "Builder", "Export"])
 
 # --------------------------- RESULTS -----------------------------------
 with tabs[0]:
@@ -2297,8 +2298,119 @@ with tabs[0]:
     st.dataframe(signed(dd_tbl, ["Drawdown"]), use_container_width=True,
                  hide_index=True)
 
-# --------------------------- POSITIONS ----------------------------------
+# --------------------------- SIGNALS -------------------------------------
 with tabs[1]:
+    _sk = run.get("strategy_key")
+    _strat = REGISTRY.get(_sk) if run_mode == "builtin" else None
+    _params = run.get("params", {})
+
+    if _strat is None:
+        note("Imported target weights carry no model, so there is no score "
+             "to show. The weights themselves are in Positions.")
+    else:
+        try:
+            _score = _strat.score(universe, _params, exog_used,
+                                  run.get("cash_series"))
+        except Exception as exc:
+            _score = None
+            st.markdown(f'<div class="flag">The score could not be computed: '
+                        f'{exc}</div>', unsafe_allow_html=True)
+
+        _tw = res.target_weights.reindex(columns=universe.columns)
+        _held = res.weights.reindex(columns=universe.columns)
+        _last = _held.index[-1]
+
+        if _score is None:
+            note(f"{_strat.label} does not rank on a single number \u2014 it "
+                 f"allocates by rule rather than by score \u2014 so there is "
+                 f"nothing to display beyond the target weights below.")
+        else:
+            eyebrow(f"Where each name stands as of {_last.date()}")
+            _s_now = _score.loc[_last]
+            _rank = _s_now.rank(ascending=False, method="min")
+            cur_tbl = pd.DataFrame({
+                "Instrument": universe.columns,
+                "Score": [_s_now.get(c, np.nan) for c in universe.columns],
+                "Rank": [_rank.get(c, np.nan) for c in universe.columns],
+                "Target weight": [_tw.loc[_last].get(c, 0.0) for c in universe.columns],
+                "Held": [_held.loc[_last].get(c, 0.0) for c in universe.columns],
+            }).sort_values("Score", ascending=False, na_position="last")
+            cur_tbl["Status"] = np.where(
+                cur_tbl["Held"].abs() > 1e-9, "Held",
+                np.where(cur_tbl["Target weight"].abs() > 1e-9,
+                         "Ordered", "Not held"))
+            disp = cur_tbl.copy()
+            disp["Score"] = disp["Score"].map(
+                lambda v: "\u2014" if pd.isna(v) else f"{v:,.4f}")
+            disp["Rank"] = disp["Rank"].map(
+                lambda v: "\u2014" if pd.isna(v) else f"{int(v)}")
+            for c in ("Target weight", "Held"):
+                disp[c] = disp[c].map(lambda v: f"{v*100:.2f}%")
+            st.dataframe(signed(disp, ["Held", "Target weight"]),
+                         use_container_width=True, hide_index=True)
+
+            _gap = int((cur_tbl["Status"] == "Not held").sum())
+            note("Score is what the model ranks on; it is not the whole "
+                 "decision. Most models apply a filter as well \u2014 an "
+                 "absolute threshold, a trend test, a screen \u2014 so a "
+                 "high-scoring name can still be excluded. Read the score "
+                 "for the ordering and the status for the outcome."
+                 + (f" {_gap} of {len(cur_tbl)} names are currently out."
+                    if _gap else ""))
+
+            eyebrow("Score through time")
+            _pick = st.multiselect(
+                "Instruments", list(universe.columns),
+                default=list(cur_tbl["Instrument"].head(5)), key="sig_pick")
+            if _pick:
+                _sub = _score[_pick].dropna(how="all")
+                if not _sub.empty:
+                    st.plotly_chart(
+                        C.equity_curve(_sub, False, "Model score"),
+                        use_container_width=True,
+                        config={"displaylogo": False})
+
+            eyebrow("Rank through time")
+            _rk = _score.rank(axis=1, ascending=False, method="min")
+            if _pick and not _rk.empty:
+                st.plotly_chart(
+                    C.equity_curve(_rk[_pick].dropna(how="all"), False,
+                                   "Rank, 1 is the strongest"),
+                    use_container_width=True, config={"displaylogo": False})
+                note("A line that stays low is persistently favoured. Lines "
+                     "that cross often mean the model is reshuffling, which "
+                     "shows up as turnover.")
+
+            eyebrow("Score distribution now")
+            _fin = _s_now.dropna()
+            if not _fin.empty:
+                st.plotly_chart(
+                    C.bar_series(_fin.sort_values(ascending=False).index,
+                                 _fin.sort_values(ascending=False).values,
+                                 "Current score by instrument"),
+                    use_container_width=True, config={"displaylogo": False})
+
+            eyebrow("Download")
+            sg1, sg2 = st.columns(2)
+            sg1.download_button("Score history (CSV)",
+                                _score.to_csv().encode("utf-8"),
+                                "scores.csv", "text/csv", key="dlscore")
+            sg2.download_button("Current standing (CSV)",
+                                cur_tbl.to_csv(index=False).encode("utf-8"),
+                                "signal_now.csv", "text/csv", key="dlsignow")
+
+        eyebrow("Target weights through time")
+        st.plotly_chart(C.weights_area(_tw.clip(lower=0), None,
+                                       "What the model asked for"),
+                        use_container_width=True,
+                        config={"displaylogo": False})
+        note("Target weights are the signal the engine acts on, shifted by "
+             "the execution lag. Positions shows what was actually held "
+             "after drift and frictions.")
+
+
+# --------------------------- POSITIONS ----------------------------------
+with tabs[2]:
     if w_report is not None:
         eyebrow("Target weights file check")
         a, b, c, d = st.columns(4)
@@ -2434,7 +2546,7 @@ with tabs[1]:
                            "trades.csv", "text/csv")
 
 # --------------------------- ROBUSTNESS ----------------------------------
-with tabs[2]:
+with tabs[3]:
     note("A single backtest is only one observation. These four tests probe "
          "whether the result holds up beyond the exact parameter set chosen.")
 
@@ -2633,7 +2745,7 @@ with tabs[2]:
                          use_container_width=True, hide_index=True)
 
 # --------------------------- DATA ----------------------------------------
-with tabs[3]:
+with tabs[4]:
     a, b, c = st.columns(3)
     with a:
         dial("Sessions", f"{quality.rows:,}")
@@ -2701,7 +2813,7 @@ with tabs[3]:
                        universe.to_csv().encode("utf-8"), "prices.csv", "text/csv")
 
 # --------------------------- BUILDER --------------------------------------
-with tabs[4]:
+with tabs[5]:
     note("Build a strategy from criteria. Each rule is an indicator, a "
          "comparison and a value; rules combine into a filter that decides "
          "what is eligible and a score that ranks it. The result compiles to "
@@ -2871,7 +2983,7 @@ with tabs[4]:
 
 
 # --------------------------- EXPORT ---------------------------------------
-with tabs[5]:
+with tabs[6]:
     note("Every export below reproduces the backtest currently on screen. "
          "The tearsheet is the fastest way to share a result; the workbook "
          "and CSVs are for further analysis elsewhere.")
