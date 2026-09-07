@@ -10,6 +10,28 @@ interface (`app.py`) is just a front end: all logic lives in pure functions.
 
 ---
 
+## 0. Two workspaces
+
+The sidebar switches between them.
+
+**Backtest** simulates a strategy: data, signal, execution, frictions,
+robustness, exports. Everything from section 2 onward describes it.
+
+**Markets** describes a watchlist rather than simulating one. Return across
+ten horizons, risk and drawdown, relative strength against a reference,
+rolling correlation and beta, the most and least correlated pairs, and
+seasonality. It shares the same data layer, so anything the backtester can
+load, the monitor can analyse.
+
+Everything in Markets is derived from prices, and that is deliberate. Free
+fundamental endpoints are inconsistent between tickers, change shape without
+warning, and come back empty for anything outside large-cap US equity. A
+screen showing a blank P/E for half a watchlist is worse than one that never
+promised it. Price-derived analytics either work for every instrument or
+fail visibly for all of them.
+
+---
+
 ## 1. Local setup
 
 ```bash
@@ -795,6 +817,7 @@ qbt/
   exog.py                  exogenous series, publication lag
   external.py              imported target weights
   allocation.py            sleeves: asset-class budgets and composition
+  monitor.py               market monitor analytics
   excel_export.py          complete multi-sheet workbook export
   formula.py               sandboxed expression evaluator
   presets.py               preset universes

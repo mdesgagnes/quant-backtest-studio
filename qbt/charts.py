@@ -297,3 +297,49 @@ def correlation_matrix(corr: pd.DataFrame,
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(autorange="reversed", showgrid=False)
     return fig
+
+
+def scatter_points(df: pd.DataFrame, x: str, y: str, label: str,
+                   title: str = "", x_suffix: str = "%", y_suffix: str = "%",
+                   theme: str = "dark") -> go.Figure:
+    """Labelled scatter, for risk against return.
+
+    Each point is named on the chart rather than in a legend: with a dozen
+    instruments a legend forces the eye to travel back and forth, and the
+    whole value of this view is seeing which name sits where.
+    """
+    pal, colors = _colors(theme)
+    fig = go.Figure(go.Scatter(
+        x=df[x], y=df[y], mode="markers+text",
+        text=df[label], textposition="top center",
+        textfont=dict(family=MONO, size=10, color=pal["muted"]),
+        marker=dict(size=11, color=pal["brass"],
+                    line=dict(width=1, color=pal["ink"])),
+        hovertemplate=("%{text}<br>" + x + ": %{x:.2f}" + x_suffix +
+                       "<br>" + y + ": %{y:.2f}" + y_suffix + "<extra></extra>"),
+    ))
+    _base(fig, 420, title, theme)
+    fig.update_layout(hovermode="closest")
+    fig.update_xaxes(title=x, ticksuffix=x_suffix, zeroline=True,
+                     zerolinecolor=pal["rule"])
+    fig.update_yaxes(title=y, ticksuffix=y_suffix, zeroline=True,
+                     zerolinecolor=pal["rule"])
+    return fig
+
+
+def multi_line(df: pd.DataFrame, title: str = "", suffix: str = "",
+               ref: Optional[float] = None, theme: str = "dark") -> go.Figure:
+    """Several series on one axis, for rolling correlation or beta."""
+    pal, colors = _colors(theme)
+    fig = go.Figure()
+    for i, col in enumerate(df.columns):
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df[col], name=str(col), mode="lines",
+            line=dict(color=colors[i % len(colors)], width=1.5),
+            hovertemplate="%{y:.2f}<extra>" + str(col) + "</extra>",
+        ))
+    if ref is not None:
+        fig.add_hline(y=ref, line=dict(color=pal["muted"], width=1, dash="dot"))
+    _base(fig, 340, title, theme)
+    fig.update_yaxes(ticksuffix=suffix)
+    return fig

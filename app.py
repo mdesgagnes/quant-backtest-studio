@@ -39,6 +39,7 @@ from qbt import schedule as SCHED
 from qbt.brand import BRAND, css_variables
 from qbt import store as STORE
 from qbt import rules as RULES
+from qbt import monitor as MON
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -353,6 +354,45 @@ def _sign_color(v) -> str:
     return f"color:{TEAL}" if f > 0 else (f"color:{RUST}" if f < 0 else f"color:{DIM}")
 
 
+def heat(df, cols, pct: bool = True):
+    """A value grid shaded by magnitude, the way a market screen reads.
+
+    Colour is computed here rather than through a pandas gradient, which
+    would pull in matplotlib for one visual effect and add fifty megabytes
+    to a free-tier deploy. Alpha scales with the value relative to the
+    largest absolute figure in the grid, so a quiet month is faintly tinted
+    and a violent one is not.
+    """
+    if df is None or getattr(df, "empty", True):
+        return df
+    use = [c for c in cols if c in df.columns]
+    if not use:
+        return df
+    vals = pd.to_numeric(df[use].stack(), errors="coerce").abs()
+    scale = float(vals.quantile(0.95)) if len(vals.dropna()) else 0.0
+    if not scale or scale != scale:
+        scale = 1.0
+
+    def _cell(v):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return f"color:{DIM}"
+        if f != f:
+            return f"color:{DIM}"
+        a = min(0.42, abs(f) / scale * 0.42)
+        if f > 0:
+            return f"background-color:rgba(79,183,154,{a:.3f}); color:{BRAND['text']}"
+        if f < 0:
+            return f"background-color:rgba(232,112,92,{a:.3f}); color:{BRAND['text']}"
+        return f"color:{DIM}"
+
+    styler = df.style.map(_cell, subset=use)
+    fmt = "{:+.2%}" if pct else "{:+.2f}"
+    return styler.format({c: (lambda v, f=fmt: "\u2014" if pd.isna(v)
+                              else f.format(v)) for c in use})
+
+
 def signed(df, cols=None, emphasise=None):
     """Returns a Styler that colours the given columns by sign.
 
@@ -434,6 +474,13 @@ require_password()
 # Data loading (cached)
 # ----------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=3600)
+def fetch_market(tickers: tuple, start: str, end: Optional[str],
+                 adjusted: bool, want_open: bool, want_div: bool) -> MarketData:
+    return load_market_data(list(tickers), start, end, adjusted=adjusted,
+                            want_open=want_open, want_dividends=want_div)
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
 def fetch_yf(tickers: tuple, start: str, end: Optional[str], field: str) -> pd.DataFrame:
     return load_yfinance(list(tickers), start, end, field)
 
@@ -462,10 +509,283 @@ def parse_weights(content: bytes, name: str, sheet: Optional[str]) -> pd.DataFra
 # ----------------------------------------------------------------------
 # Sidebar
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# Workspace. Two tools that share a data layer: one simulates a strategy,
+# the other describes a market. Keeping them apart stops the sidebar from
+# holding sixty controls of which forty are irrelevant to what is on screen.
+# ----------------------------------------------------------------------
+WORKSPACES = ["Backtest", "Markets"]
+workspace = st.sidebar.radio("Workspace", WORKSPACES, horizontal=True,
+                             label_visibility="collapsed", key="workspace")
+
 st.sidebar.markdown(
     '<div style="font-family:IBM Plex Mono,monospace;font-size:.68rem;'
     'letter-spacing:.18em;text-transform:uppercase;color:#C9A227;'
     'padding:.2rem 0 .8rem;">Settings</div>', unsafe_allow_html=True)
+
+# ======================================================================
+# MARKETS WORKSPACE
+# ======================================================================
+if workspace == "Markets":
+    st.sidebar.markdown('<div class="eyebrow">Watchlist</div>',
+                        unsafe_allow_html=True)
+    _mk_preset_names = ["\u2014 custom \u2014"] + PRESETS.names()
+    mk_preset = st.sidebar.selectbox("Preset", _mk_preset_names, key="mk_preset")
+    if mk_preset != st.session_state.get("_mk_applied"):
+        st.session_state["_mk_applied"] = mk_preset
+        if not mk_preset.startswith("\u2014"):
+            st.session_state["mk_tickers"] = "\n".join(
+                PRESETS.get(mk_preset)["tickers"])
+    st.session_state.setdefault(
+        "mk_tickers", "XIC.TO\nXBB.TO\nSPY\nEFA\nEEM\nGLD\nTLT\nVNQ")
+    mk_txt = st.sidebar.text_area("Symbols", key="mk_tickers", height=150)
+    mk_tickers = [t.strip().upper() for t in
+                  mk_txt.replace(",", "\n").replace(";", "\n").split("\n")
+                  if t.strip()]
+
+    mc1, mc2 = st.sidebar.columns(2)
+    mk_start = mc1.date_input("From", value=date(date.today().year - 5, 1, 1),
+                              min_value=date(1970, 1, 1),
+                              max_value=date.today(), key="mk_start")
+    mk_end = mc2.date_input("To", value=date.today(), min_value=date(1971, 1, 1),
+                            max_value=date.today(), key="mk_end")
+    mk_base = st.sidebar.selectbox(
+        "Reference", mk_tickers or ["\u2014"], key="mk_base",
+        help="Relative strength, rolling correlation and beta are all "
+             "measured against this instrument.")
+    mk_win = st.sidebar.number_input(
+        "Rolling window (sessions)", 20, 756, 126, 1, key="mk_win",
+        help="126 sessions is about six months.")
+    mk_run = st.sidebar.button("Load markets", key="mk_run")
+
+    st.markdown(
+        '<div class="masthead"><div><h1>Markets</h1>'
+        '<div class="sub">Performance &nbsp;\u00b7&nbsp; Risk &nbsp;\u00b7&nbsp; '
+        'Relationships</div></div></div>', unsafe_allow_html=True)
+
+    if mk_run and mk_tickers:
+        try:
+            with st.spinner("Loading prices..."):
+                raw = fetch_market(tuple(mk_tickers), str(mk_start), str(mk_end),
+                                   True, False, False)
+                mk_prices, mk_quality = clean_prices(raw.close, DataConfig(
+                    tickers=mk_tickers, start=str(mk_start), end=str(mk_end)))
+            st.session_state["mk_data"] = {
+                "prices": mk_prices, "quality": mk_quality,
+                "base": mk_base, "window": int(mk_win),
+                "stamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            }
+        except Exception as exc:
+            st.error(f"Could not load: {exc}")
+
+    mk = st.session_state.get("mk_data")
+    if mk is None:
+        note("Enter a watchlist on the left and load it. Everything on this "
+             "screen is derived from prices, so it works for any instrument "
+             "the backtester can load \u2014 no fundamentals, and nothing "
+             "that silently comes back empty for half a list.")
+        eyebrow("What this shows")
+        _rows = [
+            ("Performance", "Return over ten standard horizons, with anything "
+                            "beyond a year annualized and anything the history "
+                            "does not cover left blank."),
+            ("Risk", "Volatility, drawdown, skew and how far each name sits "
+                     "below its own high right now."),
+            ("Relationships", "Relative strength against a reference, rolling "
+                              "correlation and beta, and the most and least "
+                              "correlated pairs."),
+            ("Seasonality", "Average return by calendar month, with the number "
+                            "of years behind each average shown alongside."),
+        ]
+        _c = st.columns(len(_rows))
+        for col, (t, b) in zip(_c, _rows):
+            with col:
+                st.markdown(f'<div class="startcard"><div class="n">{t}</div>'
+                            f'<div class="b" style="margin-top:.4rem;">{b}</div>'
+                            f'</div>', unsafe_allow_html=True)
+        st.stop()
+
+    prices = mk["prices"]
+    base = mk["base"] if mk["base"] in prices.columns else (
+        prices.columns[0] if len(prices.columns) else None)
+    win = mk["window"]
+    if prices.empty or base is None:
+        st.error("No usable price data for that watchlist.")
+        st.stop()
+
+    st.markdown(
+        f'<div class="runbar"><span class="lead">{len(prices.columns)} '
+        f'instruments</span>'
+        f'<span class="item">{prices.index[0].date()} &rarr; '
+        f'{prices.index[-1].date()}</span>'
+        f'<span class="item">reference <b>{base}</b></span>'
+        f'<span class="item">rolling {win} sessions</span>'
+        f'<span class="item">loaded {mk["stamp"]}</span></div>',
+        unsafe_allow_html=True)
+
+    mtabs = st.tabs(["Performance", "Risk", "Relationships", "Seasonality",
+                     "Data"])
+
+    # ---------------- Performance ----------------
+    with mtabs[0]:
+        eyebrow("Return by horizon")
+        grid = MON.performance_grid(prices)
+        hcols = [c for c in grid.columns if c != "Instrument"]
+        st.dataframe(heat(grid, hcols), use_container_width=True,
+                     hide_index=True, height=min(620, 60 + 36 * len(grid)))
+        note("Horizons beyond one year are annualized; shorter ones are "
+             "cumulative. A blank means the history does not reach that far "
+             "back \u2014 the window is omitted rather than measured over a "
+             "shorter span under a longer label.")
+
+        eyebrow("Rebased to 100")
+        pick = st.multiselect("Instruments", list(prices.columns),
+                              default=list(prices.columns)[:6], key="mk_norm")
+        if pick:
+            sub = prices[pick].dropna(how="all")
+            st.plotly_chart(C.equity_curve(align_results(
+                {c: sub[c].dropna() for c in pick}), True,
+                "Total price, rebased to 100"),
+                use_container_width=True, config={"displaylogo": False})
+
+        eyebrow("Risk against return")
+        rr = MON.risk_return_points(prices)
+        if not rr.empty:
+            plot = rr.copy()
+            plot["Volatility"] *= 100; plot["Return"] *= 100
+            st.plotly_chart(
+                C.scatter_points(plot, "Volatility", "Return", "Instrument",
+                                 "Annualized, over the loaded period"),
+                use_container_width=True, config={"displaylogo": False})
+
+    # ---------------- Risk ----------------
+    with mtabs[1]:
+        eyebrow("Risk profile")
+        rg = MON.risk_grid(prices, window=win)
+        disp = rg.copy()
+        for c in ("Volatility", "Vol (recent)", "Max Drawdown",
+                  "Current Drawdown", "% Positive Days"):
+            if c in disp:
+                disp[c] = disp[c].map(
+                    lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
+        for c in ("Sharpe", "Sortino", "Skew", "Kurtosis"):
+            if c in disp:
+                disp[c] = disp[c].map(
+                    lambda v: "\u2014" if pd.isna(v) else f"{v:.2f}")
+        st.dataframe(signed(disp, ["Volatility", "Vol (recent)", "Max Drawdown",
+                                   "Current Drawdown", "Sharpe", "Sortino"]),
+                     use_container_width=True, hide_index=True)
+
+        eyebrow("Distance from the high")
+        dd = MON.drawdown_summary(prices)
+        if not dd.empty:
+            st.plotly_chart(
+                C.bar_series(dd["Instrument"], (dd["Current Drawdown"]*100).tolist(),
+                             "Current drawdown", "%"),
+                use_container_width=True, config={"displaylogo": False})
+            d2 = dd.copy()
+            for c in ("Current Drawdown", "Max Drawdown"):
+                d2[c] = d2[c].map(lambda v: f"{v*100:+.2f}%")
+            st.dataframe(signed(d2, ["Current Drawdown", "Max Drawdown"]),
+                         use_container_width=True, hide_index=True)
+
+        eyebrow("Underwater")
+        upick = st.multiselect("Instruments ", list(prices.columns),
+                               default=list(prices.columns)[:4], key="mk_uw")
+        if upick:
+            st.plotly_chart(
+                C.underwater({c: prices[c].dropna() for c in upick}),
+                use_container_width=True, config={"displaylogo": False})
+
+    # ---------------- Relationships ----------------
+    with mtabs[2]:
+        eyebrow(f"Relative to {base}")
+        rel = MON.relative_strength(prices, base)
+        rel = rel.drop(columns=[base], errors="ignore")
+        if not rel.empty:
+            st.plotly_chart(
+                C.equity_curve(rel, False,
+                               f"Ratio to {base}, rebased to 100"),
+                use_container_width=True, config={"displaylogo": False})
+            note("A rising line is outperformance against the reference, "
+                 "which is a different question from whether the instrument "
+                 "itself rose.")
+
+        eyebrow("Correlation")
+        st.plotly_chart(C.correlation_matrix(prices.pct_change().corr()),
+                        use_container_width=True, config={"displaylogo": False})
+        pairs = MON.correlation_pairs(prices, 8)
+        pc1, pc2 = st.columns(2)
+        with pc1:
+            st.markdown("**Most correlated**")
+            if not pairs["highest"].empty:
+                h = pairs["highest"].copy()
+                h["Correlation"] = h["Correlation"].map(lambda v: f"{v:.3f}")
+                st.dataframe(h, use_container_width=True, hide_index=True)
+        with pc2:
+            st.markdown("**Least correlated**")
+            if not pairs["lowest"].empty:
+                l = pairs["lowest"].copy()
+                l["Correlation"] = l["Correlation"].map(lambda v: f"{v:.3f}")
+                st.dataframe(signed(l, ["Correlation"]),
+                             use_container_width=True, hide_index=True)
+
+        eyebrow(f"Rolling correlation with {base}")
+        rc = MON.rolling_correlation(prices, base, win)
+        if not rc.empty:
+            st.plotly_chart(C.multi_line(rc, f"{win}-session correlation",
+                                         ref=0.0),
+                            use_container_width=True,
+                            config={"displaylogo": False})
+        eyebrow(f"Rolling beta to {base}")
+        rb = MON.rolling_beta(prices, base, win)
+        if not rb.empty:
+            st.plotly_chart(C.multi_line(rb, f"{win}-session beta", ref=1.0),
+                            use_container_width=True,
+                            config={"displaylogo": False})
+
+    # ---------------- Seasonality ----------------
+    with mtabs[3]:
+        eyebrow("Average return by calendar month")
+        se = MON.seasonality(prices)
+        if not se.empty:
+            st.dataframe(heat((se * 100).round(2).reset_index()
+                              .rename(columns={"index": "Instrument"}),
+                              list(se.columns), pct=False),
+                         use_container_width=True, hide_index=True)
+            counts = MON.seasonality_counts(prices)
+            st.dataframe(pd.DataFrame({
+                "Instrument": counts.index,
+                "Years of data": counts.values}),
+                use_container_width=True, hide_index=True)
+        st.markdown(
+            '<div class="flag">Twenty years of history gives twenty '
+            'observations per month, and a single crash lands in one of '
+            'them. This describes what happened; it does not forecast. The '
+            'years-of-data column is there because a two-year average is a '
+            'coincidence, not a pattern.</div>', unsafe_allow_html=True)
+
+    # ---------------- Data ----------------
+    with mtabs[4]:
+        eyebrow("Coverage")
+        st.dataframe(mk["quality"].per_asset, use_container_width=True,
+                     hide_index=True)
+        for wmsg in mk["quality"].warnings[:20]:
+            st.markdown(f'<div class="flag">{wmsg}</div>',
+                        unsafe_allow_html=True)
+        eyebrow("Download")
+        d1, d2, d3 = st.columns(3)
+        d1.download_button("Prices (CSV)", prices.to_csv().encode("utf-8"),
+                           "watchlist_prices.csv", "text/csv", key="mkp")
+        d2.download_button("Performance grid (CSV)",
+                           MON.performance_grid(prices).to_csv(index=False)
+                           .encode("utf-8"), "performance.csv", "text/csv",
+                           key="mkg")
+        d3.download_button("Risk grid (CSV)",
+                           MON.risk_grid(prices, window=win).to_csv(index=False)
+                           .encode("utf-8"), "risk.csv", "text/csv", key="mkr")
+    st.stop()
+
 
 with st.sidebar.expander("Presets", expanded=False):
     _saved = STORE.list_presets()
@@ -1474,13 +1794,6 @@ for p in problems:
 # ----------------------------------------------------------------------
 # Execution
 # ----------------------------------------------------------------------
-@st.cache_data(show_spinner=False, ttl=3600)
-def fetch_market(tickers: tuple, start: str, end: Optional[str],
-                 adjusted: bool, want_open: bool, want_div: bool) -> MarketData:
-    return load_market_data(list(tickers), start, end, adjusted=adjusted,
-                            want_open=want_open, want_dividends=want_div)
-
-
 def build_market() -> MarketData:
     """Prices, plus opens and dividends when the settings call for them."""
     if source == "Yahoo Finance":
