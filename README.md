@@ -30,6 +30,18 @@ screen showing a blank P/E for half a watchlist is worse than one that never
 promised it. Price-derived analytics either work for every instrument or
 fail visibly for all of them.
 
+### Rebasing, and why it is done on the common period
+
+Any chart comparing two instruments rebases them to 100. The only honest
+place to anchor is the first date **both** have data. Anchoring each series
+to its own first observation puts them level on different dates, so an
+instrument that listed in 2015 appears to start alongside one that had been
+running since 2005, and the gap between the lines measures nothing.
+
+Both comparison charts use the common period and say which date that is.
+Where a selection shares no overlap at all, they say so rather than drawing
+something meaningless.
+
 ### Charting
 
 Price and equity charts are drawn with **TradingView Lightweight Charts**,
@@ -48,15 +60,17 @@ The version is pinned to 4.2.3 on purpose. The series API changed between
 v4 and v5, so tracking "latest" would mean the charts silently stop
 rendering the day the CDN rolls forward.
 
-Where it appears:
+Where it appears: **Markets, Chart tab only** -- candlesticks with a volume
+pane, or a line, for one instrument, plus a rebased comparison of several.
 
-- **Markets, Chart tab** -- candlesticks with a volume pane, or a line, for
-  one instrument; plus a rebased comparison of several.
-- **Backtest, Results** -- the equity curve with **every fill marked on it**,
-  green for buy days and red for sell days, so a drawdown can be read
-  against what the strategy was doing at the time instead of inferred from a
-  separate table. Beyond 400 rebalance dates the most recent are kept and
-  the chart says so. A toggle returns the static Plotly version.
+It is deliberately **not** used in the backtester. It was, briefly, drawing
+the equity curve with trades marked on it, and testing that view against the
+Plotly reference found the benchmark anchored to its own first date rather
+than to the strategy's. With a benchmark whose history starts earlier, every
+relative reading off the chart was wrong -- 0.795 where the true figure was
+0.698. The bug is fixed, but the backtester is where the numbers have to be
+beyond question, so it keeps the chart that has been checked against the
+engine since the beginning.
 
 Nothing is scraped. TradingView's terms prohibit it, and the unofficial
 libraries that pull their data work by impersonating a browser session,

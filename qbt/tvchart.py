@@ -246,9 +246,14 @@ def equity_with_trades(equity: pd.Series, trades: Optional[pd.DataFrame] = None,
   main.setData({_j(eq)});""")
 
     if benchmark is not None and benchmark.notna().any():
-        base = benchmark.dropna()
-        if len(base) and len(equity.dropna()):
-            scaled = base / base.iloc[0] * float(equity.dropna().iloc[0])
+        # Anchor on the first date BOTH series have. Rebasing the benchmark
+        # to its own first value puts the two curves at the same level on
+        # different dates, and every relative reading off the chart is then
+        # wrong by whatever the benchmark did in between.
+        joined = pd.concat([equity.rename("e"), benchmark.rename("b")],
+                           axis=1).dropna()
+        if not joined.empty:
+            scaled = joined["b"] / joined["b"].iloc[0] * float(joined["e"].iloc[0])
             parts.append(f"""
   var bench = chart.addLineSeries({{
     color: {_j('#C9B896')}, lineWidth: 1,

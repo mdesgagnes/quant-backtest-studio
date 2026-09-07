@@ -695,10 +695,24 @@ if workspace == "Markets":
                                   default=list(prices.columns)[:3],
                                   key="mk_cmp")
         if cmp_pick:
-            sub = prices[cmp_pick].dropna(how="all")
-            rebased = sub.div(sub.bfill().iloc[0]).mul(100.0)
-            tv(TV.line({c: rebased[c].dropna() for c in cmp_pick},
-                       "Rebased to 100", height=420), 420)
+            # Rebase on the period every selection shares. Anchoring each
+            # line to its own first value puts them at 100 on different
+            # dates, and the comparison then measures nothing: an
+            # instrument that listed later appears to start level with one
+            # that had already been running for years.
+            rebased = align_results({c: prices[c].dropna() for c in cmp_pick})
+            if rebased.empty:
+                st.markdown('<div class="flag">These instruments share no '
+                            'overlapping history, so they cannot be compared '
+                            'on one chart.</div>', unsafe_allow_html=True)
+            else:
+                tv(TV.line({c: rebased[c] for c in rebased.columns},
+                           f"Rebased to 100 at {rebased.index[0].date()}",
+                           height=420), 420)
+                if len(rebased) < len(prices):
+                    note(f"Common period only: {rebased.index[0].date()} "
+                         f"onward, which is as far back as every selected "
+                         f"instrument has data.")
 
     # ---------------- Performance ----------------
     with mtabs[1]:
@@ -716,11 +730,16 @@ if workspace == "Markets":
         pick = st.multiselect("Instruments", list(prices.columns),
                               default=list(prices.columns)[:6], key="mk_norm")
         if pick:
-            sub = prices[pick].dropna(how="all")
-            st.plotly_chart(C.equity_curve(align_results(
-                {c: sub[c].dropna() for c in pick}), True,
-                "Total price, rebased to 100"),
-                use_container_width=True, config={"displaylogo": False})
+            reb = align_results({c: prices[c].dropna() for c in pick})
+            if reb.empty:
+                st.markdown('<div class="flag">These instruments share no '
+                            'overlapping history.</div>',
+                            unsafe_allow_html=True)
+            else:
+                st.plotly_chart(
+                    C.equity_curve(reb, True,
+                                   f"Rebased to 100 at {reb.index[0].date()}"),
+                    use_container_width=True, config={"displaylogo": False})
 
         eyebrow("Risk against return")
         rr = MON.risk_return_points(prices)
@@ -2191,39 +2210,19 @@ with tabs[0]:
             dial(k, M.format_metric(k, v), sub, tone)
 
     st.write("")
-    c1, c2, c3 = st.columns([2, 1, 1])
+    c1, c2 = st.columns([3, 1])
     log_scale = c2.toggle("Log scale", value=True,
                           help="A log scale makes relative changes comparable "
                                "across the whole period.")
-    interactive = c3.toggle(
-        "Interactive chart", value=True, key="tvtoggle",
-        help="Draws the curve with TradingView's charting library and marks "
-             "every fill on it. Turn off for the static Plotly version.")
     curves = {res.label: res.equity}
     if bench is not None:
         curves[bench.label] = bench.equity
+    # align_results rebases both curves to 100 at their *common* start, which
+    # is the only way the comparison means anything when one series begins
+    # earlier than the other.
     rebased = align_results(curves)
-
-    if interactive:
-        # Trades marked on the curve: a drawdown can be read against what
-        # the strategy was doing at the time, rather than inferred from a
-        # separate table.
-        tv(TV.equity_with_trades(
-            res.equity, res.trades,
-            bench.equity if bench is not None else None,
-            res.label, height=470, log=log_scale), 470)
-        _n = len(res.trades["Date"].unique()) if not res.trades.empty else 0
-        if _n > 400:
-            note(f"{_n:,} rebalance dates; the chart marks the most recent "
-                 f"400. The full log is in the Positions tab.")
-        else:
-            note("Green arrows are days with buys, red are sells, and the "
-                 "label counts the instruments traded. The full log, with "
-                 "units and fill prices, is in the Positions tab.")
-    else:
-        st.plotly_chart(C.equity_curve(rebased, log_scale),
-                        use_container_width=True,
-                        config={"displaylogo": False})
+    st.plotly_chart(C.equity_curve(rebased, log_scale), use_container_width=True,
+                    config={"displaylogo": False})
 
     st.plotly_chart(C.underwater({k: v for k, v in curves.items()}),
                     use_container_width=True, config={"displaylogo": False})

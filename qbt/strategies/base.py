@@ -26,6 +26,24 @@ import pandas as pd
 
 REGISTRY: Dict[str, "Strategy"] = {}
 
+# Optional per-strategy scoring functions. A strategy returns weights, which
+# is what the engine needs, but weights only say what was chosen -- not how
+# close the runner-up came, or how a name is trending while it sits out of
+# the book. The score is the quantity the model ranks on, and seeing it is
+# what turns a backtest into something you can reason about between trades.
+#
+# Not every strategy has one. A fixed-weight allocation ranks nothing, and
+# inventing a score for it would be worse than admitting there is none.
+SCORERS: Dict[str, Any] = {}
+
+
+def register_scorer(key: str):
+    """Attaches a scoring function to a registered strategy."""
+    def deco(fn):
+        SCORERS[key] = fn
+        return fn
+    return deco
+
 
 @dataclass
 class Param:
@@ -75,6 +93,38 @@ class Strategy:
         comparison need the cash series itself, not a number typed once.
         """
         return "cash" in inspect.signature(self.fn).parameters
+
+    @property
+    def has_score(self) -> bool:
+        return self.key in SCORERS
+
+    def score(self, prices: pd.DataFrame,
+              params: Dict[str, Any] | None = None,
+              exog: Optional[pd.DataFrame] = None,
+              cash: Optional[pd.Series] = None) -> Optional[pd.DataFrame]:
+        """The quantity this strategy ranks on, per instrument per day.
+
+        Returns None when the strategy has no ranking score, rather than a
+        stand-in. The caller shows target weights instead and says so.
+        """
+        fn = SCORERS.get(self.key)
+        if fn is None:
+            return None
+        p = self.defaults()
+        p.update(params or {})
+        import inspect as _i
+        kwargs = {}
+        sig = _i.signature(fn).parameters
+        if "exog" in sig:
+            kwargs["exog"] = (exog.reindex(prices.index)
+                              if exog is not None else None)
+        if "cash" in sig:
+            kwargs["cash"] = (cash.reindex(prices.index)
+                              if cash is not None else None)
+        out = fn(prices, p, **kwargs)
+        if out is None:
+            return None
+        return out.reindex(index=prices.index, columns=prices.columns)
 
     def generate(self, prices: pd.DataFrame,
                  params: Dict[str, Any] | None = None,

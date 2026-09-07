@@ -4,7 +4,8 @@
 registers every built-in strategy.
 """
 from .base import (  # noqa: F401
-    REGISTRY, Param, Strategy, register, sanitize_weights,
+    REGISTRY, SCORERS, Param, Strategy, register, register_scorer,
+    sanitize_weights,
     sma, ema, total_return, realized_vol, downside_vol, rsi,
     efficiency_ratio, zscore, size_equal, size_inverse_vol, apply_vol_target,
 )
