@@ -70,7 +70,8 @@ def parameter_sweep(prices: pd.DataFrame, strategy, base_params: Dict[str, Any],
                     grid: Dict[str, List[Any]], engine: EngineConfig,
                     costs: CostConfig, cash_prices: Optional[pd.Series] = None,
                     max_runs: int = 400,
-                    exog: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+                    exog: Optional[pd.DataFrame] = None,
+                    volume: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """Sweeps a parameter grid. A flat surface is worth more than a sharp peak."""
     keys = list(grid.keys())
     combos = list(itertools.product(*[grid[k] for k in keys]))[:max_runs]
@@ -80,7 +81,7 @@ def parameter_sweep(prices: pd.DataFrame, strategy, base_params: Dict[str, Any],
         p.update(dict(zip(keys, combo)))
         try:
             w = strategy.generate(prices, p, exog, cash_prices)
-            res = run_backtest(prices, w, engine, costs, cash_prices)
+            res = run_backtest(prices, w, engine, costs, cash_prices, volume=volume)
             row = dict(zip(keys, combo))
             row.update(_stats(res, engine.periods_per_year))
             rows.append(row)
@@ -98,7 +99,8 @@ def walk_forward(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                  cash_prices: Optional[pd.Series] = None,
                  exog: Optional[pd.DataFrame] = None,
                  weights: Optional[pd.DataFrame] = None,
-                 rebalance_dates=None) -> pd.DataFrame:
+                 rebalance_dates=None,
+                 volume: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """Splits the history into successive folds and measures stability.
 
     Signals are generated over the full history, then evaluated fold by
@@ -108,7 +110,7 @@ def walk_forward(prices: pd.DataFrame, strategy, params: Dict[str, Any],
     """
     w = _weights_for(strategy, prices, params, exog, weights, cash_prices)
     res = run_backtest(prices, w, engine, costs, cash_prices,
-                       rebalance_dates=rebalance_dates)
+                       rebalance_dates=rebalance_dates, volume=volume)
     return fold_stats(res.returns, n_folds, engine.periods_per_year)
 
 
@@ -117,11 +119,12 @@ def in_out_sample(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                   cash_prices: Optional[pd.Series] = None,
                   exog: Optional[pd.DataFrame] = None,
                   weights: Optional[pd.DataFrame] = None,
-                  rebalance_dates=None) -> pd.DataFrame:
+                  rebalance_dates=None,
+                  volume: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """Compares the first portion of the history to the last."""
     w = _weights_for(strategy, prices, params, exog, weights, cash_prices)
     res = run_backtest(prices, w, engine, costs, cash_prices,
-                       rebalance_dates=rebalance_dates)
+                       rebalance_dates=rebalance_dates, volume=volume)
     cut = int(len(res.returns) * split)
     parts = {"In-sample": res.returns.iloc[:cut],
              "Out-of-sample": res.returns.iloc[cut:]}
@@ -259,7 +262,8 @@ def rebalance_day_sweep(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                         cash_prices: Optional[pd.Series] = None,
                         exog: Optional[pd.DataFrame] = None,
                         weights: Optional[pd.DataFrame] = None,
-                        include_months: bool = True) -> pd.DataFrame:
+                        include_months: bool = True,
+                        volume: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """Runs the same strategy on every plausible trading day.
 
     The day a strategy rebalances is a parameter like any other, and one
@@ -293,7 +297,7 @@ def rebalance_day_sweep(prices: pd.DataFrame, strategy, params: Dict[str, Any],
         try:
             w = (weights if weights is not None
                  else strategy.generate(prices, params, exog, cash_prices))
-            res = run_backtest(prices, w, eng, costs, cash_prices)
+            res = run_backtest(prices, w, eng, costs, cash_prices, volume=volume)
             row = {"Trading day": spec.label()}
             row.update(_stats(res, engine.periods_per_year))
             rows.append(row)

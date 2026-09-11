@@ -10,8 +10,16 @@ Simulation model, explicit and verifiable:
 3. Between rebalances, weights **drift** with asset returns: an implicit
    daily rebalance is never assumed, the classic mistake that inflates
    backtested results.
-4. On rebalance dates, turnover is charged:
-   cost = sum(|target weight - current weight|) x (commission + slippage).
+4. On rebalance dates, turnover is charged. Commission is a flat rate.
+   Slippage has a flat component plus, optionally, a market-impact term
+   that scales with trade size relative to the instrument's own trailing
+   average daily volume -- the same order costs more in a thinner name,
+   and more again the larger it is relative to that name's liquidity.
+   Manual per-instrument multipliers on the flat rate are also supported,
+   for instruments with no volume data or known liquidity quirks. The
+   monthly management fee, when it must be raised by selling holdings
+   rather than from idle cash, pays these same costs by default -- an
+   involuntary liquidation is not free just because it was involuntary.
 5. The uninvested portion earns the cash rate, or tracks the return of a
    cash proxy asset (e.g. PSA.TO) if supplied.
 6. Optionally, trades execute at the **open** and the portfolio is marked to
@@ -104,7 +112,8 @@ def run_backtest(prices: pd.DataFrame,
                  label: str = "Backtest",
                  rebalance_dates: Optional[pd.DatetimeIndex] = None,
                  open_prices: Optional[pd.DataFrame] = None,
-                 dividends: Optional[pd.DataFrame] = None) -> BacktestResult:
+                 dividends: Optional[pd.DataFrame] = None,
+                 volume: Optional[pd.DataFrame] = None) -> BacktestResult:
     """Simulates the portfolio day by day. Returns all diagnostics.
 
     `rebalance_dates` overrides the periodic calendar when dates are imposed
@@ -122,6 +131,14 @@ def run_backtest(prices: pd.DataFrame,
     until the next rebalance reinvests them. Supply these only alongside
     price-return prices: with dividend-adjusted prices the payment is
     already inside the price series and would be counted twice.
+
+    `volume` (shares per session) drives the optional market-impact cost
+    model. A trailing 20-session average, shifted so the trade day's own
+    volume is never used, stands in for the average daily volume a real
+    order would be sized against -- using the same day's volume would let
+    the simulation "know" a print it could not have known when the order
+    was placed. Instruments with no volume data supplied fall back to the
+    flat slippage rate, since impact cannot be estimated without it.
     """
     prices = prices.sort_index()
     idx = prices.index
@@ -182,9 +199,49 @@ def run_backtest(prices: pd.DataFrame,
     ppy = max(1, int(engine.periods_per_year))
     borrow_daily = costs.borrow_rate_pa / ppy
     fee_daily = float(getattr(costs, "management_fee_pa", 0.0)) / ppy
-    fric = (costs.commission_bps + costs.slippage_bps) / 10_000.0
+    commission_rate = float(costs.commission_bps) / 10_000.0
     min_trade = float(engine.min_trade_weight)
     whole = bool(getattr(engine, "whole_shares", False))
+
+    # --- Per-instrument slippage: a flat rate, a manual multiplier per
+    # instrument, and an optional volume-scaled impact term added on top.
+    # Commission stays a pure flat rate throughout -- it is a broker fee,
+    # not a liquidity cost, so it is never scaled by size or overrides.
+    overrides = dict(getattr(costs, "slippage_overrides", {}) or {})
+    slip_mult = np.array([float(overrides.get(a, 1.0)) for a in assets])
+    base_slip_rate = (float(costs.slippage_bps) / 10_000.0) * slip_mult
+
+    impact_model = getattr(costs, "impact_model", "flat")
+    ADV_WINDOW = 20
+    adv_dollars = None
+    no_volume_assets: List[str] = []
+    if impact_model == "sqrt":
+        if volume is not None:
+            vol = volume.reindex(index=idx, columns=assets)
+            # Shifted by one session: the impact of today's trade is priced
+            # against liquidity known BEFORE today, never against today's
+            # own not-yet-complete volume.
+            trail = vol.rolling(ADV_WINDOW, min_periods=max(5, ADV_WINDOW // 4)).mean().shift(1)
+            adv_dollars = (trail * prices).to_numpy(dtype=float)
+        no_volume_assets = [a for i, a in enumerate(assets)
+                            if adv_dollars is None or not np.isfinite(adv_dollars[:, i]).any()]
+
+    impact_bps_10 = float(getattr(costs, "impact_bps_at_10pct_adv", 0.0))
+    apply_fee_frictions = bool(getattr(costs, "apply_frictions_to_fee_liquidation", True))
+
+    def _rate_vector(i: int, notional: np.ndarray) -> np.ndarray:
+        """Effective slippage rate per instrument for this trade, before
+        commission. `notional` is the dollar size of THIS trade, per
+        instrument -- the participation rate is trade size over trailing
+        ADV, so the same order costs more in a thinner name."""
+        rate = base_slip_rate.copy()
+        if impact_model == "sqrt" and adv_dollars is not None and impact_bps_10 > 0:
+            adv_i = adv_dollars[i]
+            usable = np.isfinite(adv_i) & (adv_i > 0)
+            participation = np.where(usable, notional / np.where(usable, adv_i, 1.0), 0.0)
+            impact = (impact_bps_10 / 10_000.0) * np.sqrt(np.clip(participation, 0.0, None) / 0.10)
+            rate = np.where(usable, rate + impact, rate)
+        return rate
 
     n, m = len(idx), len(assets)
     T = w_exec.to_numpy(dtype=float)
@@ -244,6 +301,17 @@ def run_backtest(prices: pd.DataFrame,
         if not np.any(delta):
             return 0.0, 0.0
 
+        # The rate is computed once, from the size implied by the target
+        # weights, and reused through the cash-availability adjustment
+        # below. A trade that gets scaled down for lack of cash would, in
+        # a perfectly exact model, also cost slightly less to match its
+        # smaller size -- but that is a second-order refinement chasing a
+        # fixed point, and a single-pass estimate is standard practice for
+        # a simulation rather than a live order router.
+        notional0 = np.abs(delta) * np.where(ok, price_row, 0.0)
+        slip_rate = _rate_vector(i, notional0)
+        rate = commission_rate + slip_rate
+
         # Sell first, then buy with the proceeds -- the order a desk would
         # actually use. Scaling the whole order when cash is short would
         # shrink the sales too, which is precisely what leaves a position
@@ -251,24 +319,24 @@ def run_backtest(prices: pd.DataFrame,
         sells = np.where(delta < 0, delta, 0.0)
         buys = np.where(delta > 0, delta, 0.0)
 
-        sell_notional = float((np.abs(sells) * np.where(ok, price_row, 0.0)).sum())
-        cash_avail = cash + sell_notional - sell_notional * fric
+        sell_notional_i = np.abs(sells) * np.where(ok, price_row, 0.0)
+        cash_avail = cash + float((sell_notional_i * (1.0 - rate)).sum())
 
-        buy_notional = float((buys * np.where(ok, price_row, 0.0)).sum())
+        buy_notional_i = buys * np.where(ok, price_row, 0.0)
+        buy_notional = float(buy_notional_i.sum())
         if buy_notional > 0:
-            need = buy_notional * (1.0 + fric)
+            need = float((buy_notional_i * (1.0 + rate)).sum())
             if need > cash_avail + 1e-9:
                 scale = max(0.0, cash_avail / need) if need > 1e-12 else 0.0
                 buys = buys * min(1.0, scale)
                 if whole:
                     buys = np.trunc(buys)
-                buy_notional = float((buys * np.where(ok, price_row, 0.0)).sum())
 
         delta = sells + buys
         notional = np.abs(delta) * np.where(ok, price_row, 0.0)
         if not np.any(delta):
             return 0.0, 0.0
-        cost = float(notional.sum()) * fric
+        cost = float((notional * rate).sum())
         net_spend = float((delta * np.where(ok, price_row, 0.0)).sum())
 
         for j, a in enumerate(assets):
@@ -278,6 +346,7 @@ def run_backtest(prices: pd.DataFrame,
                     "Shares Before": shares[j], "Shares After": shares[j] + delta[j],
                     "Change": delta[j], "Price": float(price_row[j]),
                     "Notional": float(abs(delta[j]) * price_row[j]),
+                    "Effective Cost (bps)": float(rate[j]) * 10_000.0,
                 })
         shares = shares + delta
         cash -= net_spend + cost
@@ -329,6 +398,7 @@ def run_backtest(prices: pd.DataFrame,
         #    of the holdings. Capping it at whatever cash happens to be
         #    lying around would mean a fully invested strategy quietly pays
         #    almost nothing, which is the opposite of the truth.
+        liq_cost = 0.0
         if fee_daily > 0 and i > 0:
             fee_accrued += value * fee_daily
             if (np.datetime64(date, "ns") in month_end) or i == n - 1:
@@ -338,11 +408,54 @@ def run_backtest(prices: pd.DataFrame,
                     holdings_val = float((shares * mark).sum())
                     if holdings_val > 1e-12:
                         # Sell pro rata across the book, exactly as a fund
-                        # liquidates units to meet its own fee.
-                        keep = max(0.0, 1.0 - shortfall / holdings_val)
-                        proceeds = float((shares * mark).sum()) * (1.0 - keep)
-                        shares = shares * keep
-                        cash += proceeds
+                        # liquidates units to meet its own fee. When this
+                        # sale pays the same trading costs as any other
+                        # trade, slightly more than the shortfall itself
+                        # must be raised to net the right amount after
+                        # those costs -- an involuntary redemption trade
+                        # is not free just because it was involuntary.
+                        # The rate is estimated once, from the cost-free
+                        # sale size, then used to solve the slightly larger
+                        # sale that nets the shortfall -- the same
+                        # single-pass approach as an ordinary trade, not a
+                        # fixed-point iteration.
+                        naive_keep = max(0.0, 1.0 - shortfall / holdings_val)
+                        if apply_fee_frictions:
+                            naive_sold = shares * (1.0 - naive_keep)
+                            naive_notional = np.abs(naive_sold * mark)
+                            rate0 = commission_rate + _rate_vector(i, naive_notional)
+                            sold_total = float(naive_notional.sum())
+                            # The rate weighted by what is actually being
+                            # SOLD, not by total holdings -- dividing by
+                            # holdings_val here would silently shrink this
+                            # toward zero whenever the fee is small relative
+                            # to the book (the ordinary case), making the
+                            # sale barely account for its own cost at all.
+                            blended = (float((naive_notional * rate0).sum()) / sold_total
+                                      if sold_total > 0 else 0.0)
+                            keep = (0.0 if blended >= 1.0 else
+                                   max(0.0, 1.0 - (shortfall / (1.0 - blended)) / holdings_val))
+                        else:
+                            keep = naive_keep
+                        sold_shares = shares * (1.0 - keep)
+                        proceeds_gross = float((sold_shares * mark).sum())
+                        if apply_fee_frictions and proceeds_gross > 0:
+                            rate_final = commission_rate + _rate_vector(i, np.abs(sold_shares * mark))
+                            liq_cost = float((np.abs(sold_shares * mark) * rate_final).sum())
+                            for j, a in enumerate(assets):
+                                if sold_shares[j] != 0.0:
+                                    trades.append({
+                                        "Date": date, "Instrument": a,
+                                        "Shares Before": shares[j],
+                                        "Shares After": shares[j] - sold_shares[j],
+                                        "Change": -sold_shares[j],
+                                        "Price": float(mark[j]),
+                                        "Notional": float(abs(sold_shares[j]) * mark[j]),
+                                        "Effective Cost (bps)": float(rate_final[j]) * 10_000.0,
+                                        "Reason": "Fee liquidation",
+                                    })
+                        shares = shares - sold_shares
+                        cash += proceeds_gross - liq_cost
                 cash -= fee_i
                 fee_accrued -= fee_i
                 value = float((shares * mark).sum()) + cash
@@ -350,8 +463,8 @@ def run_backtest(prices: pd.DataFrame,
         nav[i] = value
         r_port = (value / prev_value - 1.0) if (i > 0 and prev_value > 0) else 0.0
         net_r[i] = r_port
-        gross_r[i] = ((value + cost_i + fee_i) / prev_value - 1.0) if (i > 0 and prev_value > 0) else 0.0
-        cost_arr[i] = cost_i / prev_value if prev_value > 0 else 0.0
+        gross_r[i] = ((value + cost_i + liq_cost + fee_i) / prev_value - 1.0) if (i > 0 and prev_value > 0) else 0.0
+        cost_arr[i] = (cost_i + liq_cost) / prev_value if prev_value > 0 else 0.0
         fee_arr[i] = fee_i / prev_value if prev_value > 0 else 0.0
         div_arr[i] = div_i / prev_value if prev_value > 0 else 0.0
         SH[i] = shares
@@ -362,7 +475,11 @@ def run_backtest(prices: pd.DataFrame,
     weights = pd.DataFrame(W, index=idx, columns=assets)
     trades_df = pd.DataFrame(trades) if trades else pd.DataFrame(
         columns=["Date", "Instrument", "Shares Before", "Shares After",
-                 "Change", "Price", "Notional"])
+                 "Change", "Price", "Notional", "Effective Cost (bps)", "Reason"])
+    if "Reason" not in trades_df.columns:
+        trades_df["Reason"] = "Rebalance"
+    else:
+        trades_df["Reason"] = trades_df["Reason"].fillna("Rebalance")
 
     exposure = weights.abs().sum(axis=1)
     active = exposure[exposure > 1e-9]

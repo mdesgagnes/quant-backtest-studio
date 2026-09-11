@@ -445,7 +445,8 @@ def _pseudo_result(returns, equity, label):
         rebalance_dates=pd.DatetimeIndex([]),
         trades=pd.DataFrame(columns=["Date", "Instrument", "Shares Before",
                                      "Shares After", "Change", "Price",
-                                     "Notional"]),
+                                     "Notional", "Effective Cost (bps)",
+                                     "Reason"]),
         label=label)
 
 
@@ -964,9 +965,15 @@ if source == "Return stream":
                                      type=["csv", "xlsx", "xls", "txt"], key="rsup")
     rsheet = None
     if rfile is not None and rfile.name.lower().endswith((".xlsx", ".xls")):
-        names = excel_sheet_names(io.BytesIO(rfile.getvalue()))
+        try:
+            names = RS.sheet_names(rfile.getvalue())
+        except Exception:
+            names = []
         if len(names) > 1:
-            rsheet = st.sidebar.selectbox("Sheet", names, key="rssheet")
+            rsheet = st.sidebar.selectbox(
+                "Sheet", names, key="rssheet",
+                help="The first sheet with a readable date column and "
+                     "numbers is used automatically if you don't pick one.")
 
     scale_label = st.sidebar.selectbox(
         "Value scale", ["Detect automatically", "Decimals (0.0213)",
@@ -974,6 +981,17 @@ if source == "Return stream":
         help="Only override if the automatic reading is wrong.")
     scale = {"Detect automatically": "auto", "Decimals (0.0213)": "decimal",
              "Percentages (2.13)": "percentage"}[scale_label]
+
+    order_label = st.sidebar.selectbox(
+        "Date order in file", ["Auto-detect", "Day first (31/12/2024)",
+                               "Month first (12/31/2024)"], key="rsorder",
+        help="Only matters for dates like 05/06/2020 where day and month "
+             "could both be valid. Auto-detect picks the reading that gives "
+             "the more regular spacing; if the dates below look shifted by "
+             "a month, switch this.")
+    day_first = {"Auto-detect": None, "Day first (31/12/2024)": True,
+                "Month first (12/31/2024)": False}[order_label]
+
     rs_capital = st.sidebar.number_input("Base value ($)", 1_000, 1_000_000_000,
                                          100_000, 10_000, key="rscap")
 
@@ -996,8 +1014,12 @@ if source == "Return stream":
         st.stop()
 
     try:
-        rs_raw = RS.load_return_stream(io.BytesIO(rfile.getvalue()), rsheet)
-        rets, rrep = RS.prepare_returns(rs_raw, scale)
+        rs_raw, rs_meta = RS.load_return_stream(rfile.getvalue(), rfile.name,
+                                                rsheet, day_first)
+        rets, rrep = RS.prepare_returns(rs_raw, scale, rs_meta)
+    except RS.ReturnStreamError as exc:
+        st.error(str(exc))
+        st.stop()
     except Exception as exc:
         st.error(f"The file could not be read: {exc}")
         st.stop()
@@ -1028,6 +1050,10 @@ if source == "Return stream":
              f"to {rrep.end.date()}" if rrep.end is not None else "")
     with d:
         dial("Scale read", rrep.scale.capitalize())
+    note(f"Dates read from \u201c{rrep.date_column}\u201d, "
+         f"{rrep.date_convention}. If the period above looks shifted by a "
+         f"month from what you expect, set \u201cDate order in file\u201d "
+         f"in the sidebar.")
     for w in rrep.warnings:
         st.markdown(f'<div class="flag">{w}</div>', unsafe_allow_html=True)
 
@@ -1803,8 +1829,64 @@ with st.sidebar.expander("Execution", expanded=False):
              "fractional units, which most brokers now support.")
 
 with st.sidebar.expander("Frictions", expanded=False):
-    comm = st.number_input("Commission (bps)", 0.0, 200.0, float(c0.commission_bps), 1.0)
-    slip = st.number_input("Slippage (bps)", 0.0, 500.0, float(c0.slippage_bps), 5.0)
+    comm = st.number_input("Commission (bps)", 0.0, 200.0, float(c0.commission_bps), 1.0,
+                           help="A flat broker fee. Never scaled by trade "
+                                "size or by the market-impact model below -- "
+                                "commission is a fee schedule, not a "
+                                "liquidity cost.")
+    slip = st.number_input(
+        "Slippage, flat component (bps)", 0.0, 500.0, float(c0.slippage_bps), 5.0,
+        help="Charged on every trade regardless of size. With the impact "
+             "model off, this is the whole slippage cost.")
+
+    impact_label = st.selectbox(
+        "Market impact", ["Flat only", "Scale with trade size (volume-aware)"],
+        index=1 if getattr(c0, "impact_model", "flat") == "sqrt" else 0,
+        help="Real slippage grows with how large an order is relative to "
+             "the instrument's own liquidity -- the same $10M order costs "
+             "far more in a thin ETF than in SPY. \u201cFlat only\u201d "
+             "charges the same rate no matter the size; volume-aware adds "
+             "a cost that grows with the square root of participation "
+             "(trade size \u00f7 trailing 20-day average volume), the "
+             "standard institutional approximation.")
+    impact_model = "sqrt" if impact_label.startswith("Scale") else "flat"
+    impact_bps10 = float(c0.impact_bps_at_10pct_adv) if impact_model == "sqrt" else 0.0
+    if impact_model == "sqrt":
+        impact_bps10 = st.number_input(
+            "Impact at 10% of average daily volume (bps)", 0.0, 500.0,
+            float(getattr(c0, "impact_bps_at_10pct_adv", 25.0)), 5.0,
+            help="The extra cost, on top of the flat rate, for an order "
+                 "equal to a tenth of the instrument's trailing 20-day "
+                 "average volume. Doubling the order size roughly multiplies "
+                 "this component by \u221a2, not by 2 -- impact grows with "
+                 "the square root of size, not linearly.")
+        if source != "Yahoo Finance":
+            st.markdown(
+                '<div class="flag">Volume-aware impact needs volume data, '
+                'only available from Yahoo Finance. With an uploaded price '
+                'file, every instrument falls back to the flat rate above.'
+                '</div>', unsafe_allow_html=True)
+
+    _override_text = st.text_area(
+        "Per-instrument slippage multiplier (optional)",
+        value="\n".join(f"{k}: {v:g}" for k, v in
+                        (getattr(c0, "slippage_overrides", {}) or {}).items()),
+        height=70, placeholder="HCAL.TO: 2.5\nWXM.TO: 1.8",
+        help="One per line, TICKER: multiplier. Multiplies the flat "
+             "slippage rate above for that instrument only (2.5 means "
+             "2.5\u00d7 the flat rate). For a name with no volume data, or "
+             "one known to be thinner or deeper than its volume alone "
+             "suggests. Leave blank to use the flat rate everywhere.")
+    slip_overrides: Dict[str, float] = {}
+    for line in _override_text.replace(",", "\n").split("\n"):
+        if ":" not in line:
+            continue
+        k, _, v = line.partition(":")
+        try:
+            slip_overrides[k.strip().upper()] = float(v.strip())
+        except ValueError:
+            continue
+
     cash_rate = st.number_input("Cash rate (annual %)", 0.0, 15.0,
                                 float(c0.cash_rate_pa * 100), 0.25,
                                 key="cashrate_pct") / 100.0
@@ -1817,6 +1899,14 @@ with st.sidebar.expander("Frictions", expanded=False):
              "invested book has no idle cash to pay from, so the deduction "
              "sells holdings pro rata, exactly as a fund liquidates units "
              "to meet its own fee.") / 100.0
+    fee_pays_frictions = st.checkbox(
+        "Fee liquidation pays the same commission and slippage",
+        value=bool(getattr(c0, "apply_frictions_to_fee_liquidation", True)),
+        help="An involuntary sale to raise cash for the fee is not free "
+             "just because it was involuntary. On, it pays the same costs "
+             "as any other trade and appears in the trade log tagged "
+             "\u201cFee liquidation\u201d; off reproduces the earlier, "
+             "simpler behaviour.")
 
 st.sidebar.markdown("")
 
@@ -1865,7 +1955,11 @@ cfg = RunConfig(
                         weekday=int(weekday), nth=int(nth),
                         anchor_month=int(anchor_month)),
     costs=CostConfig(commission_bps=comm, slippage_bps=slip,
-                     cash_rate_pa=cash_rate, management_fee_pa=mgmt_fee),
+                     impact_model=impact_model,
+                     impact_bps_at_10pct_adv=impact_bps10,
+                     slippage_overrides=dict(slip_overrides),
+                     cash_rate_pa=cash_rate, management_fee_pa=mgmt_fee,
+                     apply_frictions_to_fee_liquidation=fee_pays_frictions),
 )
 
 # ----------------------------------------------------------------------
@@ -1899,8 +1993,12 @@ def build_market() -> MarketData:
         need_div = bool(use_divs) or (
             benchmark is not None
             and bench_mode.startswith("Price return + dividends"))
+        # Volume is fetched automatically once the volume-aware impact
+        # model is selected in Frictions -- no separate control to forget.
+        need_ohlc = (impact_model == "sqrt")
         return fetch_market(tuple(needed), str(start), str(end),
-                            bool(adjusted), bool(exec_at_open), need_div)
+                            bool(adjusted), bool(exec_at_open) or need_ohlc,
+                            need_div, need_ohlc)
     if prices_raw is None:
         raise RuntimeError("No file loaded.")
     return MarketData(close=prices_raw, adjusted=True)
@@ -2013,10 +2111,14 @@ if run_clicked and not blocking:
             if market.dividends is not None and cfg.data.use_dividends:
                 div_px = market.dividends.reindex(index=universe.index,
                                                   columns=cols).fillna(0.0)
+            vol_px = None
+            if market.volume is not None and cfg.costs.impact_model == "sqrt":
+                vol_px = market.volume.reindex(index=universe.index, columns=cols)
 
             result = run_backtest(universe, weights, cfg.engine, cfg.costs,
                                   cash_px, run_label, rebal_dates,
-                                  open_prices=open_px, dividends=div_px)
+                                  open_prices=open_px, dividends=div_px,
+                                  volume=vol_px)
             bench = None
             if benchmark == BLEND and bench_blend:
                 have = {k: v for k, v in bench_blend.items() if k in prices.columns}
@@ -2090,6 +2192,7 @@ if run_clicked and not blocking:
             "weights": weights,
             "sleeves": sleeve_report,
             "cash_series": cash_series,
+            "volume": vol_px,
             "construction": construction,
             "market": market,
             "bench_mode": bench_mode,
@@ -2536,11 +2639,25 @@ with tabs[2]:
             t["Change"] = t["Change"].map(lambda v: f"{v:+,.4f}".rstrip("0").rstrip("."))
         for c in ("Price", "Notional"):
             if c in t: t[c] = t[c].map(lambda v: f"{v:,.2f}")
+        if "Effective Cost (bps)" in t:
+            t["Effective Cost (bps)"] = t["Effective Cost (bps)"].map(
+                lambda v: f"{v:.1f}" if pd.notna(v) else "\u2014")
+        n_liq = int((res.trades.get("Reason", pd.Series(dtype=str))
+                    == "Fee liquidation").sum())
         st.dataframe(t.tail(400), use_container_width=True, hide_index=True, height=380)
-        note("Every fill records the units traded and the price they filled "
-             "at, so the execution assumption can be checked rather than "
-             "taken on trust. With execution set to the open, these prices "
-             "are that session's opens.")
+        note("Every fill records the units traded, the price they filled "
+             "at, and the realized commission-plus-slippage rate that "
+             "traded size incurred, so the execution and cost assumptions "
+             "can both be checked rather than taken on trust. With "
+             "execution set to the open, these prices are that session's "
+             "opens.")
+        if n_liq:
+            st.markdown(
+                f'<div class="flag">{n_liq} of these are pro-rata sales to '
+                f'raise the management fee, tagged \u201cFee liquidation\u201d '
+                f'rather than \u201cRebalance\u201d \u2014 the model did not '
+                f'choose to sell these; the fee did.</div>',
+                unsafe_allow_html=True)
         st.download_button("Download full trade log (CSV)",
                            res.trades.to_csv(index=False).encode("utf-8"),
                            "trades.csv", "text/csv")
@@ -2556,7 +2673,8 @@ with tabs[3]:
     fixed_w = run["weights"] if is_external else None
     kw = dict(cash_prices=run.get("cash_series") if run.get("cash_series")
               is not None else run["cash"],
-              exog=exog_used, weights=fixed_w, rebalance_dates=run_rebal)
+              exog=exog_used, weights=fixed_w, rebalance_dates=run_rebal,
+              volume=run.get("volume"))
 
     eyebrow("1. Stability over time")
     n_folds = st.slider("Number of folds", 3, 10, 5, key="wf")
@@ -2624,7 +2742,7 @@ with tabs[3]:
             with st.spinner("Sweeping..."):
                 sw = R.parameter_sweep(universe, strategy_obj, params_run, grid,
                                        rcfg.engine, rcfg.costs, run["cash"],
-                                       exog=exog_used)
+                                       exog=exog_used, volume=run.get("volume"))
             st.session_state["sweep"] = (sw, px_, py_, metric_choice)
 
         if "sweep" in st.session_state:
@@ -2667,7 +2785,8 @@ with tabs[3]:
         with st.spinner("Running every trading day..."):
             st.session_state["daysweep"] = R.rebalance_day_sweep(
                 universe, strategy_obj, params_run, rcfg.engine, rcfg.costs,
-                run["cash"], exog=exog_used, weights=fixed_w)
+                run["cash"], exog=exog_used, weights=fixed_w,
+                volume=run.get("volume"))
     if "daysweep" in st.session_state:
         ds = st.session_state["daysweep"]
         if not ds.empty and "CAGR" in ds.columns:
@@ -2705,8 +2824,14 @@ with tabs[3]:
                     unsafe_allow_html=True)
 
     eyebrow("4. Cost sensitivity")
+    note("This sweep rebuilds a clean flat-rate cost for each level on the "
+         "axis, independent of the impact model or overrides configured "
+         "above \u2014 it answers a different question (how sensitive is "
+         "the strategy to costs in general) from the headline result (what "
+         "it actually costs given the configured model).")
+    _kw_flat = {k: v for k, v in kw.items() if k != "volume"}
     cs = R.cost_sensitivity(universe, strategy_obj, params_run, rcfg.engine,
-                            rcfg.costs, None, **kw)
+                            rcfg.costs, None, **_kw_flat)
     st.plotly_chart(C.sweep_line(cs, "Costs (bps round-trip)", "CAGR",
                                  "CAGR by level of frictions"),
                     use_container_width=True, config={"displaylogo": False})

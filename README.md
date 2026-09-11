@@ -393,6 +393,42 @@ stability, Monte Carlo, and the tearsheet. Positions, frictions, cost
 sensitivity and parameter sweeps do not apply: there is no portfolio being
 simulated, only a realized stream.
 
+**The reader is a separate, self-contained module**
+(`qbt/returns_input.py`) that does not call the shared file loader used by
+prices, exogenous series or target weights. It exists on its own precisely
+so it can be far more forgiving without touching anything the simulation
+depends on -- a return-stream file is rarely a clean export, and this
+reader is built to survive that:
+
+- **Excel or CSV, detected from the file's actual bytes**, not just its
+  name, so an upload never fails because a wrapper somewhere lost the
+  filename.
+- **Several encodings and separators tried in turn**, since a French-locale
+  export is often semicolon-separated in CP-1252, not comma-separated
+  UTF-8.
+- **The date column is found by content, not by name.** Every column is
+  tried as dates; whichever parses the most wins, with a small preference
+  for a date-like header. A column named "Period" or "Mois" is found the
+  same way one literally named "Date" is.
+- **Both date conventions are tried and compared** for the genuinely
+  ambiguous case -- every day in the file at 12 or under -- scored by
+  which reading produces more realistic spacing. Which one was used is
+  always reported, and the **Date order** control in the sidebar overrides
+  it when the guess is wrong. Nothing can rule that out for a file with no
+  day over 12 anywhere in it, since at that point both readings are
+  equally valid arithmetic and only the person who made the file knows
+  which is true.
+- **Numbers are cleaned before being given up on**: percent signs, currency
+  symbols, parenthesised negatives, and both the North American
+  (1,234.56) and European (1 234,56) conventions, decided once per column
+  from the punctuation actually present.
+- **A column that still won't parse is named in the warnings**, with a
+  sample of the values that defeated it, instead of silently vanishing.
+
+A multi-sheet workbook with no sheet chosen tries sheets in order and keeps
+the first that yields real data, so a cover page as sheet one no longer
+needs to be found and skipped by hand.
+
 ---
 
 ## 4 ter. Period reporting
@@ -542,18 +578,43 @@ They are explicit because they determine how credible the result is.
 7. **Weights drift between rebalances.** Positions evolve with prices.
    Assuming an implicit daily rebalance is the mistake that most often
    inflates published results.
-8. **Frictions on actual turnover.** Cost = sum(|target weight - current
-   weight|) x (commission + slippage). Default: 5 bps + 25 bps, a
-   conservative blended assumption for Canadian ETFs.
-9. **Management fees.** An annual rate accrues daily on the marked value
-   and is deducted at each month-end, which is how a fee is actually
-   billed. A fully invested book has no idle cash to pay from, so the
-   deduction sells holdings pro rata, exactly as a fund liquidates units to
-   meet its own fee. Capping the charge at whatever cash happened to be
-   lying around would let a fully invested strategy quietly pay almost
-   nothing. Realized drag runs a little above the headline rate, because the
-   fee compounds against a growing balance: 1.00% per year costs about
-   1.07% of CAGR over a decade at 8%.
+8. **Frictions on actual turnover, per instrument.** Commission is a flat
+   rate, never scaled by size or by anything below -- it is a broker fee,
+   not a liquidity cost. Slippage has a flat component (default 25 bps)
+   plus two optional refinements:
+
+   - **Per-instrument multipliers.** A manual override list scales the flat
+     rate for specific tickers -- for a name known to be thinner than its
+     peers, or one with no volume data to drive the model below.
+   - **Volume-scaled market impact.** Turned on under Frictions, this adds
+     a cost that grows with the *square root* of participation (trade size
+     over the instrument's trailing 20-session average volume), the
+     standard institutional approximation: a $10K order and a $10M order in
+     the same name no longer cost the same rate, and the same order costs
+     more in a thinner ETF than in a deep one. Calibrated by one number --
+     the extra cost, in bps, for an order equal to 10% of average volume.
+     Doubling participation multiplies the impact term by roughly `sqrt(2)`,
+     not by 2. Volume is fetched automatically once this is turned on, and
+     an instrument with no volume data simply falls back to the flat rate.
+
+   The trailing volume average is shifted by one session, so a trade is
+   always priced against liquidity known *before* it happened, never
+   against that day's own not-yet-complete print.
+
+9. **Management fees pay the same frictions as everything else.** An
+   annual rate accrues daily on the marked value and is deducted at each
+   month-end, which is how a fee is actually billed. A fully invested book
+   has no idle cash to pay from, so the deduction sells holdings pro rata,
+   exactly as a fund liquidates units to meet its own fee -- and, by
+   default, that sale pays the same commission and slippage any other
+   trade would, tagged **"Fee liquidation"** in the trade log rather than
+   "Rebalance" so it reads as an explanation, not a surprise. A checkbox
+   under Frictions turns this off to reproduce the simpler, cost-free
+   liquidation.
+
+   Realized fee drag runs a little above the headline rate even without
+   trading costs, because the fee compounds against a growing balance:
+   1.00% per year costs about 1.07% of CAGR over a decade at 8%.
 
 10. **Whole units are optional.** Off by default, since most brokers now
    support fractional shares. Turned on, every order rounds down to a whole

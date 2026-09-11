@@ -39,7 +39,15 @@ class DataConfig:
 class CostConfig:
     """Frictions. Defaults calibrated for Canadian ETFs (a conservative assumption)."""
     commission_bps: float = 5.0
-    slippage_bps: float = 25.0
+    slippage_bps: float = 25.0        # flat component, always charged
+    impact_model: str = "flat"        # "flat" | "sqrt" (volume-scaled)
+    impact_bps_at_10pct_adv: float = 25.0
+    # Manual per-instrument multipliers on the flat slippage rate, for when
+    # average daily volume isn't available or a name is known to be
+    # thinner or deeper than its volume alone suggests. {} means every
+    # instrument uses the flat rate as-is.
+    slippage_overrides: Dict[str, float] = field(default_factory=dict)
+    apply_frictions_to_fee_liquidation: bool = True
     cash_rate_pa: float = 0.0              # used when no cash_proxy is provided
     borrow_rate_pa: float = 0.0            # cost of leverage beyond 100%
     management_fee_pa: float = 0.0         # accrued daily, deducted monthly
@@ -132,6 +140,13 @@ class RunConfig:
             errs.append(f"Unknown strategy mode: {self.strategy.mode}")
         if self.exog.enabled and self.exog.publication_lag_days < 0:
             errs.append("Publication lag cannot be negative.")
+        if self.costs.impact_model not in ("flat", "sqrt"):
+            errs.append("impact_model must be 'flat' or 'sqrt'.")
+        if self.costs.impact_bps_at_10pct_adv < 0:
+            errs.append("impact_bps_at_10pct_adv cannot be negative.")
+        for k, v in self.costs.slippage_overrides.items():
+            if v < 0:
+                errs.append(f"Slippage override for {k} cannot be negative.")
         if self.costs.management_fee_pa < 0:
             errs.append("Management fee cannot be negative.")
         if self.costs.management_fee_pa > 0.10:
