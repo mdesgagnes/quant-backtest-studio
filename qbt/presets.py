@@ -139,6 +139,35 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
                 "while its peers are not. And several of these launched in "
                 "the mid-2010s, so an early start date quietly drops them.",
     },
+    "Global multi-asset ETF universe": {
+        "tickers": ["SPY", "PDBC", "IEFA", "IEF", "IEMG", "VNQ", "QQQ", "XLE",
+                    "GLD", "TLT", "EWJ", "TIP", "LQD", "VTV", "VGK", "UUP",
+                    "VBR", "IWM", "MTUM", "HYG", "EMB", "BNDX", "EFV", "SCZ",
+                    "XLK", "XLV", "BWX", "SHY", "REET", "DBA", "XLB", "EWC"],
+        "classes": {
+            "SPY": "Equities", "QQQ": "Equities", "IWM": "Equities",
+            "VTV": "Equities", "VBR": "Equities", "MTUM": "Equities",
+            "IEFA": "Equities", "IEMG": "Equities", "EWJ": "Equities",
+            "EWC": "Equities", "VGK": "Equities", "EFV": "Equities",
+            "SCZ": "Equities", "XLE": "Equities", "XLK": "Equities",
+            "XLV": "Equities", "XLB": "Equities",
+            "IEF": "Fixed income", "TLT": "Fixed income", "SHY": "Fixed income",
+            "TIP": "Fixed income", "LQD": "Fixed income", "HYG": "Fixed income",
+            "EMB": "Fixed income", "BNDX": "Fixed income", "BWX": "Fixed income",
+            "VNQ": "Real assets", "REET": "Real assets", "GLD": "Real assets",
+            "PDBC": "Real assets", "DBA": "Real assets",
+            "UUP": "Currency",
+        },
+        "benchmark": "SPY",
+        "cash": "SHY",
+        "note": "Thirty-two ETFs spanning US and international equities, "
+                "sectors, factors, sovereign and credit fixed income, "
+                "commodities and gold, real estate, and the dollar -- built "
+                "for cross-sectional and trend strategies with real "
+                "asset-class breadth to rotate across, rather than variations "
+                "on one market. SHY is offered as the cash leg; nothing here "
+                "requires it.",
+    },
     "HIDE target asset classes": {
         "tickers": ["SCHR", "VNQ", "BCI"],
         "classes": {

@@ -30,6 +30,20 @@ screen showing a blank P/E for half a watchlist is worse than one that never
 promised it. Price-derived analytics either work for every instrument or
 fail visibly for all of them.
 
+**Tables, selectors and chart legends throughout Markets show the security's
+full name alongside its ticker** ("SPY \u2014 SPDR S&P 500 ETF Trust"), since
+a screen of thirty tickers stops being obvious at a glance which is which.
+This is a static lookup (`qbt/names.py`), not a live one: a per-ticker
+network call for a name is slow, and the free `.info` endpoint that would
+supply it is unreliable enough that other bugs in this app trace back to
+trusting it. Coverage is every ticker in the app's own presets plus the
+common US-listed ETFs likely to end up in a custom watchlist; anything else
+falls back to the bare ticker rather than guessing. Dense visual displays
+(the correlation heatmap, the risk/return scatter's floating point labels)
+keep bare tickers on purpose, since a name on every point there would be
+clutter rather than clarity -- the accompanying table carries the full name
+instead.
+
 ### Rebasing, and why it is done on the common period
 
 Any chart comparing two instruments rebases them to 100. The only honest
@@ -320,9 +334,12 @@ HTML file directly.
 
 **Presets.** The Yahoo Finance source offers ready-made universes (Canadian
 ETFs, Canadian asset classes, TSX sectors, U.S. SPDR sectors, global asset
-classes, U.S. factors, sixty-forty blocks). Picking one fills the symbol
-box and sets a matching benchmark and cash proxy; everything stays
-editable. Add your own by appending an entry to `UNIVERSES` in
+classes, U.S. factors, sixty-forty blocks, a Canadian equity factor mix,
+HIDE's target asset classes, and a 32-ETF global multi-asset universe
+spanning US and international equities, sectors, factors, sovereign and
+credit fixed income, commodities, gold and the dollar). Picking one fills
+the symbol box and sets a matching benchmark and cash proxy; everything
+stays editable. Add your own by appending an entry to `UNIVERSES` in
 `qbt/presets.py`.
 
 Two caveats apply to every preset, and to any universe assembled today out

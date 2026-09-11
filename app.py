@@ -41,6 +41,7 @@ from qbt import store as STORE
 from qbt import rules as RULES
 from qbt import monitor as MON
 from qbt import tvchart as TV
+from qbt import names as N
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -587,6 +588,7 @@ if workspace == "Markets":
                             max_value=date.today(), key="mk_end")
     mk_base = st.sidebar.selectbox(
         "Reference", mk_tickers or ["\u2014"], key="mk_base",
+        format_func=lambda t: N.label(t) if t in (mk_tickers or []) else t,
         help="Relative strength, rolling correlation and beta are all "
              "measured against this instrument.")
     mk_win = st.sidebar.number_input(
@@ -665,7 +667,8 @@ if workspace == "Markets":
     # ---------------- Chart ----------------
     with mtabs[0]:
         mkt = mk.get("market")
-        pick_one = st.selectbox("Instrument", list(prices.columns), key="mk_one")
+        pick_one = st.selectbox("Instrument", list(prices.columns), key="mk_one",
+                                format_func=N.label)
         cc1, cc2 = st.columns([1, 3])
         style = cc1.radio("Style", ["Candles", "Line"], horizontal=True,
                           key="mk_style")
@@ -682,19 +685,19 @@ if workspace == "Markets":
             vol = (mkt.volume[pick_one] if (show_vol and mkt.volume is not None
                                             and pick_one in mkt.volume.columns)
                    else None)
-            tv(TV.candles(frame, vol, pick_one, height=480), 480)
+            tv(TV.candles(frame, vol, N.label(pick_one), height=480), 480)
         else:
             if style == "Candles":
                 st.markdown('<div class="flag">High and low prices were not '
                             'available for this instrument, so it is drawn as '
                             'a line.</div>', unsafe_allow_html=True)
-            tv(TV.line({pick_one: prices[pick_one].dropna()}, pick_one,
+            tv(TV.line({pick_one: prices[pick_one].dropna()}, N.label(pick_one),
                        height=440), 440)
 
         eyebrow("Compare")
         cmp_pick = st.multiselect("Instruments", list(prices.columns),
                                   default=list(prices.columns)[:3],
-                                  key="mk_cmp")
+                                  key="mk_cmp", format_func=N.label)
         if cmp_pick:
             # Rebase on the period every selection shares. Anchoring each
             # line to its own first value puts them at 100 on different
@@ -707,7 +710,7 @@ if workspace == "Markets":
                             'overlapping history, so they cannot be compared '
                             'on one chart.</div>', unsafe_allow_html=True)
             else:
-                tv(TV.line({c: rebased[c] for c in rebased.columns},
+                tv(TV.line({N.label(c): rebased[c] for c in rebased.columns},
                            f"Rebased to 100 at {rebased.index[0].date()}",
                            height=420), 420)
                 if len(rebased) < len(prices):
@@ -720,7 +723,9 @@ if workspace == "Markets":
         eyebrow("Return by horizon")
         grid = MON.performance_grid(prices)
         hcols = [c for c in grid.columns if c != "Instrument"]
-        st.dataframe(heat(grid, hcols), use_container_width=True,
+        disp_grid = grid.copy()
+        disp_grid["Instrument"] = disp_grid["Instrument"].map(N.label)
+        st.dataframe(heat(disp_grid, hcols), use_container_width=True,
                      hide_index=True, height=min(620, 60 + 36 * len(grid)))
         note("Horizons beyond one year are annualized; shorter ones are "
              "cumulative. A blank means the history does not reach that far "
@@ -729,7 +734,8 @@ if workspace == "Markets":
 
         eyebrow("Rebased to 100")
         pick = st.multiselect("Instruments", list(prices.columns),
-                              default=list(prices.columns)[:6], key="mk_norm")
+                              default=list(prices.columns)[:6], key="mk_norm",
+                              format_func=N.label)
         if pick:
             reb = align_results({c: prices[c].dropna() for c in pick})
             if reb.empty:
@@ -738,7 +744,7 @@ if workspace == "Markets":
                             unsafe_allow_html=True)
             else:
                 st.plotly_chart(
-                    C.equity_curve(reb, True,
+                    C.equity_curve(reb.rename(columns=N.label_map(reb.columns)), True,
                                    f"Rebased to 100 at {reb.index[0].date()}"),
                     use_container_width=True, config={"displaylogo": False})
 
@@ -757,6 +763,8 @@ if workspace == "Markets":
         eyebrow("Risk profile")
         rg = MON.risk_grid(prices, window=win)
         disp = rg.copy()
+        if "Instrument" in disp:
+            disp["Instrument"] = disp["Instrument"].map(N.label)
         for c in ("Volatility", "Vol (recent)", "Max Drawdown",
                   "Current Drawdown", "% Positive Days"):
             if c in disp:
@@ -774,10 +782,12 @@ if workspace == "Markets":
         dd = MON.drawdown_summary(prices)
         if not dd.empty:
             st.plotly_chart(
-                C.bar_series(dd["Instrument"], (dd["Current Drawdown"]*100).tolist(),
+                C.bar_series(dd["Instrument"].map(N.label),
+                             (dd["Current Drawdown"]*100).tolist(),
                              "Current drawdown", "%"),
                 use_container_width=True, config={"displaylogo": False})
             d2 = dd.copy()
+            d2["Instrument"] = d2["Instrument"].map(N.label)
             for c in ("Current Drawdown", "Max Drawdown"):
                 d2[c] = d2[c].map(lambda v: f"{v*100:+.2f}%")
             st.dataframe(signed(d2, ["Current Drawdown", "Max Drawdown"]),
@@ -785,21 +795,23 @@ if workspace == "Markets":
 
         eyebrow("Underwater")
         upick = st.multiselect("Instruments ", list(prices.columns),
-                               default=list(prices.columns)[:4], key="mk_uw")
+                               default=list(prices.columns)[:4], key="mk_uw",
+                               format_func=N.label)
         if upick:
             st.plotly_chart(
-                C.underwater({c: prices[c].dropna() for c in upick}),
+                C.underwater({N.label(c): prices[c].dropna() for c in upick}),
                 use_container_width=True, config={"displaylogo": False})
 
     # ---------------- Relationships ----------------
     with mtabs[3]:
-        eyebrow(f"Relative to {base}")
+        base_label = N.label(base)
+        eyebrow(f"Relative to {base_label}")
         rel = MON.relative_strength(prices, base)
         rel = rel.drop(columns=[base], errors="ignore")
         if not rel.empty:
             st.plotly_chart(
-                C.equity_curve(rel, False,
-                               f"Ratio to {base}, rebased to 100"),
+                C.equity_curve(rel.rename(columns=N.label_map(rel.columns)), False,
+                               f"Ratio to {base_label}, rebased to 100"),
                 use_container_width=True, config={"displaylogo": False})
             note("A rising line is outperformance against the reference, "
                  "which is a different question from whether the instrument "
@@ -809,32 +821,40 @@ if workspace == "Markets":
         st.plotly_chart(C.correlation_matrix(prices.pct_change().corr()),
                         use_container_width=True, config={"displaylogo": False})
         pairs = MON.correlation_pairs(prices, 8)
+
+        def _label_pair(p: str) -> str:
+            a, _, b = p.partition(" / ")
+            return f"{N.label(a)}  /  {N.label(b)}" if b else p
+
         pc1, pc2 = st.columns(2)
         with pc1:
             st.markdown("**Most correlated**")
             if not pairs["highest"].empty:
                 h = pairs["highest"].copy()
+                h["Pair"] = h["Pair"].map(_label_pair)
                 h["Correlation"] = h["Correlation"].map(lambda v: f"{v:.3f}")
                 st.dataframe(h, use_container_width=True, hide_index=True)
         with pc2:
             st.markdown("**Least correlated**")
             if not pairs["lowest"].empty:
                 l = pairs["lowest"].copy()
+                l["Pair"] = l["Pair"].map(_label_pair)
                 l["Correlation"] = l["Correlation"].map(lambda v: f"{v:.3f}")
                 st.dataframe(signed(l, ["Correlation"]),
                              use_container_width=True, hide_index=True)
 
-        eyebrow(f"Rolling correlation with {base}")
+        eyebrow(f"Rolling correlation with {base_label}")
         rc = MON.rolling_correlation(prices, base, win)
         if not rc.empty:
-            st.plotly_chart(C.multi_line(rc, f"{win}-session correlation",
-                                         ref=0.0),
+            st.plotly_chart(C.multi_line(rc.rename(columns=N.label_map(rc.columns)),
+                                         f"{win}-session correlation", ref=0.0),
                             use_container_width=True,
                             config={"displaylogo": False})
-        eyebrow(f"Rolling beta to {base}")
+        eyebrow(f"Rolling beta to {base_label}")
         rb = MON.rolling_beta(prices, base, win)
         if not rb.empty:
-            st.plotly_chart(C.multi_line(rb, f"{win}-session beta", ref=1.0),
+            st.plotly_chart(C.multi_line(rb.rename(columns=N.label_map(rb.columns)),
+                                         f"{win}-session beta", ref=1.0),
                             use_container_width=True,
                             config={"displaylogo": False})
 
@@ -843,13 +863,13 @@ if workspace == "Markets":
         eyebrow("Average return by calendar month")
         se = MON.seasonality(prices)
         if not se.empty:
-            st.dataframe(heat((se * 100).round(2).reset_index()
-                              .rename(columns={"index": "Instrument"}),
-                              list(se.columns), pct=False),
+            se_disp = (se * 100).round(2).reset_index().rename(columns={"index": "Instrument"})
+            se_disp["Instrument"] = se_disp["Instrument"].map(N.label)
+            st.dataframe(heat(se_disp, list(se.columns), pct=False),
                          use_container_width=True, hide_index=True)
             counts = MON.seasonality_counts(prices)
             st.dataframe(pd.DataFrame({
-                "Instrument": counts.index,
+                "Instrument": [N.label(t) for t in counts.index],
                 "Years of data": counts.values}),
                 use_container_width=True, hide_index=True)
         st.markdown(
@@ -862,8 +882,10 @@ if workspace == "Markets":
     # ---------------- Data ----------------
     with mtabs[5]:
         eyebrow("Coverage")
-        st.dataframe(mk["quality"].per_asset, use_container_width=True,
-                     hide_index=True)
+        cov = mk["quality"].per_asset.copy()
+        if "Instrument" in cov:
+            cov["Instrument"] = cov["Instrument"].map(N.label)
+        st.dataframe(cov, use_container_width=True, hide_index=True)
         for wmsg in mk["quality"].warnings[:20]:
             st.markdown(f'<div class="flag">{wmsg}</div>',
                         unsafe_allow_html=True)
