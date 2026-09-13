@@ -922,7 +922,12 @@ capital gains -- one purchase, then drift -- so this mostly isolates its
 dividend taxation, which is exactly the fair basis a strategy that trades
 is judged against. Both show up as bars on the same Tax Cost Ratio chart,
 and both get their own after-tax equity line on the comparison chart
-above.
+above -- all four lines (strategy pretax/after-tax, benchmark
+pretax/after-tax) stay in real dollars on one shared scale. An earlier
+version rebased the benchmark's pretax line to a common index of 100 for
+the comparison and left its after-tax line in real dollars, which put the
+two benchmark lines on entirely different scales on the same chart; fixed,
+since the whole point here is comparing actual dollar levels, not shapes.
 
 **A by-year, by-source breakdown** splits each year's tax bill into
 capital gains tax, eligible dividend tax and foreign dividend tax, since a
@@ -1131,6 +1136,19 @@ the link between exploring on screen and reproducing in a script.
 That last point deserves attention: after 200 combinations tested, a Sharpe
 of 0.4 is achievable on pure noise. The displayed gap is the model's net
 edge.
+
+### Parameter surface, in 3D
+
+Sweeping two parameters against a metric is exactly three variables, and a
+flat heatmap can leave one thing ambiguous that a true surface answers
+directly: whether a strong reading sits on a **ridge** running the length
+of one parameter (robust to that one, sensitive to the other) or at an
+**isolated peak** with steep drop-offs on every side (overfit to both at
+once). Two cells that look similarly warm on a colour scale can be exactly
+those two different shapes underneath. A **View** toggle switches between
+the 3D surface and the original heatmap on the same underlying sweep --
+tilt and rotate the surface to read the shape, drop back to the heatmap for
+exact cell values.
 
 ### Stress test periods
 

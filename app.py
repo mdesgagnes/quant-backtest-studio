@@ -2989,14 +2989,20 @@ with tabs[3]:
                      f"({bench_tax_rep.tax_cost_ratio*100:.2f}%/yr).")
 
             eyebrow("Pretax vs. after-tax")
+            # All four series stay in real dollars, on the strategy's own
+            # scale, throughout. `align_results` rebases to a common
+            # starting index of 100 -- exactly right for a shape
+            # comparison elsewhere in this app, and exactly wrong here: it
+            # would put the benchmark's pretax line on a $100 basis while
+            # its after-tax line (built directly from `bench_res.equity`)
+            # stayed in real dollars, so the two benchmark lines would sit
+            # on entirely different scales on the same axis.
             curves = pd.DataFrame({res.label: res.equity})
             curves[f"{res.label} (after tax)"] = tax_rep.after_tax_equity.reindex(
                 res.equity.index).ffill().bfill()
             if bench_tax_rep is not None:
-                b_curves = align_results({
-                    res.label: res.equity, bench_res.label: bench_res.equity})
-                curves[bench_res.label] = b_curves[bench_res.label].reindex(
-                    curves.index).ffill().bfill() if bench_res.label in b_curves else np.nan
+                curves[bench_res.label] = bench_res.equity.reindex(
+                    curves.index).ffill().bfill()
                 curves[f"{bench_res.label} (after tax)"] = bench_tax_rep.after_tax_equity.reindex(
                     res.equity.index).ffill().bfill()
             st.plotly_chart(C.equity_curve(curves, True),
@@ -3137,9 +3143,30 @@ with tabs[4]:
             sw, sx, sy, sz = st.session_state["sweep"]
             if sz in sw.columns:
                 if sy != "\u2014 none \u2014" and sy in sw.columns:
-                    st.plotly_chart(C.sweep_heatmap(sw, sx, sy, sz),
-                                    use_container_width=True,
-                                    config={"displaylogo": False})
+                    view = st.radio("View", ["3D surface", "Heatmap"],
+                                    horizontal=True, key="sweepview",
+                                    help="Two parameters plus a metric is "
+                                         "exactly three variables -- the "
+                                         "surface shows the shape between "
+                                         "them directly. A heatmap's colour "
+                                         "scale can make an isolated peak "
+                                         "and a ridge that runs the length "
+                                         "of one parameter look similarly "
+                                         "warm; tilting the surface tells "
+                                         "them apart at a glance.")
+                    if view == "3D surface":
+                        st.plotly_chart(C.sweep_surface(sw, sx, sy, sz),
+                                        use_container_width=True,
+                                        config={"displaylogo": False})
+                        note("A ridge running the length of one axis means "
+                             "the result is robust to that parameter and "
+                             "sensitive to the other. An isolated peak with "
+                             "steep drop-offs on every side is the "
+                             "overfitting shape to worry about.")
+                    else:
+                        st.plotly_chart(C.sweep_heatmap(sw, sx, sy, sz),
+                                        use_container_width=True,
+                                        config={"displaylogo": False})
                 else:
                     st.plotly_chart(C.sweep_line(sw, sx, sz),
                                     use_container_width=True,

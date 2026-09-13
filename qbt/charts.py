@@ -250,6 +250,48 @@ def sweep_heatmap(df: pd.DataFrame, x: str, y: str, z: str,
     return fig
 
 
+def sweep_surface(df: pd.DataFrame, x: str, y: str, z: str,
+                  title: str = "", theme: str = "dark") -> go.Figure:
+    """A true 3D surface over two swept parameters and the resulting
+    metric, for the case a flat heatmap can leave ambiguous: whether a
+    strong reading sits on a ridge running the length of one parameter
+    (robust to the other) or right at an isolated peak (overfit to both
+    at once). Tilting the surface shows that shape directly; a heatmap's
+    colour scale can hide it behind two cells that look similarly warm.
+    """
+    pal, _ = _colors(theme)
+    piv = df.pivot_table(index=y, columns=x, values=z, aggfunc="mean")
+    x_vals = [float(c) for c in piv.columns]
+    y_vals = [float(i) for i in piv.index]
+    fig = go.Figure(go.Surface(
+        z=piv.values, x=x_vals, y=y_vals,
+        colorscale=[[0, pal["rust"]], [0.5, pal["panel"]], [1, pal["brass"]]],
+        showscale=True,
+        colorbar=dict(thickness=10, outlinewidth=0,
+                      tickfont=dict(family=MONO, size=9)),
+        contours=dict(z=dict(show=True, usecolormap=True,
+                             highlightcolor="rgba(255,255,255,0.5)",
+                             project=dict(z=True))),
+    ))
+    fig.update_layout(
+        template="plotly_white" if theme == "print" else "plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        title=dict(text=title or f"{z} across {x} and {y}", font=dict(size=13)),
+        height=480, margin=dict(l=10, r=10, t=45, b=10),
+        font=dict(family=FONT, size=11, color=pal["text"]),
+        scene=dict(
+            xaxis=dict(title=x, backgroundcolor="rgba(0,0,0,0)",
+                      gridcolor=pal["rule"], showbackground=True),
+            yaxis=dict(title=y, backgroundcolor="rgba(0,0,0,0)",
+                      gridcolor=pal["rule"], showbackground=True),
+            zaxis=dict(title=z, backgroundcolor="rgba(0,0,0,0)",
+                      gridcolor=pal["rule"], showbackground=True),
+            camera=dict(eye=dict(x=1.5, y=-1.5, z=0.9)),
+        ),
+    )
+    return fig
+
+
 def sweep_line(df: pd.DataFrame, x: str, z: str, title: str = "",
               theme: str = "dark") -> go.Figure:
     pal, _ = _colors(theme)
