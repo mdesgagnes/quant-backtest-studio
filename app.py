@@ -31,6 +31,7 @@ from qbt import charts as C
 from qbt import robustness as R
 from qbt import stress as STRESS
 from qbt import tax as TAX
+from qbt import full_report as FULLREPORT
 from qbt import report as REPORT
 from qbt import returns_input as RS
 from qbt import presets as PRESETS
@@ -2849,6 +2850,8 @@ with tabs[3]:
          "effect on the backtest itself: it is analysis of the trade log "
          "and dividend stream the run already produced.")
 
+    tax_rep = None
+    bench_tax_rep = None
     if run.get("dividends") is None or res.shares is None:
         note("No dividend or share data available for this run.")
     else:
@@ -3655,6 +3658,85 @@ with tabs[7]:
                        tearsheet_html.encode("utf-8"),
                        f"tearsheet_{run['strategy_key']}.html", "text/html",
                        key="dltearsheet")
+
+    eyebrow("Detailed report")
+    note("Every module in one document: Results, Signals, Positions, "
+         "Robustness, Stress test periods and Tax, all pulled from the "
+         "backtest already on screen. Walk-forward, in/out-of-sample and "
+         "cost sensitivity are recomputed fresh (they are cheap); the "
+         "parameter surface, trading-day sweep and Monte Carlo are only "
+         "included if already run from the Robustness tab in this "
+         "session, since forcing those to recompute here would be slow "
+         "for a document nobody may have asked for yet.")
+
+    def _build_report_bundle() -> Dict[str, Any]:
+        b: Dict[str, Any] = {
+            "label": res.label, "equity": res.equity, "returns": res.returns,
+            "trades": res.trades,
+            "period": f"{res.equity.index[0].date()} to {res.equity.index[-1].date()}",
+            "engine_line": f"{REBALANCE_RULES.get(rcfg.engine.rebalance, rcfg.engine.rebalance)} "
+                          f"rebalance \u00b7 {run_label}",
+            "stats": stats,
+        }
+        if bench is not None:
+            b["benchmark_label"] = bench.label
+            b["benchmark_equity"] = bench.equity
+        try:
+            _tp = M.period_table(res.equity, res.returns,
+                                 bench.equity if bench is not None else None,
+                                 bench.returns if bench is not None else None,
+                                 rcfg.engine.periods_per_year, res.label,
+                                 bench.label if bench is not None else "Benchmark")
+            b["trailing_table"] = _tp.get("trailing")
+            b["calendar_table"] = _tp.get("calendar")
+        except Exception:
+            pass
+        if run_mode == "builtin" and strategy_obj.has_score:
+            try:
+                b["scores"] = strategy_obj.score(universe, params_run, exog_used,
+                                                 run.get("cash_series"))
+            except Exception:
+                pass
+        b["walk_forward"] = wf if "wf" in dir() else None
+        b["in_out_sample"] = ios if "ios" in dir() else None
+        b["cost_sensitivity"] = cs if "cs" in dir() else None
+        if "sweep" in st.session_state:
+            _sw, _sx, _sy, _sz = st.session_state["sweep"]
+            b["parameter_sweep"] = {"df": _sw, "x": _sx,
+                                    "y": None if _sy == "\u2014 none \u2014" else _sy,
+                                    "z": _sz}
+        b["day_sweep"] = st.session_state.get("daysweep")
+        _mc_res = st.session_state.get("mc")
+        if _mc_res is not None and not _mc_res.empty and "CAGR" in _mc_res.columns:
+            good = _mc_res["CAGR"].dropna()
+            if len(good):
+                b["monte_carlo"] = {"median_cagr": float(good.median()),
+                                    "p5": float(good.quantile(0.05)),
+                                    "p95": float(good.quantile(0.95))}
+        try:
+            b["stress"] = STRESS.evaluate_periods(
+                res.returns, benchmark=bench.returns if bench is not None else None)
+        except Exception:
+            pass
+        if tax_rep is not None:
+            b["tax_report"] = tax_rep
+            b["tax_benchmark_report"] = bench_tax_rep
+        return b
+
+    rc1, rc2 = st.columns(2)
+    if rc1.button("Generate detailed report", key="genreport"):
+        with st.spinner("Assembling every section..."):
+            bundle = _build_report_bundle()
+            st.session_state["report_html"] = FULLREPORT.render_full_report(bundle, dark=True)
+            st.session_state["report_pdf"] = FULLREPORT.render_full_report_pdf(bundle)
+    if "report_html" in st.session_state:
+        rc1.download_button("Download report (HTML)",
+                            st.session_state["report_html"].encode("utf-8"),
+                            f"detailed_report_{run['strategy_key']}.html", "text/html",
+                            key="dlfullhtml")
+        rc2.download_button("Download report (PDF)", st.session_state["report_pdf"],
+                            f"detailed_report_{run['strategy_key']}.pdf", "application/pdf",
+                            key="dlfullpdf")
 
     eyebrow("Holdings")
     hc1, hc2 = st.columns(2)

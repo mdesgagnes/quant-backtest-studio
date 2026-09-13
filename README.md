@@ -302,6 +302,7 @@ under the **Export** tab, plus a few convenience buttons in "Positions".
 
 | Export | Format | Contents |
 |---|---|---|
+| Detailed report | HTML + PDF | Every module in one document: Results, Signals, Positions, Robustness, Stress test periods, Tax -- see below |
 | Tearsheet report | HTML | One printable page: KPIs, equity curve, drawdown, monthly returns, return distribution, full stats table, top drawdown episodes, current holdings, engine assumptions |
 | Current holdings | CSV | Instrument, weight, dollar value as of the last date |
 | Holdings history | CSV | Full weight time series (same shape used internally for drift) |
@@ -311,6 +312,54 @@ under the **Export** tab, plus a few convenience buttons in "Positions".
 | Trailing periods | on screen + tearsheet | 1M, 3M, 6M, YTD, 1Y, 2Y, 3Y, 5Y, 10Y, 15Y, 20Y, since inception, against the benchmark |
 | Calendar years | on screen + tearsheet | Year-by-year return and excess, partial years flagged |
 | Configuration | YAML | Exact reproduction of the run (imported files are not included; their name, settings, and lag are) |
+
+### The detailed report
+
+One document, generated from the **Generate detailed report** button in
+Export, covering every module: Results (KPIs, equity curve, drawdown,
+trailing and calendar tables), Signals (the model's score through time, for
+any strategy that has one), Positions (the trade log), Robustness
+(successive folds, in/out-of-sample, cost sensitivity, and whichever of the
+parameter surface, trading-day sweep, and Monte Carlo have already been run
+this session), Stress test periods, and Tax. Both an HTML file and a PDF
+come out of the same button, in the same dark theme.
+
+**Built from what has already been computed, not by re-running
+everything.** Walk-forward, in/out-of-sample and cost sensitivity are cheap
+enough to compute fresh every time; the parameter surface, the trading-day
+sweep and Monte Carlo are each expensive enough that the app only runs them
+on request, so the report includes whichever of those are already sitting
+in this session and says plainly when one has not been run yet, rather
+than forcing a slow recompute for a document nobody may have asked for.
+
+**Every chart is a static image, deliberately, not the interactive Plotly
+charts used everywhere else in this app.** Plotly's own static-image path
+goes through Kaleido, which as of version 1 requires downloading a full
+Chrome binary on first use -- a slow, large, and failure-prone addition to
+a free-tier deployment's build step. `qbt/report_charts.py` renders every
+chart with matplotlib instead, which is already a dependency of this
+project's own dependencies, needs no browser, and produces the exact same
+PNG bytes for both the HTML file (base64-embedded) and the PDF (via a
+reportlab Image flowable) -- one rendering path feeding two destinations,
+so the two documents cannot show different pictures of the same result.
+
+**The PDF is generated natively, not by converting the HTML through a
+browser engine.** The alternative -- weasyprint or wkhtmltopdf -- needs
+system libraries (Cairo, Pango) that are a fragile, slow addition to a
+free host's build process, and would not render Plotly's JavaScript-based
+interactive charts as anything but blank space besides. `reportlab`
+builds the PDF directly from styled paragraphs, tables and the same PNG
+images, painting the dark background on every page since reportlab has
+no native page-background property.
+
+**The dark theme is a deliberate exception to how this app's own
+tearsheet works.** The existing tearsheet (`qbt/report.py`) is
+intentionally light, on the reasoning that a page meant to be printed
+should not waste ink on a full-page dark background. The detailed report
+is dark because that is what was asked for -- most reports like this are
+read on a screen, not printed, and the app's whole interface already
+makes that same call. Worth knowing if a physical printout is the plan:
+a dark background will use noticeably more toner than the tearsheet does.
 
 **The workbook is complete by design.** Anything visible in the report is
 in it, so nothing has to be re-derived by hand. For a backtest that is
@@ -1211,6 +1260,8 @@ qbt/
   monitor.py               market monitor analytics
   stress.py                stress test periods against named historical episodes
   tax.py                   Canadian tax friendliness: ACB gains, eligible/foreign dividends
+  full_report.py           detailed HTML + PDF report combining every module
+  report_charts.py         matplotlib chart rendering shared by the detailed report's HTML and PDF
   tvchart.py               TradingView Lightweight Charts integration
   excel_export.py          complete multi-sheet workbook export
   formula.py               sandboxed expression evaluator
