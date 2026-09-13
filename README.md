@@ -538,7 +538,19 @@ at, so the execution assumption can be audited instead of trusted; and the
 reported value reconciles to units times close plus cash to machine
 precision on every session.
 
-
+That guarantee held for the raw simulation output, but not for a trimmed
+one until this pass: `trim_warmup()` -- which drops the leading stretch
+before a strategy's first real signal -- was rebuilding the result object
+without carrying `shares` or `fees` through, both added to the engine
+after this function was first written. Every trimmed run (the common case,
+since most strategies need lookback history) silently lost its share
+counts and fee series, which was already quietly breaking the Positions
+tab's share-count table and the workbook's Share Counts sheet before the
+Tax tab surfaced it outright. Fixed; both fields are now carried through
+exactly like every other field, and nothing else about a trimmed result
+changes -- verified by reconciling `shares x price + cash` back to the
+already-correct equity curve after the fix, on the same combinations used
+throughout this section.
 
 They are explicit because they determine how credible the result is.
 
@@ -582,16 +594,23 @@ They are explicit because they determine how credible the result is.
    benchmark is cut to the same date so the comparison stays honest. Only
    the leading stretch is removed: a deliberate move to cash mid-period is a
    decision and is kept.
-6. **Dividends.** Two conventions, chosen under Price convention. *Total
-   return* uses dividend-adjusted prices, so payments are folded into the
-   price series and compound inside the position from the moment they are
-   paid. *Price return + cash dividends* keeps prices ex-dividend and
-   credits each payment as cash on its ex-date, where it sits uninvested
-   until the next rebalance. Same cash in, different timing - and for a
-   strategy that is often partly in cash or rebalances rarely, the gap is
-   real. The two are mutually exclusive by construction: crediting dividends
-   on top of adjusted prices would count every payment twice, and the app
-   refuses that combination rather than silently producing it.
+6. **Dividends.** Two conventions, chosen under Price convention.
+   **Price return + cash dividends is the default**: prices stay
+   ex-dividend and each payment is credited as cash on its ex-date, where
+   it sits uninvested until the next rebalance. *Total return* uses
+   dividend-adjusted prices instead, folding payments invisibly into the
+   price series so they compound inside the position from the moment they
+   are paid. Same cash in, different timing -- and for a strategy that is
+   often partly in cash or rebalances rarely, the gap is real. The two are
+   mutually exclusive by construction: crediting dividends on top of
+   adjusted prices would count every payment twice, and the app refuses
+   that combination rather than silently producing it.
+
+   The default changed to price-return-plus-cash for a reason beyond
+   realism: it is the only convention that keeps price appreciation and
+   dividend income visible as two separate numbers. Total-return prices
+   make that separation impossible after the fact, which is exactly the
+   information the Tax tab needs -- see section 9 bis.
 7. **Weights drift between rebalances.** Positions evolve with prices.
    Assuming an implicit daily rebalance is the mistake that most often
    inflates published results.
@@ -792,6 +811,91 @@ silent partial one.
 For anything the expression language cannot say - a stateful rule, an
 optimizer, a custom data join - write a real strategy in Python instead,
 as below.
+
+---
+
+## 5 quater bis. Tax friendliness
+
+A separate tab, and a separate question from everything else in this app:
+not "how did the strategy perform," but "how much of that would actually
+reach a Canadian investor after tax, and how much of the tax bill did the
+strategy's own trading behaviour create." Two strategies with an identical
+pre-tax Sharpe ratio can differ sharply here -- a low-turnover strategy
+defers gains it hasn't sold, a high-turnover one crystallizes them every
+year, and that difference is invisible everywhere else in this app.
+
+Like Signals and the Robustness tests, this is **pure post-hoc analysis**
+of a completed backtest. It reads `BacktestResult.trades` and
+`BacktestResult.shares`, plus the per-share dividend series the run
+already used, and computes a separate, additional set of numbers in
+`qbt/tax.py`. It cannot change a single figure the engine reports.
+
+**Scope, stated plainly.** This models a **non-registered (taxable)
+account** for an **individual Canadian resident**, where the tax year is
+the calendar year. Inside a TFSA or an RRSP, none of this applies -- there
+is no annual tax on capital gains or dividends in either registered
+account, which is often a bigger lever than the strategy itself.
+
+**Capital gains use the Adjusted Cost Base method** -- the average cost of
+everything currently held, recomputed after every buy and sell -- because
+that is what Canadian tax law requires. This is deliberately not FIFO and
+not specific-lot identification, both allowed elsewhere but not here. Each
+realized sale is matched against the ACB in effect at that moment, in
+chronological order, so a sale never sees cost-base information from a
+trade that came after it.
+
+**The capital gains inclusion rate defaults to 50%.** The 2024 federal
+budget proposed raising it to 66.67% on individual gains above
+$250,000/year; that increase was deferred to January 2026 and then
+cancelled outright in March 2025. As of this writing the rate remains 50%
+for everyone, with no threshold -- but tax law can change again, so it is
+a parameter here, not a constant.
+
+**Dividend income is classified as eligible or foreign by ticker suffix**
+-- `.TO` and similar are treated as Canadian-listed and everything else as
+foreign, overridable per ticker in the tab. This is a starting heuristic,
+not a determination of what the issuing corporation actually designates: a
+Canadian-listed ETF holding foreign equities may itself pass through
+foreign, non-eligible income that cannot be seen from price and
+distribution data alone.
+
+- **Eligible dividends** get the federal gross-up and dividend tax credit
+  (38% gross-up, 15.0198% federal credit on the grossed-up amount, both
+  fixed nationally and unlikely to be wrong). **Provincial dividend tax
+  credits are not modelled** -- they vary by province and are usually
+  large enough to matter, so the derived eligible-dividend rate is a
+  conservative, federal-only figure unless a full effective rate is
+  entered directly in the tab.
+- **Foreign and non-eligible dividends** are taxed at the plain marginal
+  rate, with no gross-up or credit, which is accurate as-is. US
+  withholding tax on US-listed dividends is assumed fully recoverable
+  through the foreign tax credit by default -- true for most taxpayers in
+  a taxable account, since it works against Canadian tax otherwise owed on
+  the same income. A toggle turns that assumption off and adds the 15%
+  back as an uncredited cost.
+
+**Not modelled at all:** the superficial loss rule, the lifetime capital
+gains exemption, capital gains from anywhere outside this backtest,
+provincial surtaxes and clawback thresholds, and any account other than
+non-registered. Loss carryforward runs only *forward* within the
+backtest's own date range -- Canada also allows carrying a loss back three
+years, which needs tax history this module cannot see.
+
+**Tax is assumed paid from outside the portfolio** -- other income or
+cash -- rather than funded by selling more of the position, the simpler
+and more common real assumption for anyone with other income. The
+after-tax equity curve grows at the strategy's own realized return each
+calendar year, then subtracts that year's tax bill once at year-end,
+consistent with an annual filing; it is a bookkeeping construction on top
+of the untouched equity curve, not a different simulation.
+
+**This needs price-return-plus-cash-dividends prices to work at all.**
+Total-return (adjusted) prices fold dividends invisibly into the price
+series, and once folded in they cannot be separated back out into "how
+much was dividend" versus "how much was price appreciation" -- which is
+exactly why the default price convention changed (section 5, point 6). The
+tab detects the total-return case and says so rather than producing a
+number quietly missing half the picture.
 
 ---
 
@@ -1054,6 +1158,8 @@ qbt/
   external.py              imported target weights
   allocation.py            sleeves: asset-class budgets and composition
   monitor.py               market monitor analytics
+  stress.py                stress test periods against named historical episodes
+  tax.py                   Canadian tax friendliness: ACB gains, eligible/foreign dividends
   tvchart.py               TradingView Lightweight Charts integration
   excel_export.py          complete multi-sheet workbook export
   formula.py               sandboxed expression evaluator

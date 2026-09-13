@@ -30,6 +30,7 @@ from qbt import metrics as M
 from qbt import charts as C
 from qbt import robustness as R
 from qbt import stress as STRESS
+from qbt import tax as TAX
 from qbt import report as REPORT
 from qbt import returns_input as RS
 from qbt import presets as PRESETS
@@ -2365,6 +2366,7 @@ if run_clicked and not blocking:
             "sleeves": sleeve_report,
             "cash_series": cash_series,
             "volume": vol_px,
+            "dividends": div_px,
             "construction": construction,
             "market": market,
             "bench_mode": bench_mode,
@@ -2453,8 +2455,8 @@ if run.get("trimmed"):
     _bits.append('<span class="item">warm-up trimmed</span>')
 st.markdown(f'<div class="runbar">{"".join(_bits)}</div>', unsafe_allow_html=True)
 
-tabs = st.tabs(["Results", "Signals", "Positions", "Robustness", "Data",
-                "Builder", "Export"])
+tabs = st.tabs(["Results", "Signals", "Positions", "Tax", "Robustness",
+                "Data", "Builder", "Export"])
 
 # --------------------------- RESULTS -----------------------------------
 with tabs[0]:
@@ -2834,8 +2836,148 @@ with tabs[2]:
                            res.trades.to_csv(index=False).encode("utf-8"),
                            "trades.csv", "text/csv")
 
-# --------------------------- ROBUSTNESS ----------------------------------
+# --------------------------- TAX ------------------------------------------
 with tabs[3]:
+    note("Tax friendliness for a Canadian non-registered account, where "
+         "the fiscal year is the calendar year. Realized capital gains use "
+         "the Adjusted Cost Base method Canadian tax law requires, not "
+         "FIFO -- the average cost of everything held, recomputed after "
+         "every trade. Capital gains and dividend income are taxed "
+         "differently and are broken out separately below. This has no "
+         "effect on the backtest itself: it is analysis of the trade log "
+         "and dividend stream the run already produced.")
+
+    if run.get("dividends") is None or res.shares is None:
+        note("No dividend or share data available for this run.")
+    else:
+        with st.expander("Tax settings", expanded=True):
+            tc1, tc2, tc3 = st.columns(3)
+            tax_marginal = tc1.number_input(
+                "Marginal tax rate (%)", 0.0, 75.0, 40.0, 1.0, key="tax_marginal",
+                help="Your own combined federal + provincial marginal rate "
+                     "on ordinary income. This varies enormously by income "
+                     "and province -- there is no sensible universal "
+                     "default, so 40% is a placeholder to replace with your "
+                     "own number.") / 100.0
+            tax_inclusion = tc2.number_input(
+                "Capital gains inclusion rate (%)", 0.0, 100.0, 50.0, 1.0,
+                key="tax_inclusion",
+                help="The share of a capital gain that is taxable. 50% as "
+                     "of this writing for every individual, with no "
+                     "threshold -- a 2024 proposal to raise it to 66.67% "
+                     "on gains above $250,000/year was deferred and then "
+                     "cancelled in March 2025. Exposed as a parameter "
+                     "because tax law can change again.") / 100.0
+            us_recoverable = tc3.checkbox(
+                "US withholding fully recoverable via foreign tax credit",
+                value=True, key="tax_uswh",
+                help="On, the 15% US withholding on US-listed dividends is "
+                     "assumed offset by the Canadian foreign tax credit -- "
+                     "true for most taxpayers in a taxable account. Off "
+                     "adds it back as a permanent cost.")
+
+            tc4, tc5 = st.columns(2)
+            _elig_override = tc4.number_input(
+                "Eligible dividend rate override (%, optional)", 0.0, 75.0, 0.0, 1.0,
+                key="tax_elig_override",
+                help="Leave at 0 to derive this from the marginal rate "
+                     "above using the federal gross-up (38%) and federal "
+                     "dividend tax credit (15.02%) alone. That federal-only "
+                     "figure omits your province's own dividend tax "
+                     "credit, which further reduces the true rate -- enter "
+                     "your own all-in effective rate here for an accurate "
+                     "number.") / 100.0 or None
+            _foreign_override = tc5.number_input(
+                "Foreign dividend rate override (%, optional)", 0.0, 75.0, 0.0, 1.0,
+                key="tax_foreign_override",
+                help="Leave at 0 to use the marginal rate above (foreign "
+                     "and non-eligible dividends get no gross-up or "
+                     "credit, so the marginal rate is already accurate).") / 100.0 or None
+
+            _tick_txt = st.text_area(
+                "Per-ticker classification override (optional)",
+                placeholder="XEF.TO: foreign\nSPY: eligible",
+                height=60, key="tax_overrides",
+                help="One per line, TICKER: eligible or foreign. By default "
+                     "a \u201c.TO\u201d-suffixed ticker is treated as an "
+                     "eligible-dividend payer and everything else as "
+                     "foreign -- a simplification, since a Canadian-listed "
+                     "ETF holding foreign equities may itself pass through "
+                     "foreign income this cannot see from price data alone.")
+            _overrides = {}
+            for line in (_tick_txt or "").replace(",", "\n").split("\n"):
+                if ":" in line:
+                    k, _, v = line.partition(":")
+                    v = v.strip().lower()
+                    if v in ("eligible", "foreign"):
+                        _overrides[k.strip().upper()] = v
+
+        settings = TAX.TaxSettings(
+            marginal_rate=tax_marginal, inclusion_rate=tax_inclusion,
+            eligible_dividend_rate=_elig_override,
+            foreign_dividend_rate=_foreign_override,
+            us_withholding_recoverable=bool(us_recoverable),
+            ticker_overrides=_overrides,
+        )
+        tax_rep = TAX.evaluate(res.trades, res.shares, run["dividends"],
+                               res.equity, settings)
+
+        for w in tax_rep.warnings:
+            st.markdown(f'<div class="flag">{w}</div>', unsafe_allow_html=True)
+
+        if tax_rep.by_year.empty:
+            note("Nothing to evaluate for this run.")
+        else:
+            tt1, tt2, tt3, tt4 = st.columns(4)
+            with tt1:
+                dial("Total tax", f"${tax_rep.total_tax:,.0f}", "over the backtest", "neg")
+            with tt2:
+                dial("Tax drag", f"{tax_rep.tax_drag_pa*100:.2f}%/yr",
+                    "pretax CAGR minus after-tax CAGR", "neg")
+            with tt3:
+                dial("Realized gains", f"${tax_rep.total_pretax_gain:,.0f}",
+                    "net of losses, before inclusion rate")
+            with tt4:
+                yrs_taxed = int((tax_rep.by_year["Total Tax"] > 0).sum())
+                dial("Years with tax owed", f"{yrs_taxed} / {len(tax_rep.by_year)}")
+
+            eyebrow("Pretax vs. after-tax")
+            curves = pd.DataFrame({res.label: res.equity})
+            at = tax_rep.after_tax_equity.reindex(res.equity.index).ffill().bfill()
+            curves[f"{res.label} (after tax)"] = at
+            st.plotly_chart(C.equity_curve(curves, True),
+                            use_container_width=True, config={"displaylogo": False})
+            note("The after-tax line assumes tax is paid once a year, at "
+                 "each calendar year-end, from money outside the "
+                 "portfolio -- not funded by selling more of the position.")
+
+            eyebrow("By tax year")
+            disp = tax_rep.by_year.copy()
+            money_cols = [c for c in disp.columns if c != "Year"]
+            for c in money_cols:
+                disp[c] = disp[c].map(lambda v: f"${v:,.0f}")
+            st.dataframe(signed(disp, money_cols), use_container_width=True,
+                        hide_index=True)
+
+            if not tax_rep.realized_trades.empty:
+                with st.expander("Every realized sale (ACB detail)", expanded=False):
+                    rt = tax_rep.realized_trades.copy()
+                    rt["Date"] = pd.to_datetime(rt["Date"]).dt.date
+                    for c in ("Proceeds", "ACB of Shares Sold", "Realized Gain"):
+                        rt[c] = rt[c].map(lambda v: f"${v:,.2f}")
+                    st.dataframe(signed(rt, ["Realized Gain"]),
+                                use_container_width=True, hide_index=True)
+
+            dl1, dl2 = st.columns(2)
+            dl1.download_button("Download annual tax summary (CSV)",
+                               tax_rep.by_year.to_csv(index=False).encode("utf-8"),
+                               "tax_by_year.csv", "text/csv", key="dltaxyear")
+            dl2.download_button("Download realized sales detail (CSV)",
+                               tax_rep.realized_trades.to_csv(index=False).encode("utf-8"),
+                               "tax_realized_sales.csv", "text/csv", key="dltaxsales")
+
+# --------------------------- ROBUSTNESS ----------------------------------
+with tabs[4]:
     note("A single backtest is only one observation. These four tests probe "
          "whether the result holds up beyond the exact parameter set chosen.")
 
@@ -3159,7 +3301,7 @@ with tabs[3]:
                          use_container_width=True, hide_index=True)
 
 # --------------------------- DATA ----------------------------------------
-with tabs[4]:
+with tabs[5]:
     a, b, c = st.columns(3)
     with a:
         dial("Sessions", f"{quality.rows:,}")
@@ -3227,7 +3369,7 @@ with tabs[4]:
                        universe.to_csv().encode("utf-8"), "prices.csv", "text/csv")
 
 # --------------------------- BUILDER --------------------------------------
-with tabs[5]:
+with tabs[6]:
     note("Build a strategy from criteria. Each rule is an indicator, a "
          "comparison and a value; rules combine into a filter that decides "
          "what is eligible and a score that ranks it. The result compiles to "
@@ -3397,7 +3539,7 @@ with tabs[5]:
 
 
 # --------------------------- EXPORT ---------------------------------------
-with tabs[6]:
+with tabs[7]:
     note("Every export below reproduces the backtest currently on screen. "
          "The tearsheet is the fastest way to share a result; the workbook "
          "and CSVs are for further analysis elsewhere.")

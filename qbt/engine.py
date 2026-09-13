@@ -560,6 +560,14 @@ def trim_warmup(res: BacktestResult, start: Optional[pd.Timestamp] = None,
         dividend_income=(res.dividend_income.loc[keep]
                          if res.dividend_income is not None else None),
         warmup_start=start,
+        # `shares` and `fees` were added to BacktestResult after this
+        # function was first written, and reconstructing the object here
+        # without them silently dropped both on every trimmed run -- the
+        # common case, since most strategies need history before their
+        # first signal. Neither field affects a number already computed
+        # above; both are carried through exactly like every other field.
+        shares=(res.shares.loc[keep] if res.shares is not None else None),
+        fees=(res.fees.loc[keep] if res.fees is not None else None),
     )
 
 

@@ -31,8 +31,12 @@ class DataConfig:
     price_field: str = "Close"             # adjusted close by default
     fill_limit: int = 5                    # forward-fill days tolerated
     min_history: int = 60                  # days required before the first signal
-    adjusted: bool = True                  # True = total-return prices
-    use_dividends: bool = False            # credit dividends as cash (needs adjusted=False)
+    # Price return + cash dividends is the default: dividends land as cash
+    # on their ex-date rather than folding invisibly into the price series.
+    # Total-return (adjusted) prices remain fully available as the other
+    # option -- this changes only which one a fresh run starts on.
+    adjusted: bool = False                 # True = total-return prices
+    use_dividends: bool = True             # credit dividends as cash (needs adjusted=False)
 
 
 @dataclass
