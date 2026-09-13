@@ -168,6 +168,21 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
                 "on one market. SHY is offered as the cash leg; nothing here "
                 "requires it.",
     },
+    "VIX-adaptive momentum proxy (Alpha Architect)": {
+        "tickers": ["SPY", "VXF", "EFA", "AGG", "BIL"],
+        "classes": {
+            "SPY": "Equities", "VXF": "Equities", "EFA": "Equities",
+            "AGG": "Fixed income", "BIL": "Fixed income",
+        },
+        "benchmark": "SPY",
+        "cash": "BIL",
+        "note": "The five-ETF universe from Alpha Architect's VIX-and-"
+                "trend-following research: SPY for large-cap US equities, "
+                "VXF for the rest of the US market, EFA for developed "
+                "international, AGG for investment-grade bonds, BIL as the "
+                "defensive holding. Pair with the VIX-Adaptive Momentum "
+                "model, monthly rebalancing, one-month execution lag.",
+    },
     "HIDE target asset classes": {
         "tickers": ["SCHR", "VNQ", "BCI"],
         "classes": {

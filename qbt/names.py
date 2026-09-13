@@ -30,6 +30,7 @@ NAMES: Dict[str, str] = {
     "VUG": "Vanguard Growth ETF",
     "VBR": "Vanguard Small-Cap Value ETF",
     "VB": "Vanguard Small-Cap ETF",
+    "VXF": "Vanguard Extended Market ETF",
     "MTUM": "iShares MSCI USA Momentum Factor ETF",
     "QUAL": "iShares MSCI USA Quality Factor ETF",
     "USMV": "iShares MSCI USA Min Vol Factor ETF",

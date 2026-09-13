@@ -1261,3 +1261,143 @@ def _score_custom(px: pd.DataFrame, p: Dict[str, Any],
                               exog if exog is not None and not exog.empty else None)
     except FormulaError:
         return pd.DataFrame(np.nan, index=px.index, columns=px.columns)
+
+
+@register(
+    key="vix_adaptive_momentum",
+    label="VIX-Adaptive Momentum",
+    description="Cross-sectional momentum whose lookback window changes "
+                "with the volatility regime: slow when calm, faster when "
+                "elevated, faster still when extreme. Ranks the universe on "
+                "whichever window applies that day and holds the top name(s) "
+                "equal-weighted. Modelled on Alpha Architect's research "
+                "combining VIX with trend-following (2017, revisited 2026).",
+    params=[
+        Param("vix_series", "Volatility Series", "series", "",
+              help="Auto-fetched from Yahoo Finance (^VIX) whenever this "
+                   "model is selected. Pick an uploaded column instead to "
+                   "use a different volatility measure."),
+        Param("threshold_mode", "Regime Thresholds", "choice",
+              "Level (index points)",
+              choices=["Level (index points)", "Percentile of own history"],
+              help="\"Level\" reads the series directly -- 20 and 30 are the "
+                   "common calm / elevated / crisis cutoffs for the VIX. "
+                   "\"Percentile\" ranks today's reading against its own "
+                   "trailing history instead, which keeps working if "
+                   "volatility's normal range drifts over a long backtest."),
+        Param("yellow_threshold", "Yellow Starts At", "float", 20.0, 0.0, 100.0, 1.0,
+              help="Series level (or percentile, 0-100) at or above which "
+                   "the regime becomes Yellow."),
+        Param("red_threshold", "Red Starts At", "float", 30.0, 0.0, 100.0, 1.0,
+              help="Series level (or percentile) at or above which the "
+                   "regime becomes Red."),
+        Param("percentile_window", "Percentile Lookback (days)", "int", 756, 60, 2520, 21,
+              help="Only used in Percentile mode. 756 sessions is about "
+                   "three years of trailing history to rank against."),
+        Param("lookback_green", "Lookback, Green (days)", "int", 210, 20, 504, 5,
+              help="Calm regime. 210 sessions is about ten months, the "
+                   "article's baseline window."),
+        Param("lookback_yellow", "Lookback, Yellow (days)", "int", 84, 5, 504, 5,
+              help="Elevated regime: a faster signal, roughly four months."),
+        Param("lookback_red", "Lookback, Red (days)", "int", 21, 5, 252, 1,
+              help="Crisis regime: the fastest signal, roughly one month."),
+        Param("skip", "Skip Days", "int", 0, 0, 63, 1,
+              help="Excludes the most recent days from the momentum "
+                   "calculation. The article does not use one; the option "
+                   "is here for consistency with the other momentum models."),
+        Param("top_n", "Number of Positions", "int", 1, 1, 20, 1,
+              help="1 matches the article's Top 1 variant, the one that "
+                   "held up out of sample. 2 matches Top 2, which did not: "
+                   "diversifying away the concentrated bet also diversified "
+                   "away the edge."),
+    ],
+)
+def _vix_adaptive_momentum(px: pd.DataFrame, p: Dict[str, Any],
+                           exog: pd.DataFrame = None) -> pd.DataFrame:
+    """Regime-conditioned cross-sectional momentum.
+
+    The published result is specific about *why* this differs from a plain
+    momentum strategy: it is not a volatility filter on top of momentum, and
+    it does not change exposure. Every day it ranks the same universe by
+    trailing return, exactly like `xs_momentum` -- the only thing the
+    volatility regime changes is *which lookback window* that ranking uses.
+    A slow window in calm markets, a fast one when volatility rises.
+
+    Where the volatility series has no value at all -- before it starts, or
+    if none was supplied -- the regime defaults to Green (the slow,
+    baseline window) rather than to cash. That is a stated assumption, not
+    a detected one: absent evidence of stress, the model assumes calm,
+    which matches how `macro_gate` handles a missing series elsewhere in
+    this library.
+    """
+    ex = exog if exog is not None else pd.DataFrame(index=px.index)
+    col = p.get("vix_series")
+    vix = (pd.to_numeric(ex[col], errors="coerce").reindex(px.index).ffill()
+           if col and col in ex.columns else pd.Series(np.nan, index=px.index))
+
+    if p["threshold_mode"].startswith("Percentile"):
+        w = int(p["percentile_window"])
+        level = vix.rolling(w, min_periods=max(20, w // 4)).apply(
+            lambda a: 100.0 * (a <= a[-1]).mean(), raw=True)
+    else:
+        level = vix
+
+    yellow_at, red_at = float(p["yellow_threshold"]), float(p["red_threshold"])
+    is_yellow = (level >= yellow_at) & (level < red_at)
+    is_red = level >= red_at
+    # No signal at all (NaN) falls through to neither mask -> Green, the
+    # baseline window, per the "assume calm" default above.
+    is_yellow = is_yellow.fillna(False)
+    is_red = is_red.fillna(False)
+
+    skip = int(p.get("skip", 0))
+    base = px.shift(skip)
+    mom_green = base / base.shift(int(p["lookback_green"])) - 1.0
+    mom_yellow = base / base.shift(int(p["lookback_yellow"])) - 1.0
+    mom_red = base / base.shift(int(p["lookback_red"])) - 1.0
+
+    yellow_mask = pd.DataFrame({c: is_yellow for c in px.columns})
+    red_mask = pd.DataFrame({c: is_red for c in px.columns})
+    score = mom_green.where(~yellow_mask, mom_yellow)
+    score = score.where(~red_mask, mom_red)
+
+    top_n = int(p["top_n"])
+    ranks = score.rank(axis=1, ascending=False, na_option="keep", method="first")
+    mask = (ranks <= top_n).astype(float).where(score.notna(), 0.0)
+    return mask / float(top_n)
+
+
+@register_scorer("vix_adaptive_momentum")
+def _score_vix_adaptive(px: pd.DataFrame, p: Dict[str, Any],
+                        exog: pd.DataFrame = None) -> pd.DataFrame:
+    """The momentum score actually used that day, under whichever lookback
+    the regime called for -- not a fixed window, so the value on any given
+    date depends on the regime path up to that point."""
+    ex = exog if exog is not None else pd.DataFrame(index=px.index)
+    col = p.get("vix_series")
+    vix = (pd.to_numeric(ex[col], errors="coerce").reindex(px.index).ffill()
+           if col and col in ex.columns else pd.Series(np.nan, index=px.index))
+
+    if p["threshold_mode"].startswith("Percentile"):
+        w = int(p["percentile_window"])
+        level = vix.rolling(w, min_periods=max(20, w // 4)).apply(
+            lambda a: 100.0 * (a <= a[-1]).mean(), raw=True)
+    else:
+        level = vix
+
+    yellow_at, red_at = float(p["yellow_threshold"]), float(p["red_threshold"])
+    is_yellow = (level >= yellow_at) & (level < red_at)
+    is_red = level >= red_at
+    is_yellow = is_yellow.fillna(False)
+    is_red = is_red.fillna(False)
+
+    skip = int(p.get("skip", 0))
+    base = px.shift(skip)
+    mom_green = base / base.shift(int(p["lookback_green"])) - 1.0
+    mom_yellow = base / base.shift(int(p["lookback_yellow"])) - 1.0
+    mom_red = base / base.shift(int(p["lookback_red"])) - 1.0
+
+    yellow_mask = pd.DataFrame({c: is_yellow for c in px.columns})
+    red_mask = pd.DataFrame({c: is_red for c in px.columns})
+    score = mom_green.where(~yellow_mask, mom_yellow)
+    return score.where(~red_mask, mom_red)

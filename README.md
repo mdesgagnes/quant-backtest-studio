@@ -810,6 +810,45 @@ paper it names is worse than one that admits it.
 | Accelerating Dual Momentum | Blend short, medium and long lookbacks instead of trusting one, with an absolute threshold that moves to cash when nothing clears it. |
 | MomentumOG | Cumulative return over the lookback, less how far the price sits above its own average over that window. A name that has run up but is stretched far above its mean scores below one that got there steadily. |
 | Trend-Gated Target Weights (HIDE-style) | Fixed target weights per asset class, each independently gated by two trend signals worth half its allocation each: full weight, half weight, or cash. Never short. |
+| VIX-Adaptive Momentum | Cross-sectional momentum whose lookback window changes with the volatility regime -- slow when calm, faster when elevated, fastest when extreme -- then holds the top-ranked name(s) equal-weighted. |
+
+### On VIX-Adaptive Momentum
+
+Modelled on Alpha Architect's research combining the VIX with trend
+following (2017, revisited with nearly a decade of out-of-sample data in
+2026). The mechanism is specific, and worth stating precisely because it is
+easy to mistake for something else: **the volatility regime never touches
+exposure.** The portfolio is always fully invested. What the regime changes
+is *which lookback window* the cross-sectional momentum ranking uses that
+day -- a slow window (about ten months) when volatility is calm, a faster
+one when it is elevated, faster still when it is extreme. The same universe
+is ranked either way; only the speed of the signal changes.
+
+Three regimes, Green / Yellow / Red, driven by a volatility series against
+two thresholds. Thresholds can be read as raw index levels (20 and 30 are
+the levels commonly cited for the VIX) or as a percentile of the series'
+own trailing history, which keeps working if volatility's normal range
+drifts over a multi-decade backtest. **Top N is not a free choice to
+calibrate away.** The published finding is specific: the concentrated Top 1
+version showed a real, cost-surviving edge over nearly a decade of
+out-of-sample data; Top 2 did not -- diversifying across two names also
+diversified away the advantage. Both are available here, but only one of
+them is the one the evidence supports.
+
+**The volatility series is auto-fetched.** Selecting this model fetches
+CBOE VIX data from Yahoo Finance automatically and adds it as an
+exogenous column named "VIX (auto)" -- nothing has to be uploaded by hand
+for the default case. The model's "Volatility Series" parameter is an
+ordinary exogenous-series picker, though, so an uploaded column of a
+different volatility measure can be selected in its place, and it is never
+overwritten by the auto-fetch. If the fetch fails, or no volatility data
+covers a stretch of the backtest, the model defaults to the Green (slow,
+baseline) lookback for that stretch rather than guessing or halting --
+a stated assumption ("absent evidence of stress, assume calm"), not a
+detected one.
+
+A dedicated preset, "VIX-adaptive momentum proxy (Alpha Architect)", loads
+the article's own five-ETF universe: SPY, VXF, EFA, AGG, BIL.
 
 ### On MomentumOG
 

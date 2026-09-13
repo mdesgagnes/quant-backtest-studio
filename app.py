@@ -522,6 +522,21 @@ def fetch_yf(tickers: tuple, start: str, end: Optional[str], field: str) -> pd.D
     return load_yfinance(list(tickers), start, end, field)
 
 
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_vix(start: str, end: Optional[str]) -> Optional[pd.Series]:
+    """The CBOE VIX index, for models that condition on volatility.
+
+    A best-effort fetch: if it fails, the caller falls back to whatever the
+    person uploaded (or, absent that, the model's own no-signal default)
+    rather than breaking the run over one optional series.
+    """
+    try:
+        df = load_yfinance(["^VIX"], start, end, "Close")
+        return df.iloc[:, 0].dropna() if not df.empty else None
+    except Exception:
+        return None
+
+
 @st.cache_data(show_spinner=False)
 def parse_upload(content: bytes, name: str, sheet: Optional[str]) -> pd.DataFrame:
     buf = io.BytesIO(content)
@@ -1537,6 +1552,36 @@ if mode == "builtin":
     strategy = REGISTRY[strat_key]
     st.sidebar.markdown(f'<div class="note">{strategy.description}</div>',
                         unsafe_allow_html=True)
+
+    # Models that read a named volatility series (currently just this one)
+    # get it fetched automatically, so nothing has to be uploaded by hand
+    # for the default case. An uploaded column of the same purpose still
+    # takes priority if the person picks it from the dropdown -- the fetch
+    # only fills the slot, it never overwrites a real upload of the same
+    # name, and a failed fetch degrades to "nothing auto-added" rather than
+    # blocking the run.
+    if strat_key == "vix_adaptive_momentum":
+        _vix_name = "VIX (auto)"
+        if _vix_name not in exog_columns:
+            _vix = fetch_vix(str(start), str(end))
+            if _vix is not None and not _vix.empty:
+                _vix_frame = _vix.to_frame(_vix_name)
+                exog_raw = (pd.concat([exog_raw, _vix_frame], axis=1)
+                           if exog_raw is not None else _vix_frame)
+                exog_columns = list(exog_raw.columns)
+                st.sidebar.markdown(
+                    f'<div class="note">VIX fetched automatically '
+                    f'({_vix.index.min().date()} to {_vix.index.max().date()}). '
+                    f'Select an uploaded column above instead to use a '
+                    f'different volatility series.</div>',
+                    unsafe_allow_html=True)
+            else:
+                st.sidebar.markdown(
+                    '<div class="flag">Could not fetch VIX automatically. '
+                    'Upload a volatility series above, or the model falls '
+                    'back to its default (calm) regime throughout.</div>',
+                    unsafe_allow_html=True)
+
     if strategy.needs_exog and not exog_columns:
         st.sidebar.markdown(
             '<div class="flag">This model reads exogenous series. Upload a '
