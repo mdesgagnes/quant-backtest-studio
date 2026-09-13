@@ -1278,7 +1278,8 @@ if source == "Return stream":
                     '<div class="flag">None of these periods fall inside '
                     'this series\u2019 date range.</div>', unsafe_allow_html=True)
             else:
-                rc1, rc2, rc3, rc4 = st.columns(4)
+                rs_has_bench = "n_vs_benchmark" in rs_summ
+                rc1, rc2, rc3, rc4, *rc5 = st.columns(5 if rs_has_bench else 4)
                 with rc1:
                     dial("Periods covered", f"{n_cov} / {rs_summ['n_total']}")
                 with rc2:
@@ -1289,6 +1290,17 @@ if source == "Return stream":
                         wp if len(wp) <= 28 else wp[:26] + "\u2026")
                 with rc4:
                     dial("Deepest drawdown", f"{rs_summ.get('worst_drawdown', float('nan'))*100:.1f}%")
+                if rs_has_bench:
+                    with rc5[0]:
+                        dial("Beat benchmark in",
+                            f"{rs_summ['n_beat_benchmark']} / {rs_summ['n_vs_benchmark']}",
+                            f"median excess {rs_summ['median_excess']*100:+.1f}%")
+                elif not bench_col:
+                    note("No benchmark column is selected, so these figures "
+                         "show this series alone. A benchmark shows whether "
+                         "a decline here was worse or better than the "
+                         "market's own decline over the same window, which "
+                         "a single number cannot.")
 
                 partial_n = int((rs_ev["Coverage"] == "Partial").sum())
                 no_data_n = int((rs_ev["Coverage"] == "No data").sum())
@@ -1305,21 +1317,34 @@ if source == "Return stream":
                 rs_shown = rs_ev[rs_ev["Coverage"] != "No data"].copy()
                 if not rs_shown.empty:
                     rs_order = rs_shown.sort_values("Start")["Period"]
-                    st.plotly_chart(
-                        C.bar_series(rs_order, (rs_shown.set_index("Period")
-                                               .loc[rs_order, "Return"] * 100).tolist(),
-                                    "Return during each period", "%"),
-                        use_container_width=True, config={"displaylogo": False})
+                    rs_ordered = rs_shown.set_index("Period").loc[rs_order]
+                    if rs_has_bench and rs_ordered["Benchmark Return"].notna().any():
+                        st.plotly_chart(
+                            C.bar_compare(
+                                rs_order,
+                                {str(main_col): (rs_ordered["Return"] * 100).tolist(),
+                                 str(bench_col or "Benchmark"):
+                                     (rs_ordered["Benchmark Return"] * 100).tolist()},
+                                "Return during each period", "%"),
+                            use_container_width=True, config={"displaylogo": False})
+                        note("Excess return is the gap between the two bars, "
+                             "not a substitute for seeing both.")
+                    else:
+                        st.plotly_chart(
+                            C.bar_series(rs_order, (rs_ordered["Return"] * 100).tolist(),
+                                        "Return during each period", "%"),
+                            use_container_width=True, config={"displaylogo": False})
 
                 rs_disp = rs_ev.copy()
                 rs_disp["Start"] = rs_disp["Start"].dt.date
                 rs_disp["End"] = rs_disp["End"].dt.date
                 for c in ("Return", "Max Drawdown", "Best Day", "Worst Day",
-                         "Excess vs Benchmark"):
+                         "Benchmark Return", "Excess vs Benchmark"):
                     rs_disp[c] = rs_disp[c].map(
                         lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
                 st.dataframe(signed(rs_disp, ["Return", "Max Drawdown", "Best Day",
-                                             "Worst Day", "Excess vs Benchmark"]),
+                                             "Worst Day", "Benchmark Return",
+                                             "Excess vs Benchmark"]),
                             use_container_width=True, hide_index=True)
                 st.download_button(
                     "Download stress test results (CSV)",
@@ -3028,7 +3053,8 @@ with tabs[3]:
                 'Extend the start date to reach further back.</div>',
                 unsafe_allow_html=True)
         else:
-            sc1, sc2, sc3, sc4 = st.columns(4)
+            has_bench = "n_vs_benchmark" in summ
+            sc1, sc2, sc3, sc4, *sc5 = st.columns(5 if has_bench else 4)
             with sc1:
                 dial("Periods covered", f"{n_cov} / {summ['n_total']}")
             with sc2:
@@ -3039,6 +3065,18 @@ with tabs[3]:
                     wp if len(wp) <= 28 else wp[:26] + "\u2026")
             with sc4:
                 dial("Deepest drawdown", f"{summ.get('worst_drawdown', float('nan'))*100:.1f}%")
+            if has_bench:
+                with sc5[0]:
+                    dial("Beat benchmark in",
+                        f"{summ['n_beat_benchmark']} / {summ['n_vs_benchmark']}",
+                        f"median excess {summ['median_excess']*100:+.1f}%")
+            elif bench is None:
+                note("No benchmark is set for this run, so these figures "
+                     "show the strategy alone. Set one under Data to see "
+                     "how it did against the market during each episode -- "
+                     "a strategy that fell 10% in a period the market fell "
+                     "30% in behaved very differently from one that fell "
+                     "10% while the market was flat.")
 
             partial_n = int((ev["Coverage"] == "Partial").sum())
             no_data_n = int((ev["Coverage"] == "No data").sum())
@@ -3057,21 +3095,36 @@ with tabs[3]:
             shown = ev[ev["Coverage"] != "No data"].copy()
             if not shown.empty:
                 order = shown.sort_values("Start")["Period"]
-                st.plotly_chart(
-                    C.bar_series(order, (shown.set_index("Period")
-                                        .loc[order, "Return"] * 100).tolist(),
-                                "Return during each period", "%"),
-                    use_container_width=True, config={"displaylogo": False})
+                ordered = shown.set_index("Period").loc[order]
+                if has_bench and ordered["Benchmark Return"].notna().any():
+                    st.plotly_chart(
+                        C.bar_compare(
+                            order,
+                            {res.label: (ordered["Return"] * 100).tolist(),
+                             (bench.label if bench is not None else "Benchmark"):
+                                 (ordered["Benchmark Return"] * 100).tolist()},
+                            "Return during each period", "%"),
+                        use_container_width=True, config={"displaylogo": False})
+                    note("Excess return is the gap between the two bars, not "
+                         "a substitute for seeing both: a strategy can beat "
+                         "a benchmark by losing less, which looks very "
+                         "different from beating it by gaining.")
+                else:
+                    st.plotly_chart(
+                        C.bar_series(order, (ordered["Return"] * 100).tolist(),
+                                    "Return during each period", "%"),
+                        use_container_width=True, config={"displaylogo": False})
 
             disp = ev.copy()
             disp["Start"] = disp["Start"].dt.date
             disp["End"] = disp["End"].dt.date
             for c in ("Return", "Max Drawdown", "Best Day", "Worst Day",
-                     "Excess vs Benchmark"):
+                     "Benchmark Return", "Excess vs Benchmark"):
                 disp[c] = disp[c].map(
                     lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
             st.dataframe(signed(disp, ["Return", "Max Drawdown", "Best Day",
-                                      "Worst Day", "Excess vs Benchmark"]),
+                                      "Worst Day", "Benchmark Return",
+                                      "Excess vs Benchmark"]),
                         use_container_width=True, hide_index=True)
             st.download_button(
                 "Download stress test results (CSV)",

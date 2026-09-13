@@ -1006,11 +1006,18 @@ manager or an allocator asks in practice than any resampling exercise is.
 **This reads the backtest's own realized returns inside sixteen named
 windows** -- Black Monday (1987) through the yen carry-trade unwind
 (August 2024) -- and reports the return, the max drawdown inside the
-window, the best and worst single day, and the excess over the benchmark,
-for each. It is pure post-hoc analysis of a return stream the engine
-already produced: `qbt/stress.py` does not simulate anything and cannot
-change a single number the engine reports, the same relationship the other
-robustness tests already have to `qbt/engine.py`.
+window, the best and worst single day, and, when a benchmark is set,
+**the benchmark's own return alongside the excess, not just the
+difference**. A bare excess number collapses two very different stories
+into one figure: "+43 points" could mean the strategy was flat while the
+market cratered, or it could mean both fell hard and the strategy merely
+fell less. Showing the benchmark's return directly -- and a grouped bar
+chart with both series side by side -- makes that distinction visible
+instead of asking the reader to infer it. It is pure post-hoc analysis of
+a return stream the engine already produced: `qbt/stress.py` does not
+simulate anything and cannot change a single number the engine reports,
+the same relationship the other robustness tests already have to
+`qbt/engine.py`.
 
 **Coverage is reported, not assumed.** A period is marked *Full* only when
 the backtest's date range contains the whole window; *Partial* when the

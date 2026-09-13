@@ -274,6 +274,32 @@ def bar_series(labels, values, title: str = "", suffix: str = "",
     return fig
 
 
+def bar_compare(labels, series: Dict[str, list], title: str = "",
+                suffix: str = "", theme: str = "dark") -> go.Figure:
+    """Grouped bars, for a strategy set against a benchmark per label.
+
+    A single-series bar can only ever say "the strategy fell here" -- it
+    cannot say whether that was worse or better than the alternative it is
+    actually judged against. Two colours per label side by side answers
+    the question a single excess-return number collapses away: whether a
+    strategy that looks defensive was actually positive during the stress,
+    or simply lost less than a benchmark that fell even further.
+    """
+    pal, colors = _colors(theme)
+    fig = go.Figure()
+    palette = [pal["brass"], pal["slate"], pal["teal"], pal["rust"]]
+    for i, (name, values) in enumerate(series.items()):
+        fig.add_trace(go.Bar(
+            x=list(labels), y=list(values), name=str(name),
+            marker=dict(color=palette[i % len(palette)], line=dict(width=0)),
+        ))
+    _base(fig, 320, title, theme)
+    fig.update_layout(barmode="group", hovermode="x unified",
+                      legend=dict(orientation="h", y=1.12, x=0))
+    fig.update_yaxes(ticksuffix=suffix)
+    return fig
+
+
 def correlation_matrix(corr: pd.DataFrame,
                        title: str = "Correlation of daily returns",
                        theme: str = "dark") -> go.Figure:

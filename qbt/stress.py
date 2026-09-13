@@ -169,7 +169,7 @@ def evaluate_periods(returns: pd.Series, periods: Optional[List[StressPeriod]] =
                 "Start": p_start, "End": p_end, "Coverage": "No data",
                 "Sessions": 0, "Return": np.nan, "Max Drawdown": np.nan,
                 "Best Day": np.nan, "Worst Day": np.nan,
-                "Excess vs Benchmark": np.nan,
+                "Benchmark Return": np.nan, "Excess vs Benchmark": np.nan,
             })
             continue
 
@@ -186,6 +186,13 @@ def evaluate_periods(returns: pd.Series, periods: Optional[List[StressPeriod]] =
         eq = M.to_equity(window, 100.0)
         dd = M.max_drawdown(eq)
 
+        # The benchmark's own return during the window is reported
+        # alongside the excess, not just the difference between them. An
+        # excess of "-5 points" means something very different depending on
+        # whether the benchmark itself was -10% (the strategy held up
+        # better in an absolute sense) or +2% (the strategy actually lost
+        # money while the market it is judged against did not).
+        bench_ret = np.nan
         excess = np.nan
         if benchmark is not None:
             bwin = benchmark.dropna().loc[(benchmark.index >= p_start) &
@@ -193,15 +200,16 @@ def evaluate_periods(returns: pd.Series, periods: Optional[List[StressPeriod]] =
             common = window.index.intersection(bwin.index)
             if len(common) >= 1:
                 s_ret = float((1.0 + window.loc[common]).prod() - 1.0)
-                b_ret = float((1.0 + bwin.loc[common]).prod() - 1.0)
-                excess = s_ret - b_ret
+                bench_ret = float((1.0 + bwin.loc[common]).prod() - 1.0)
+                excess = s_ret - bench_ret
 
         rows.append({
             "Period": p.name, "Category": p.category,
             "Start": p_start, "End": p_end, "Coverage": coverage,
             "Sessions": int(len(window)), "Return": period_return,
             "Max Drawdown": dd, "Best Day": float(window.max()),
-            "Worst Day": float(window.min()), "Excess vs Benchmark": excess,
+            "Worst Day": float(window.min()),
+            "Benchmark Return": bench_ret, "Excess vs Benchmark": excess,
         })
 
     return pd.DataFrame(rows)
@@ -213,7 +221,7 @@ def summary_stats(evaluated: pd.DataFrame) -> Dict[str, object]:
     if covered.empty:
         return {"n_covered": 0, "n_total": len(evaluated)}
     ret = covered["Return"].dropna()
-    return {
+    out = {
         "n_covered": int(len(covered)),
         "n_total": int(len(evaluated)),
         "n_positive": int((ret > 0).sum()),
@@ -227,6 +235,12 @@ def summary_stats(evaluated: pd.DataFrame) -> Dict[str, object]:
         "worst_drawdown": (float(covered["Max Drawdown"].min())
                           if covered["Max Drawdown"].notna().any() else np.nan),
     }
+    excess = covered["Excess vs Benchmark"].dropna()
+    if len(excess):
+        out["n_vs_benchmark"] = int(len(excess))
+        out["n_beat_benchmark"] = int((excess > 0).sum())
+        out["median_excess"] = float(excess.median())
+    return out
 
 
 def from_text(text: str) -> List[StressPeriod]:
