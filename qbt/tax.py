@@ -129,6 +129,46 @@ class TaxReport:
     after_tax_equity: pd.Series
     warnings: List[str] = field(default_factory=list)
 
+    @property
+    def tax_cost_ratio(self) -> float:
+        """The same figure under its established industry name.
+
+        This is exactly Morningstar's Tax Cost Ratio: "how much a fund's
+        annualized return is reduced by the taxes investors pay," published
+        in their 2005 methodology paper and still the standard reference
+        point for comparing tax efficiency across funds or strategies. It
+        is not a separate calculation -- `tax_drag_pa` already is this
+        number -- the property exists so the UI can use the name a reader
+        may already recognize.
+        """
+        return self.tax_drag_pa
+
+
+# Descriptive bands, not a published cutoff table. Morningstar's own
+# methodology states the ratio is "usually concentrated in the range of
+# 0-5%" with 0% meaning no taxable distributions and 5% meaning tax-costly,
+# but does not publish intermediate thresholds. These divide that same
+# range into readable steps for a single-number gauge; treat the labels as
+# a description, not a benchmark.
+_EFFICIENCY_BANDS = [
+    (0.010, "Highly tax-efficient", "pos"),
+    (0.020, "Tax-efficient", "pos"),
+    (0.030, "Moderate", ""),
+    (0.050, "Tax-costly", "neg"),
+    (float("inf"), "Very tax-costly", "neg"),
+]
+
+
+def efficiency_label(tax_cost_ratio: float) -> Tuple[str, str]:
+    """(label, tone) for a Tax Cost Ratio, banded per `_EFFICIENCY_BANDS`."""
+    if tax_cost_ratio != tax_cost_ratio:   # NaN
+        return "Not available", ""
+    r = max(0.0, float(tax_cost_ratio))
+    for limit, label, tone in _EFFICIENCY_BANDS:
+        if r <= limit:
+            return label, tone
+    return "Very tax-costly", "neg"
+
 
 # ----------------------------------------------------------------------
 def realized_gains(trades: pd.DataFrame) -> pd.DataFrame:
@@ -279,26 +319,37 @@ def evaluate(trades: pd.DataFrame, shares: pd.DataFrame, dividends: pd.DataFrame
     total_tax = float(by_year["Total Tax"].sum())
     total_pretax_gain = float(gains["Realized Gain"].sum()) if not gains.empty else 0.0
 
-    # After-tax equity: grow at the strategy's own realized return each
-    # calendar year, then subtract that year's tax bill in one lump sum at
-    # year end -- consistent with an annual filing, and with tax assumed
+    # After-tax equity, at daily resolution. Within a calendar year the
+    # line tracks the strategy's own day-to-day movement exactly -- same
+    # shape, same ups and downs -- just rebased to start the year from
+    # whatever was left after the PRIOR year's tax bill. The tax itself is
+    # still a single lump sum once a year, deducted only at that year's
+    # last session, consistent with an annual filing and with tax assumed
     # paid from money outside the portfolio rather than funded by selling
-    # more of it.
+    # more of it. Computing only one point per year (the old approach) drew
+    # a straight line, or a flat one under log scale, between four or five
+    # points on a decade-long backtest -- visually a staircase with no
+    # relationship to the strategy's actual volatility, which is a
+    # materially different (and misleading) shape from what the strategy
+    # actually did.
     tax_by_year = by_year.set_index("Year")["Total Tax"]
-    yearly_last = equity.resample("YE").last()
-    yearly_first = equity.resample("YE").first()
-    prev_level = float(equity.iloc[0]) if len(equity) else 0.0
-    after_tax_points = [(equity.index[0], prev_level)] if len(equity) else []
-    for y in sorted(yearly_last.index.year):
-        y_end = yearly_last.loc[yearly_last.index.year == y]
-        y_start = yearly_first.loc[yearly_first.index.year == y]
-        if y_end.empty or y_start.empty or float(y_start.iloc[0]) == 0:
+    after_tax_equity = pd.Series(index=equity.index, dtype=float)
+    level_at_year_start = float(equity.iloc[0]) if len(equity) else 0.0
+    for y in sorted(set(equity.index.year)):
+        in_year = equity.index.year == y
+        year_eq = equity.loc[in_year]
+        if year_eq.empty or float(year_eq.iloc[0]) == 0:
             continue
-        growth = float(y_end.iloc[0]) / float(y_start.iloc[0])
-        prev_level = prev_level * growth - float(tax_by_year.get(y, 0.0))
-        after_tax_points.append((y_end.index[0], prev_level))
-    after_tax_equity = (pd.Series({d: v for d, v in after_tax_points}).sort_index()
-                        if after_tax_points else equity.copy())
+        # Same daily path as the pretax series, rebased to 1.0 at this
+        # year's first session, then scaled to the post-tax level carried
+        # in from the prior year.
+        daily_growth = year_eq / float(year_eq.iloc[0])
+        after_tax_equity.loc[year_eq.index] = level_at_year_start * daily_growth
+        level_at_year_start = (float(after_tax_equity.loc[year_eq.index[-1]])
+                               - float(tax_by_year.get(y, 0.0)))
+    after_tax_equity = after_tax_equity.dropna()
+    if after_tax_equity.empty:
+        after_tax_equity = equity.copy()
 
     yrs = max((equity.index[-1] - equity.index[0]).days / 365.25, 1e-9)
     pretax_cagr = (float(equity.iloc[-1]) / float(equity.iloc[0])) ** (1 / yrs) - 1.0

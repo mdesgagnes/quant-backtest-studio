@@ -2293,6 +2293,7 @@ if run_clicked and not blocking:
                                   open_prices=open_px, dividends=div_px,
                                   volume=vol_px)
             bench = None
+            bdiv = None
             if benchmark == BLEND and bench_blend:
                 have = {k: v for k, v in bench_blend.items() if k in prices.columns}
                 missing = [k for k in bench_blend if k not in prices.columns]
@@ -2357,7 +2358,8 @@ if run_clicked and not blocking:
                     signal_start=sig_start)
 
         st.session_state["run"] = {
-            "result": result, "bench": bench, "prices": universe,
+            "result": result, "bench": bench, "bench_dividends": bdiv,
+            "prices": universe,
             "cash": cash_px, "quality": quality, "cfg": cfg,
             "params": dict(params), "strategy_key": strat_key, "mode": mode,
             "exog": exog_aligned, "exog_raw": exog_raw, "exog_report": ex_rep,
@@ -2922,6 +2924,28 @@ with tabs[3]:
         tax_rep = TAX.evaluate(res.trades, res.shares, run["dividends"],
                                res.equity, settings)
 
+        # The benchmark, taxed under the same settings, when it has what
+        # that needs: its own trade log, share counts and a dividend
+        # series aligned to whichever ticker(s) it holds. A buy-and-hold
+        # benchmark realizes almost no capital gains -- one purchase, then
+        # drift -- so this mostly isolates dividend taxation, which is
+        # exactly the fair comparison a strategy that trades is judged
+        # against.
+        bench_res = run.get("bench")
+        bench_tax_rep = None
+        if (bench_res is not None and bench_res.shares is not None
+                and run.get("bench_dividends") is not None):
+            bdv = run["bench_dividends"]
+            if isinstance(bdv, pd.Series):
+                bdv = bdv.to_frame(bench_res.shares.columns[0])
+            bdv = bdv.reindex(columns=bench_res.shares.columns).reindex(
+                bench_res.shares.index).fillna(0.0)
+            try:
+                bench_tax_rep = TAX.evaluate(bench_res.trades, bench_res.shares,
+                                             bdv, bench_res.equity, settings)
+            except Exception:
+                bench_tax_rep = None
+
         for w in tax_rep.warnings:
             st.markdown(f'<div class="flag">{w}</div>', unsafe_allow_html=True)
 
@@ -2932,8 +2956,9 @@ with tabs[3]:
             with tt1:
                 dial("Total tax", f"${tax_rep.total_tax:,.0f}", "over the backtest", "neg")
             with tt2:
-                dial("Tax drag", f"{tax_rep.tax_drag_pa*100:.2f}%/yr",
-                    "pretax CAGR minus after-tax CAGR", "neg")
+                label, tone = TAX.efficiency_label(tax_rep.tax_cost_ratio)
+                dial("Tax Cost Ratio", f"{tax_rep.tax_cost_ratio*100:.2f}%/yr",
+                    label, tone)
             with tt3:
                 dial("Realized gains", f"${tax_rep.total_pretax_gain:,.0f}",
                     "net of losses, before inclusion rate")
@@ -2941,15 +2966,64 @@ with tabs[3]:
                 yrs_taxed = int((tax_rep.by_year["Total Tax"] > 0).sum())
                 dial("Years with tax owed", f"{yrs_taxed} / {len(tax_rep.by_year)}")
 
+            eyebrow("Tax Cost Ratio, on Morningstar's scale")
+            note("Morningstar's own Tax Cost Ratio: how much of the "
+                 "annualized return taxes take, typically 0-5% across "
+                 "funds -- 0% meaning no taxable distributions at all, 5%+ "
+                 "meaning meaningfully tax-costly. The bands below split "
+                 "that published range into readable steps; they describe "
+                 "it; Morningstar does not publish the intermediate cutoffs.")
+            gauge_names = [res.label]
+            gauge_vals = [tax_rep.tax_cost_ratio * 100]
+            if bench_tax_rep is not None:
+                gauge_names.append(bench_res.label)
+                gauge_vals.append(bench_tax_rep.tax_cost_ratio * 100)
+            st.plotly_chart(
+                C.bar_series(gauge_names, gauge_vals,
+                            "Tax Cost Ratio (lower is more tax-efficient)", "%"),
+                use_container_width=True, config={"displaylogo": False})
+            if bench_tax_rep is not None:
+                b_label, _ = TAX.efficiency_label(bench_tax_rep.tax_cost_ratio)
+                note(f"{res.label}: {label} ({tax_rep.tax_cost_ratio*100:.2f}%/yr). "
+                     f"{bench_res.label}: {b_label} "
+                     f"({bench_tax_rep.tax_cost_ratio*100:.2f}%/yr).")
+
             eyebrow("Pretax vs. after-tax")
             curves = pd.DataFrame({res.label: res.equity})
-            at = tax_rep.after_tax_equity.reindex(res.equity.index).ffill().bfill()
-            curves[f"{res.label} (after tax)"] = at
+            curves[f"{res.label} (after tax)"] = tax_rep.after_tax_equity.reindex(
+                res.equity.index).ffill().bfill()
+            if bench_tax_rep is not None:
+                b_curves = align_results({
+                    res.label: res.equity, bench_res.label: bench_res.equity})
+                curves[bench_res.label] = b_curves[bench_res.label].reindex(
+                    curves.index).ffill().bfill() if bench_res.label in b_curves else np.nan
+                curves[f"{bench_res.label} (after tax)"] = bench_tax_rep.after_tax_equity.reindex(
+                    res.equity.index).ffill().bfill()
             st.plotly_chart(C.equity_curve(curves, True),
                             use_container_width=True, config={"displaylogo": False})
-            note("The after-tax line assumes tax is paid once a year, at "
+            note("The after-tax lines assume tax is paid once a year, at "
                  "each calendar year-end, from money outside the "
-                 "portfolio -- not funded by selling more of the position.")
+                 "portfolio -- not funded by selling more of the position. "
+                 "Within a year the line moves exactly like its own pretax "
+                 "series; only the level it starts the year from, and a "
+                 "lump-sum deduction at year-end, differ.")
+
+            eyebrow("Where the tax bill comes from, by year")
+            comp = tax_rep.by_year[["Year", "Capital Gains Tax",
+                                    "Eligible Dividend Tax", "Foreign Dividend Tax"]]
+            if comp[["Capital Gains Tax", "Eligible Dividend Tax",
+                    "Foreign Dividend Tax"]].to_numpy().sum() > 0:
+                st.plotly_chart(
+                    C.bar_compare(
+                        comp["Year"].astype(str),
+                        {"Capital gains": comp["Capital Gains Tax"].tolist(),
+                         "Eligible dividends": comp["Eligible Dividend Tax"].tolist(),
+                         "Foreign dividends": comp["Foreign Dividend Tax"].tolist()},
+                        "Tax by source and year", "$"),
+                    use_container_width=True, config={"displaylogo": False})
+                note("A bill dominated by capital gains points at turnover; "
+                     "one dominated by dividends would look the same "
+                     "regardless of how often the strategy trades.")
 
             eyebrow("By tax year")
             disp = tax_rep.by_year.copy()

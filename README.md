@@ -884,10 +884,15 @@ years, which needs tax history this module cannot see.
 **Tax is assumed paid from outside the portfolio** -- other income or
 cash -- rather than funded by selling more of the position, the simpler
 and more common real assumption for anyone with other income. The
-after-tax equity curve grows at the strategy's own realized return each
-calendar year, then subtracts that year's tax bill once at year-end,
-consistent with an annual filing; it is a bookkeeping construction on top
-of the untouched equity curve, not a different simulation.
+after-tax equity curve moves **daily**, at exactly the strategy's own
+day-to-day shape -- it is not a straight line connecting year-end dots.
+Within a calendar year it tracks the pretax curve's own movement exactly,
+rebased to whatever level survived the *prior* year's tax; only at each
+year's last session does a lump sum come out, consistent with an annual
+filing. An earlier version of this computation only ever produced one
+point per year, which drew a visible staircase with no relationship to the
+strategy's actual volatility -- fixed, and the after-tax curve now carries
+day-to-day texture identical to the strategy's own.
 
 **This needs price-return-plus-cash-dividends prices to work at all.**
 Total-return (adjusted) prices fold dividends invisibly into the price
@@ -896,6 +901,34 @@ much was dividend" versus "how much was price appreciation" -- which is
 exactly why the default price convention changed (section 5, point 6). The
 tab detects the total-return case and says so rather than producing a
 number quietly missing half the picture.
+
+### Comparing tax friendliness on a scale
+
+The headline number is Morningstar's own **Tax Cost Ratio** -- "how much a
+fund's annualized return is reduced by the taxes investors pay," published
+in their 2005 methodology paper and the standard reference point the fund
+industry already uses for exactly this comparison. It is not a new
+calculation invented for this app: `tax_drag_pa` (pretax CAGR minus
+after-tax CAGR) already was this number, now labelled and banded to match.
+Morningstar states the ratio typically falls in a 0-5% range, 0% meaning no
+taxable distributions and 5%+ meaning meaningfully tax-costly, without
+publishing intermediate cutoffs; the tab divides that stated range into
+five readable steps (Highly tax-efficient through Very tax-costly) as a
+description of Morningstar's own framing, not a claim to their precision.
+
+**The benchmark is taxed under the same settings, for a genuine
+comparison on that scale.** A buy-and-hold benchmark realizes almost no
+capital gains -- one purchase, then drift -- so this mostly isolates its
+dividend taxation, which is exactly the fair basis a strategy that trades
+is judged against. Both show up as bars on the same Tax Cost Ratio chart,
+and both get their own after-tax equity line on the comparison chart
+above.
+
+**A by-year, by-source breakdown** splits each year's tax bill into
+capital gains tax, eligible dividend tax and foreign dividend tax, since a
+bill dominated by capital gains points at turnover in a way a bill
+dominated by dividends does not -- the same total tax can come from very
+different behaviour underneath it.
 
 ---
 
