@@ -987,12 +987,52 @@ the link between exploring on screen and reproducing in a script.
 | Parameter surface | Is the result a plateau or a lone spike? |
 | Cost sensitivity | At what cost level does the strategy stop paying off? |
 | Trading-day sweep | Does the result survive rebalancing on a different day of the period? |
+| Stress test periods | What did the strategy's own returns actually do in sixteen named historical episodes? |
 | Block-resampled Monte Carlo | How much of the result depends on the order of returns? |
 | Expected Sharpe by chance | What Sharpe would *n* trials produce with no real edge? |
 
 That last point deserves attention: after 200 combinations tested, a Sharpe
 of 0.4 is achievable on pure noise. The displayed gap is the model's net
 edge.
+
+### Stress test periods
+
+The other robustness tests ask statistical questions -- resample the
+returns, sweep a parameter, split the sample. This one asks a narrower,
+more concrete question: what did the strategy actually do in October 1987,
+in the autumn of 2008, in March 2020? That is closer to the question a
+manager or an allocator asks in practice than any resampling exercise is.
+
+**This reads the backtest's own realized returns inside sixteen named
+windows** -- Black Monday (1987) through the yen carry-trade unwind
+(August 2024) -- and reports the return, the max drawdown inside the
+window, the best and worst single day, and the excess over the benchmark,
+for each. It is pure post-hoc analysis of a return stream the engine
+already produced: `qbt/stress.py` does not simulate anything and cannot
+change a single number the engine reports, the same relationship the other
+robustness tests already have to `qbt/engine.py`.
+
+**Coverage is reported, not assumed.** A period is marked *Full* only when
+the backtest's date range contains the whole window; *Partial* when the
+backtest starts or ends partway through it, in which case the figures cover
+only the days actually available; and *No data* when the period falls
+entirely outside the backtest's range, which is common for shorter
+backtests and is flagged rather than silently skipped. A strategy that
+"survived" 2008 only because its backtest starts in 2009 has not been
+tested by 2008 at all, and the table says so.
+
+**On the dates.** They are drawn from cross-referenced public sources --
+S&P/Yardeni-style bear-market chronologies and the trend-following
+"crisis alpha" literature (Hamill, Rattray & Van Hemert; Kaminski) that
+treats a specific, named set of episodes as the standard test bed for
+tail-risk behavior. Exact peak and trough dates vary by a session or two
+between sources depending on methodology -- closing versus intraday, which
+index, which side of a holiday-shortened week -- so these are well-sourced
+starting points, not the only correct answer. Custom periods can be added
+in the same tab, one per line
+(`Name, YYYY-MM-DD, YYYY-MM-DD[, Category]`), alongside the built-in list
+rather than replacing it -- and permanently, by editing `DEFAULT_PERIODS`
+in `qbt/stress.py`.
 
 ---
 

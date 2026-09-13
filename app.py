@@ -29,6 +29,7 @@ from qbt.strategies import REGISTRY, get as get_strategy
 from qbt import metrics as M
 from qbt import charts as C
 from qbt import robustness as R
+from qbt import stress as STRESS
 from qbt import report as REPORT
 from qbt import returns_input as RS
 from qbt import presets as PRESETS
@@ -2909,7 +2910,96 @@ with tabs[3]:
     st.dataframe(signed(cd, ["CAGR", "Sharpe", "Max Drawdown"]),
                  use_container_width=True, hide_index=True)
 
-    eyebrow("5. Sampling uncertainty")
+    eyebrow("5. Stress test periods")
+    note("How the strategy's own realized returns behaved inside sixteen "
+         "specific, named historical episodes -- 1987 through the 2024 yen "
+         "carry-trade unwind -- rather than a statistical resample of them. "
+         "Dates are cross-referenced from public sources and the "
+         "trend-following \u201ccrisis alpha\u201d literature; exact peaks "
+         "and troughs vary by a session or two between sources depending on "
+         "methodology, so treat these as well-sourced starting points, not "
+         "settled fact.")
+
+    _cats = ["All"] + STRESS.CATEGORIES
+    _cat = st.selectbox("Category", _cats, key="stress_cat")
+    _periods = (STRESS.DEFAULT_PERIODS if _cat == "All"
+               else [p for p in STRESS.DEFAULT_PERIODS if p.category == _cat])
+
+    with st.expander("Add custom periods", expanded=False):
+        st.markdown('<div class="note">One per line: '
+                    '<code>Name, YYYY-MM-DD, YYYY-MM-DD[, Category]</code>. '
+                    'Added to the built-in list below, not a replacement for '
+                    'it.</div>', unsafe_allow_html=True)
+        _custom_txt = st.text_area("Custom periods", key="stress_custom",
+                                   height=70, label_visibility="collapsed")
+        _periods = _periods + STRESS.from_text(_custom_txt)
+
+    _bench_returns = bench.returns if bench is not None else None
+    ev = STRESS.evaluate_periods(res.returns, _periods, _bench_returns)
+
+    if ev.empty:
+        note("No return data to evaluate.")
+    else:
+        summ = STRESS.summary_stats(ev)
+        n_cov = summ.get("n_covered", 0)
+        if n_cov == 0:
+            st.markdown(
+                '<div class="flag">None of these periods fall inside the '
+                'backtest\u2019s date range, so there is nothing to show. '
+                'Extend the start date to reach further back.</div>',
+                unsafe_allow_html=True)
+        else:
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            with sc1:
+                dial("Periods covered", f"{n_cov} / {summ['n_total']}")
+            with sc2:
+                dial("Positive in", f"{summ.get('n_positive', 0)} / {n_cov}")
+            with sc3:
+                wp = summ.get("worst_period") or "\u2014"
+                dial("Worst period", f"{summ.get('worst_return', float('nan'))*100:+.1f}%",
+                    wp if len(wp) <= 28 else wp[:26] + "\u2026")
+            with sc4:
+                dial("Deepest drawdown", f"{summ.get('worst_drawdown', float('nan'))*100:.1f}%")
+
+            partial_n = int((ev["Coverage"] == "Partial").sum())
+            no_data_n = int((ev["Coverage"] == "No data").sum())
+            if partial_n:
+                st.markdown(
+                    f'<div class="flag">{partial_n} period(s) are only '
+                    f'partly inside the backtest\u2019s date range -- the '
+                    f'figures for those cover only the days actually '
+                    f'available, not the full historical episode.</div>',
+                    unsafe_allow_html=True)
+            if no_data_n:
+                note(f"{no_data_n} period(s) fall entirely outside the "
+                     f"backtest's date range and are omitted from the chart "
+                     f"below.")
+
+            shown = ev[ev["Coverage"] != "No data"].copy()
+            if not shown.empty:
+                order = shown.sort_values("Start")["Period"]
+                st.plotly_chart(
+                    C.bar_series(order, (shown.set_index("Period")
+                                        .loc[order, "Return"] * 100).tolist(),
+                                "Return during each period", "%"),
+                    use_container_width=True, config={"displaylogo": False})
+
+            disp = ev.copy()
+            disp["Start"] = disp["Start"].dt.date
+            disp["End"] = disp["End"].dt.date
+            for c in ("Return", "Max Drawdown", "Best Day", "Worst Day",
+                     "Excess vs Benchmark"):
+                disp[c] = disp[c].map(
+                    lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
+            st.dataframe(signed(disp, ["Return", "Max Drawdown", "Best Day",
+                                      "Worst Day", "Excess vs Benchmark"]),
+                        use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download stress test results (CSV)",
+                ev.to_csv(index=False).encode("utf-8"),
+                "stress_periods.csv", "text/csv", key="dlstress")
+
+    eyebrow("6. Sampling uncertainty")
     c1, c2 = st.columns(2)
     n_sims = c1.slider("Simulations", 100, 2000, 500, 100)
     blk = c2.slider("Block size (days)", 5, 63, 21, 1)
