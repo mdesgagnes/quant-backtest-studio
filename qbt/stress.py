@@ -176,8 +176,14 @@ def evaluate_periods(returns: pd.Series, periods: Optional[List[StressPeriod]] =
         covers_full = (p_start >= data_start) and (p_end <= data_end)
         coverage = "Full" if covers_full else "Partial"
 
+        # Compounded directly from the returns, not from the ratio of two
+        # points on an equity curve. `to_equity`'s first element already has
+        # the first period's return folded in -- comparing eq[-1] to eq[0]
+        # silently drops that first session from the period return, and for
+        # a one-session window (a single monthly observation, say) it
+        # returns exactly zero regardless of what actually happened.
+        period_return = float((1.0 + window).prod() - 1.0)
         eq = M.to_equity(window, 100.0)
-        period_return = float(eq.iloc[-1] / eq.iloc[0] - 1.0)
         dd = M.max_drawdown(eq)
 
         excess = np.nan
@@ -185,11 +191,10 @@ def evaluate_periods(returns: pd.Series, periods: Optional[List[StressPeriod]] =
             bwin = benchmark.dropna().loc[(benchmark.index >= p_start) &
                                           (benchmark.index <= p_end)]
             common = window.index.intersection(bwin.index)
-            if len(common) > 1:
-                b_eq = M.to_equity(bwin.loc[common], 100.0)
-                s_eq = M.to_equity(window.loc[common], 100.0)
-                excess = float((s_eq.iloc[-1] / s_eq.iloc[0]) -
-                              (b_eq.iloc[-1] / b_eq.iloc[0]))
+            if len(common) >= 1:
+                s_ret = float((1.0 + window.loc[common]).prod() - 1.0)
+                b_ret = float((1.0 + bwin.loc[common]).prod() - 1.0)
+                excess = s_ret - b_ret
 
         rows.append({
             "Period": p.name, "Category": p.category,

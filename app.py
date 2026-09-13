@@ -1247,6 +1247,85 @@ if source == "Return stream":
             else:
                 note("Not enough observations to resample meaningfully.")
 
+        eyebrow("Stress test periods")
+        note("What this series' own realized returns did inside sixteen "
+             "specific historical episodes -- 1987 through the 2024 yen "
+             "carry-trade unwind. For an imported track record this is "
+             "often the most direct question of all: what did it actually "
+             "do in 2008, in 2020, in 2022?")
+
+        _rs_cats = ["All"] + STRESS.CATEGORIES
+        _rs_cat = st.selectbox("Category", _rs_cats, key="rs_stress_cat")
+        _rs_periods = (STRESS.DEFAULT_PERIODS if _rs_cat == "All"
+                      else [p for p in STRESS.DEFAULT_PERIODS if p.category == _rs_cat])
+        with st.expander("Add custom periods", expanded=False):
+            st.markdown('<div class="note">One per line: '
+                        '<code>Name, YYYY-MM-DD, YYYY-MM-DD[, Category]</code>.'
+                        '</div>', unsafe_allow_html=True)
+            _rs_custom_txt = st.text_area("Custom periods", key="rs_stress_custom",
+                                          height=70, label_visibility="collapsed")
+            _rs_periods = _rs_periods + STRESS.from_text(_rs_custom_txt)
+
+        rs_ev = STRESS.evaluate_periods(
+            r_main, _rs_periods, r_bench if bench_col else None)
+        if rs_ev.empty:
+            note("No return data to evaluate.")
+        else:
+            rs_summ = STRESS.summary_stats(rs_ev)
+            n_cov = rs_summ.get("n_covered", 0)
+            if n_cov == 0:
+                st.markdown(
+                    '<div class="flag">None of these periods fall inside '
+                    'this series\u2019 date range.</div>', unsafe_allow_html=True)
+            else:
+                rc1, rc2, rc3, rc4 = st.columns(4)
+                with rc1:
+                    dial("Periods covered", f"{n_cov} / {rs_summ['n_total']}")
+                with rc2:
+                    dial("Positive in", f"{rs_summ.get('n_positive', 0)} / {n_cov}")
+                with rc3:
+                    wp = rs_summ.get("worst_period") or "\u2014"
+                    dial("Worst period", f"{rs_summ.get('worst_return', float('nan'))*100:+.1f}%",
+                        wp if len(wp) <= 28 else wp[:26] + "\u2026")
+                with rc4:
+                    dial("Deepest drawdown", f"{rs_summ.get('worst_drawdown', float('nan'))*100:.1f}%")
+
+                partial_n = int((rs_ev["Coverage"] == "Partial").sum())
+                no_data_n = int((rs_ev["Coverage"] == "No data").sum())
+                if partial_n:
+                    st.markdown(
+                        f'<div class="flag">{partial_n} period(s) are only '
+                        f'partly inside this series\u2019 date range -- those '
+                        f'figures cover only the days actually available.'
+                        f'</div>', unsafe_allow_html=True)
+                if no_data_n:
+                    note(f"{no_data_n} period(s) fall entirely outside this "
+                         f"series' date range and are omitted below.")
+
+                rs_shown = rs_ev[rs_ev["Coverage"] != "No data"].copy()
+                if not rs_shown.empty:
+                    rs_order = rs_shown.sort_values("Start")["Period"]
+                    st.plotly_chart(
+                        C.bar_series(rs_order, (rs_shown.set_index("Period")
+                                               .loc[rs_order, "Return"] * 100).tolist(),
+                                    "Return during each period", "%"),
+                        use_container_width=True, config={"displaylogo": False})
+
+                rs_disp = rs_ev.copy()
+                rs_disp["Start"] = rs_disp["Start"].dt.date
+                rs_disp["End"] = rs_disp["End"].dt.date
+                for c in ("Return", "Max Drawdown", "Best Day", "Worst Day",
+                         "Excess vs Benchmark"):
+                    rs_disp[c] = rs_disp[c].map(
+                        lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
+                st.dataframe(signed(rs_disp, ["Return", "Max Drawdown", "Best Day",
+                                             "Worst Day", "Excess vs Benchmark"]),
+                            use_container_width=True, hide_index=True)
+                st.download_button(
+                    "Download stress test results (CSV)",
+                    rs_ev.to_csv(index=False).encode("utf-8"),
+                    "stress_periods.csv", "text/csv", key="rsdlstress")
+
     with rs_tabs[2]:
         note("Exports reproduce the statistics shown above for the selected "
              "series.")
