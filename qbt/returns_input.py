@@ -502,10 +502,27 @@ def prepare_returns(raw: pd.DataFrame, scale: str = "auto",
             f"{n} value(s) beyond +/-100% for a single {label} period. "
             f"Check the scale of the file.")
 
-    if df.isna().to_numpy().any():
-        n = int(df.isna().to_numpy().sum())
-        warnings_out.append(f"{n} missing value(s) treated as zero.")
-        df = df.fillna(0.0)
+    # Blanks before a series' first value or after its last are not
+    # returns of zero: that series simply did not exist yet (or any more).
+    # Filling them with zero would give a short-history ticker years of
+    # flat, zero-volatility performance and falsify every statistic, so
+    # they stay missing and each series is analysed over its own span
+    # (see `analysis_window`). Only gaps *inside* a series' history are
+    # treated as zero.
+    inside = df.ffill().notna() & df.bfill().notna()
+    gaps = df.isna() & inside
+    if gaps.to_numpy().any():
+        n = int(gaps.to_numpy().sum())
+        warnings_out.append(
+            f"{n} missing value(s) inside a series' history treated as zero.")
+        df = df.mask(gaps, 0.0)
+    spans = {c: (df[c].first_valid_index(), df[c].last_valid_index())
+             for c in df.columns}
+    if len(set(spans.values())) > 1:
+        warnings_out.append(
+            "Series in this file cover different periods. Each is analysed "
+            "only over the dates where it has data, and the comparison "
+            "series is cut to the same window as the series analysed.")
 
     if label in ("daily", "business-daily", "weekly") and len(df) < 60:
         warnings_out.append(
@@ -537,6 +554,41 @@ def prepare_returns(raw: pd.DataFrame, scale: str = "auto",
         dropped_columns=dict(meta.get("dropped") or {}),
     )
     return df, report
+
+
+def analysis_window(rets: pd.DataFrame, main: str,
+                    bench: Optional[str] = None) -> Dict[str, Any]:
+    """The span the analysis runs over: the selected series' own history.
+
+    The base date is the first period the analysed series has a return,
+    the end its last. The comparison series is cut to that same window,
+    and within it to the dates where it has data itself, so neither side
+    is padded with invented zero returns.
+    """
+    r_main = rets[main]
+    start, end = r_main.first_valid_index(), r_main.last_valid_index()
+    if start is None:
+        raise ReturnStreamError(f"“{main}” has no values in this file.")
+    r_main = r_main.loc[start:end]
+    out: Dict[str, Any] = {"main": r_main, "bench": None, "start": start,
+                           "end": end, "n_periods": len(r_main),
+                           "bench_note": None}
+    if bench:
+        rb = rets[bench].loc[start:end]
+        b0, b1 = rb.first_valid_index(), rb.last_valid_index()
+        if b0 is None:
+            out["bench_note"] = (f"“{bench}” has no data between "
+                                 f"{start.date()} and {end.date()}, so there "
+                                 f"is nothing to compare against.")
+            return out
+        rb = rb.loc[b0:b1]
+        out["bench"] = rb
+        if b0 > start or b1 < end:
+            out["bench_note"] = (
+                f"“{bench}” only has data from {b0.date()} to "
+                f"{b1.date()}, shorter than “{main}”. Its figures "
+                f"and all relative statistics cover that shorter overlap only.")
+    return out
 
 
 def equity_from_returns(returns: pd.Series, initial: float = 100_000.0) -> pd.Series:

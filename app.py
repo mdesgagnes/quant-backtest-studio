@@ -1072,10 +1072,28 @@ if source == "Return stream":
     bench_col = None if bench_col.startswith("\u2014") else bench_col
 
     ppy = rrep.periods_per_year
-    r_main = rets[main_col]
+    # The analysis runs over the selected series' own history, not the
+    # whole file: a short-history ticker must not inherit the blank years
+    # of a longer one. The benchmark is cut to the same window.
+    try:
+        rs_win = RS.analysis_window(rets, main_col, bench_col)
+    except RS.ReturnStreamError as exc:
+        st.error(str(exc))
+        st.stop()
+    r_main = rs_win["main"]
     eq_main = RS.equity_from_returns(r_main, rs_capital)
-    r_bench = rets[bench_col] if bench_col else None
-    eq_bench = RS.equity_from_returns(r_bench, rs_capital) if bench_col else None
+    r_bench = rs_win["bench"]
+    if r_bench is None:
+        bench_col = None
+    if bench_col:
+        # A later-starting benchmark begins at the main series' value just
+        # before its first return, so both curves share one scale.
+        _b0 = r_bench.index[0]
+        _b_base = float(eq_main.loc[_b0] / (1.0 + r_main.loc[_b0]))
+        eq_bench = RS.equity_from_returns(r_bench, _b_base)
+    else:
+        eq_bench = None
+    rs_start, rs_end, rs_n = rs_win["start"], rs_win["end"], rs_win["n_periods"]
 
     stats = M.summary(r_main, eq_main, r_bench, None, None, 0.0, ppy)
     bstats = M.summary(r_bench, eq_bench, None, None, None, 0.0, ppy) if bench_col else {}
@@ -1084,10 +1102,9 @@ if source == "Return stream":
     with a:
         dial("Frequency", rrep.frequency.capitalize(), f"{ppy} periods/year")
     with b:
-        dial("Observations", f"{rrep.n_periods:,}")
+        dial("Observations", f"{rs_n:,}")
     with c:
-        dial("Period", str(rrep.start.date()) if rrep.start is not None else "\u2014",
-             f"to {rrep.end.date()}" if rrep.end is not None else "")
+        dial("Period", str(rs_start.date()), f"to {rs_end.date()}")
     with d:
         dial("Scale read", rrep.scale.capitalize())
     note(f"Dates read from \u201c{rrep.date_column}\u201d, "
@@ -1096,11 +1113,13 @@ if source == "Return stream":
          f"in the sidebar.")
     for w in rrep.warnings:
         st.markdown(f'<div class="flag">{w}</div>', unsafe_allow_html=True)
+    if rs_win["bench_note"]:
+        st.markdown(f'<div class="flag">{rs_win["bench_note"]}</div>',
+                    unsafe_allow_html=True)
 
     _rb = [f'<span class="lead">{main_col}</span>',
-           f'<span class="item">{rrep.start.date()} &rarr; {rrep.end.date()}</span>'
-           if rrep.start is not None else "",
-           f'<span class="item">{rrep.n_periods:,} {rrep.frequency} periods</span>']
+           f'<span class="item">{rs_start.date()} &rarr; {rs_end.date()}</span>',
+           f'<span class="item">{rs_n:,} {rrep.frequency} periods</span>']
     if bench_col:
         _rb.append(f'<span class="item">vs <b>{bench_col}</b></span>')
     _rc = stats.get("CAGR", float("nan"))
@@ -1133,7 +1152,11 @@ if source == "Return stream":
         if bench_col:
             curves[bench_col] = eq_bench
         logs = st.toggle("Log scale", value=True, key="rslog")
-        st.plotly_chart(C.equity_curve(align_results(curves), logs),
+        # Rebased to 100 at the analysed series' base date. A shorter
+        # benchmark joins where its data begins rather than cutting the
+        # main curve down to the overlap.
+        st.plotly_chart(C.equity_curve(pd.DataFrame(curves) / rs_capital * 100.0,
+                                       logs),
                         use_container_width=True, config={"displaylogo": False})
         st.plotly_chart(C.underwater(curves), use_container_width=True,
                         config={"displaylogo": False})
