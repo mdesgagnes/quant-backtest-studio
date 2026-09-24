@@ -4,12 +4,15 @@ Assembles a single, self-contained HTML document: KPI grid, equity curve,
 drawdown, monthly returns, return distribution, full stats table, top
 drawdown episodes, current holdings, and the engine assumptions that produced
 the numbers. Built for printing or sharing with a portfolio manager, so it
-uses a light "print" theme distinct from the dark in-app interface.
+uses the same dark theme as the in-app interface.
 
 No extra dependency: Plotly renders as interactive HTML via a single CDN
 script tag, and everything else is plain HTML/CSS. Opening the file in a
 browser and using Print -> Save as PDF produces a clean PDF without any
 server-side rendering step.
+
+Page, tables and charts all use the dark in-app palette. They must come
+from the same palette: dark-theme text on a white page is unreadable.
 """
 from __future__ import annotations
 
@@ -30,17 +33,20 @@ CSS = ("""
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
   :root{
     --ink:""" + BRAND["text"] + """; --muted:""" + BRAND["muted"] + """;
+    --bg:""" + BRAND["bg"] + """;
     --rule:""" + BRAND["rule"] + """; --panel:""" + BRAND["panel"] + """;
     --red:""" + BRAND["red"] + """; --sand:""" + BRAND["sand_light"] + """;
     --gain:""" + BRAND["gain"] + """; --loss:""" + BRAND["loss"] + """;
   }
   *{box-sizing:border-box;}
   body{
-    margin:0; padding:2.2rem 2.6rem 3rem; background:#fff; color:var(--ink);
+    margin:0; padding:2.2rem 2.6rem 3rem; background:var(--bg); color:var(--ink);
     font-family:'Inter',Arial,sans-serif; font-size:13px; line-height:1.55;
     max-width:1080px; margin-left:auto; margin-right:auto;
     font-variant-numeric:tabular-nums;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
   }
+  html{background:var(--bg);}
   .masthead{border-bottom:2px solid var(--red); padding-bottom:.9rem; margin-bottom:1.4rem;
     display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:.5rem;}
   .masthead h1{font-weight:700; font-size:1.5rem; letter-spacing:-.025em; margin:0;}
@@ -72,6 +78,9 @@ CSS = ("""
     line-height:1.85; background:var(--sand); padding:.6rem .8rem; border-radius:2px;}
   @media print{
     body{padding:0 .3in;}
+    /* Browsers drop backgrounds when printing by default, which would put
+       the light text back on white paper. Keep the dark ground. */
+    html,body{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
     .chart{break-inside:avoid;} .kpi-grid{break-inside:avoid;}
     a{color:inherit; text-decoration:none;}
   }
@@ -198,16 +207,16 @@ def render_tearsheet(res: BacktestResult,
         curves[bench.label] = bench.equity
     rebased = pd.DataFrame({k: (v / v.iloc[0] * 100) for k, v in curves.items()})
 
-    eq_fig = C.equity_curve(rebased, True, "Portfolio value (base 100)", theme="print")
+    eq_fig = C.equity_curve(rebased, True, "Portfolio value (base 100)", theme="dark")
     dd_fig = C.underwater(
         {res.label: res.equity, **({bench.label: bench.equity} if bench is not None else {})},
-        theme="print")
+        theme="dark")
     ppy = cfg.engine.periods_per_year
-    mh_fig = C.monthly_heatmap(res.returns, theme="print", ppy=ppy)
-    rd_fig = C.return_distribution(res.returns, theme="print", ppy=ppy)
+    mh_fig = C.monthly_heatmap(res.returns, theme="dark", ppy=ppy)
+    rd_fig = C.return_distribution(res.returns, theme="dark", ppy=ppy)
     wa_fig = (None if simple else
               C.weights_area(res.weights, res.cash_weight,
-                             "Portfolio composition", theme="print"))
+                             "Portfolio composition", theme="dark"))
 
     dd_table = M.drawdown_table(res.equity, 6, ppy)
     kpi_keys = ["CAGR", "Volatility", "Sharpe", "Sortino", "Calmar", "Max Drawdown"]
