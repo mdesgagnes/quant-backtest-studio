@@ -6,8 +6,10 @@ drawdown episodes, current holdings, and the engine assumptions that produced
 the numbers. Built for printing or sharing with a portfolio manager, so it
 uses the same dark theme as the in-app interface.
 
-No extra dependency: Plotly renders as interactive HTML via a single CDN
-script tag, and everything else is plain HTML/CSS. Opening the file in a
+No extra dependency: plotly.js is embedded in the file from the installed
+Plotly package, so the charts render offline and behind networks that block
+CDNs, and the library always matches the version that built the figures.
+Everything else is plain HTML/CSS. Opening the file in a
 browser and using Print -> Save as PDF produces a clean PDF without any
 server-side rendering step.
 
@@ -21,6 +23,7 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 import pandas as pd
+from plotly.offline import get_plotlyjs
 
 from . import charts as C
 from . import metrics as M
@@ -253,7 +256,7 @@ def render_tearsheet(res: BacktestResult,
 <head>
 <meta charset="utf-8">
 <title>Tearsheet - {_esc(res.label)}</title>
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script type="text/javascript">{get_plotlyjs()}</script>
 {CSS}
 </head>
 <body>
