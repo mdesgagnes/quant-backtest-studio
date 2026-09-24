@@ -6,9 +6,11 @@ drawdown episodes, current holdings, and the engine assumptions that produced
 the numbers. Built for printing or sharing with a portfolio manager, so it
 uses the same dark theme as the in-app interface.
 
-No extra dependency: plotly.js is embedded in the file from the installed
-Plotly package, so the charts render offline and behind networks that block
-CDNs, and the library always matches the version that built the figures.
+Charts are static PNG images from `qbt/report_charts.py`, embedded as
+base64. Interactive Plotly charts need JavaScript, and many places a shared
+file gets opened do not run it: the iPhone Files and Mail previews, email
+and chat previews, and some locked-down browsers. There they rendered as
+empty boxes. An image shows everywhere, prints, and needs no network.
 Everything else is plain HTML/CSS. Opening the file in a
 browser and using Print -> Save as PDF produces a clean PDF without any
 server-side rendering step.
@@ -18,14 +20,14 @@ from the same palette: dark-theme text on a white page is unreadable.
 """
 from __future__ import annotations
 
+import base64
 import html
 from datetime import datetime
 from typing import Any, Dict, Optional
 
 import pandas as pd
-from plotly.offline import get_plotlyjs
 
-from . import charts as C
+from . import report_charts as RC
 from . import metrics as M
 from .brand import BRAND
 from .config import RunConfig, REBALANCE_RULES
@@ -59,7 +61,7 @@ CSS = ("""
     text-transform:uppercase; color:var(--muted); margin:1.6rem 0 .6rem; font-weight:600;
     border-top:1px solid var(--rule); padding-top:.9rem;}
   .eyebrow:first-of-type{border-top:none; margin-top:0;}
-  .kpi-grid{display:grid; grid-template-columns:repeat(6,1fr); gap:.6rem;}
+  .kpi-grid{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:.6rem;}
   .kpi{background:var(--panel); border:1px solid var(--rule); border-top:2px solid var(--red);
     padding:.6rem .7rem; border-radius:2px;}
   .kpi .k{font-family:'IBM Plex Mono',monospace; font-size:.58rem; letter-spacing:.09em;
@@ -73,8 +75,16 @@ CSS = ("""
     text-transform:uppercase; color:var(--muted); font-weight:600; background:var(--panel);}
   td{font-family:'IBM Plex Mono',monospace;}
   .note{color:var(--muted); font-size:.78rem; margin:.3rem 0 .8rem;}
-  .two-col{display:grid; grid-template-columns:1fr 1fr; gap:1.4rem;}
+  .two-col{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:1.4rem;}
   .chart{border:1px solid var(--rule); border-radius:2px; padding:.4rem; margin-bottom:.9rem;}
+  .chart img{display:block; width:100%; height:auto;}
+  @media (max-width:700px){
+    body{padding:1.2rem 1rem 2rem;}
+    .kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .two-col{grid-template-columns:minmax(0,1fr);}
+    .masthead .meta{text-align:left;}
+    table{display:block; overflow-x:auto; white-space:nowrap;}
+  }
   .footer{margin-top:2rem; padding-top:1rem; border-top:1px solid var(--rule);
     font-size:.72rem; color:var(--muted);}
   .assumptions{font-family:'IBM Plex Mono',monospace; font-size:.7rem; color:var(--muted);
@@ -184,9 +194,9 @@ def _period_tables_html(res: BacktestResult, bench, ppy: int,
     )
 
 
-def _fig_html(fig) -> str:
-    return fig.to_html(full_html=False, include_plotlyjs=False,
-                       config={"displaylogo": False, "displayModeBar": False})
+def _img(png: bytes) -> str:
+    return ('<img alt="" src="data:image/png;base64,'
+            + base64.b64encode(png).decode("ascii") + '">')
 
 
 def render_tearsheet(res: BacktestResult,
@@ -210,22 +220,29 @@ def render_tearsheet(res: BacktestResult,
         curves[bench.label] = bench.equity
     rebased = pd.DataFrame({k: (v / v.iloc[0] * 100) for k, v in curves.items()})
 
-    eq_fig = C.equity_curve(rebased, True, "Portfolio value (base 100)", theme="dark")
-    dd_fig = C.underwater(
-        {res.label: res.equity, **({bench.label: bench.equity} if bench is not None else {})},
-        theme="dark")
     ppy = cfg.engine.periods_per_year
-    mh_fig = C.monthly_heatmap(res.returns, theme="dark", ppy=ppy)
-    rd_fig = C.return_distribution(res.returns, theme="dark", ppy=ppy)
+    eq_fig = RC.equity_chart(
+        {k: rebased[k] for k in rebased.columns}, "Portfolio value (base 100)")
+    dd_fig = RC.underwater_chart(
+        {res.label: res.equity, **({bench.label: bench.equity} if bench is not None else {})},
+        "Drawdown from prior peak")
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    mt = M.monthly_returns(res.returns, ppy)
+    mh_fig = (None if mt.empty else RC.heatmap_chart(
+        (mt.reindex(columns=range(1, 13)) * 100).set_axis(months, axis=1),
+        "Monthly returns (%)", fmt="{:.1f}"))
+    rd_fig = RC.distribution_chart(
+        res.returns, f"{M.freq_words(ppy)[0].capitalize()} return distribution")
     wa_fig = (None if simple else
-              C.weights_area(res.weights, res.cash_weight,
-                             "Portfolio composition", theme="dark"))
+              RC.composition_chart(res.weights, res.cash_weight,
+                                   "Portfolio composition"))
 
     dd_table = M.drawdown_table(res.equity, 6, ppy)
     kpi_keys = ["CAGR", "Volatility", "Sharpe", "Sortino", "Calmar", "Max Drawdown"]
-    monthly_block = "" if ppy < 12 else (
+    monthly_block = "" if mh_fig is None else (
         '<div class="eyebrow" style="border-top:none; margin-top:0;">Monthly returns</div>'
-        f'<div class="chart">{_fig_html(mh_fig)}</div>')
+        f'<div class="chart">{_img(mh_fig)}</div>')
     kpis = "".join(
         _kpi(k, M.format_metric(k, stats.get(k, float("nan"))),
              f"benchmark {M.format_metric(k, bench_stats.get(k, float('nan')))}"
@@ -256,7 +273,7 @@ def render_tearsheet(res: BacktestResult,
 <head>
 <meta charset="utf-8">
 <title>Tearsheet - {_esc(res.label)}</title>
-<script type="text/javascript">{get_plotlyjs()}</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 {CSS}
 </head>
 <body>
@@ -278,10 +295,10 @@ def render_tearsheet(res: BacktestResult,
 {_period_tables_html(res, bench, cfg.engine.periods_per_year, res.label, bench_label or "Benchmark")}
 
 <div class="eyebrow">Portfolio value</div>
-<div class="chart">{_fig_html(eq_fig)}</div>
+<div class="chart">{_img(eq_fig)}</div>
 
 <div class="eyebrow">Drawdown from prior peak</div>
-<div class="chart">{_fig_html(dd_fig)}</div>
+<div class="chart">{_img(dd_fig)}</div>
 
 <div class="two-col">
   <div>
@@ -289,11 +306,11 @@ def render_tearsheet(res: BacktestResult,
   </div>
   <div>
     <div class="eyebrow" style="border-top:none; margin-top:0;">{_esc(M.freq_words(ppy)[0].capitalize())} return distribution</div>
-    <div class="chart">{_fig_html(rd_fig)}</div>
+    <div class="chart">{_img(rd_fig)}</div>
   </div>
 </div>
 
-{"" if simple else f'<div class="eyebrow">Portfolio composition</div><div class="chart">{_fig_html(wa_fig)}</div>'}
+{"" if simple else f'<div class="eyebrow">Portfolio composition</div><div class="chart">{_img(wa_fig)}</div>'}
 
 <div class="two-col">
   <div>

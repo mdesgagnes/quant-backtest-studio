@@ -181,3 +181,80 @@ def score_chart(scores: pd.DataFrame, title: str = "", dark: bool = True) -> byt
         ax.set_title(title, color=pal["text"], fontsize=10, loc="left")
     fig.tight_layout()
     return _finish(fig, pal)
+
+
+def underwater_chart(equities: Dict[str, pd.Series], title: str = "",
+                     dark: bool = True) -> bytes:
+    """Drawdown from prior peak for one or more series; the first is filled."""
+    pal = _style(dark)
+    fig, ax = plt.subplots(figsize=(7.5, 2.4))
+    for i, (name, eq) in enumerate(equities.items()):
+        eq = eq.dropna()
+        if eq.empty:
+            continue
+        dd = (eq / eq.cummax() - 1.0) * 100
+        color = pal["loss"] if i == 0 else SERIES[i % len(SERIES)]
+        if i == 0:
+            ax.fill_between(dd.index, dd.values, 0, color=color, alpha=0.25)
+        ax.plot(dd.index, dd.values, color=color, linewidth=1.1, label=name)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0f}%"))
+    if len(equities) > 1:
+        ax.legend(loc="lower left", frameon=False, fontsize=8, labelcolor=pal["text"])
+    if title:
+        ax.set_title(title, color=pal["text"], fontsize=10, loc="left")
+    fig.tight_layout()
+    return _finish(fig, pal)
+
+
+def distribution_chart(returns: pd.Series, title: str = "",
+                       dark: bool = True) -> bytes:
+    """Histogram of period returns with the 95% VaR marked."""
+    pal = _style(dark)
+    r = returns.dropna() * 100
+    fig, ax = plt.subplots(figsize=(3.8, 2.8))
+    if len(r):
+        ax.hist(r, bins=min(90, max(10, len(r) // 3)), color=pal["red"],
+                alpha=0.85)
+        v = float(np.percentile(r, 5))
+        ax.axvline(v, color=pal["loss"], linewidth=1.2, linestyle="--")
+        ax.text(v, ax.get_ylim()[1] * 0.95, f" VaR 95%: {v:.2f}%",
+                color=pal["loss"], fontsize=7, va="top")
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0f}%"))
+    if title:
+        ax.set_title(title, color=pal["text"], fontsize=10, loc="left")
+    fig.tight_layout()
+    return _finish(fig, pal)
+
+
+def composition_chart(weights: pd.DataFrame, cash: Optional[pd.Series] = None,
+                      title: str = "", dark: bool = True,
+                      max_series: int = 10) -> bytes:
+    """Stacked portfolio weights. Beyond `max_series` holdings, the smallest
+    by average weight are grouped as "Other" so the legend stays legible."""
+    pal = _style(dark)
+    w = weights.fillna(0.0).clip(lower=0.0)
+    if w.shape[1] > max_series:
+        keep = w.mean().sort_values(ascending=False).index[:max_series - 1]
+        w = pd.concat([w[keep], w.drop(columns=keep).sum(axis=1).rename("Other")],
+                      axis=1)
+    layers, labels, colors = [], [], []
+    if cash is not None:
+        layers.append(cash.reindex(w.index).fillna(0.0).clip(lower=0.0) * 100)
+        labels.append("Cash"); colors.append(pal["muted"])
+    for i, c in enumerate(w.columns):
+        layers.append(w[c] * 100)
+        labels.append(str(c)); colors.append(SERIES[i % len(SERIES)])
+    fig, ax = plt.subplots(figsize=(7.5, 2.8))
+    if layers:
+        ax.stackplot(w.index, *[l.values for l in layers], labels=labels,
+                     colors=colors, alpha=0.85)
+    ax.set_ylim(0, 100)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y"))
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0f}%"))
+    ax.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), frameon=False,
+              fontsize=7, labelcolor=pal["text"])
+    if title:
+        ax.set_title(title, color=pal["text"], fontsize=10, loc="left")
+    fig.tight_layout()
+    return _finish(fig, pal)
