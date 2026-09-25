@@ -1300,17 +1300,40 @@ if source == "Return stream":
 
         if len(everyone) > 1:
             eyebrow("Correlation")
+            # Only frequencies at or coarser than the data's own can be offered.
+            _cf_opts = [f for f, p in (("Daily", 252), ("Weekly", 52), ("Monthly", 12))
+                        if p <= ppy and (ppy > 12 or f == "Monthly")]
+            if len(_cf_opts) > 1:
+                _cf = st.radio(
+                    "Correlation of", [f"{f} returns" for f in _cf_opts],
+                    index=len(_cf_opts) - 1, horizontal=True, key="rscorrfreq",
+                    help="Daily correlations are biased toward zero when a "
+                         "security trades thinly (stale prices show as 0% "
+                         "days) or on a different clock (Canada or Asia "
+                         "against the US). Compounding to weekly or monthly "
+                         "returns lets the delayed moves catch up.")
+                _cf = _cf.split()[0]
+            else:
+                _cf = _cf_opts[0] if _cf_opts else "Monthly"
             _corr_src = pd.DataFrame(everyone).dropna()
+            if _cf != _cf_opts[0]:
+                _corr_src = RS.compound_to(_corr_src, _cf)
             if len(_corr_src) >= 12:
                 st.plotly_chart(
                     C.correlation_matrix(
                         _corr_src.corr(),
-                        f"Correlation of {rrep.frequency} returns "
+                        f"Correlation of {_cf.lower()} returns, "
+                        f"{len(_corr_src):,} observations "
                         f"({_corr_src.index[0].date()} to {_corr_src.index[-1].date()})"),
                     use_container_width=True, config={"displaylogo": False})
-                note("Measured only over the dates every series has data.")
+                note("Measured only over the dates every series has data. "
+                     "Fewer observations make each correlation less "
+                     "precise: with 36 monthly returns, a correlation of 0.5 "
+                     "could plausibly be anywhere from about 0.2 to 0.7.")
             else:
-                note("Too few shared dates to measure correlation.")
+                note(f"Only {len(_corr_src)} shared {_cf.lower()} observations: "
+                     f"too few to measure correlation. Try a finer frequency "
+                     f"or a longer date range.")
 
         eyebrow("Trailing periods")
         _tr_cols, _tr_ann = {}, {}

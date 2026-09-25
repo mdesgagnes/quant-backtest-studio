@@ -572,6 +572,22 @@ def returns_from_prices(prices: pd.DataFrame, frequency: str = "Daily") -> pd.Da
     return out.dropna(how="all")
 
 
+def compound_to(returns: pd.DataFrame, frequency: str) -> pd.DataFrame:
+    """Compounds returns to a coarser frequency ("Weekly" or "Monthly").
+
+    Only dates every column shares are used, so each weekly or monthly
+    return covers exactly the same days for every series; a period with no
+    shared dates is dropped rather than read as a 0% return.
+    """
+    rule = {"Weekly": "W-FRI", "Monthly": "ME"}.get(frequency)
+    df = returns.dropna()
+    if rule is None or df.empty:
+        return df
+    grouped = (1.0 + df).resample(rule)
+    out = grouped.prod() - 1.0
+    return out[grouped.size() > 0]
+
+
 def analysis_windows(rets: pd.DataFrame, names: List[str],
                      bench: Optional[str] = None,
                      start: Optional[Any] = None, end: Optional[Any] = None,
