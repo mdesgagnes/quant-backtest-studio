@@ -507,7 +507,7 @@ def prepare_returns(raw: pd.DataFrame, scale: str = "auto",
     # Filling them with zero would give a short-history ticker years of
     # flat, zero-volatility performance and falsify every statistic, so
     # they stay missing and each series is analysed over its own span
-    # (see `analysis_window`). Only gaps *inside* a series' history are
+    # (see `analysis_windows`). Only gaps *inside* a series' history are
     # treated as zero.
     inside = df.ffill().notna() & df.bfill().notna()
     gaps = df.isna() & inside
@@ -516,13 +516,6 @@ def prepare_returns(raw: pd.DataFrame, scale: str = "auto",
         warnings_out.append(
             f"{n} missing value(s) inside a series' history treated as zero.")
         df = df.mask(gaps, 0.0)
-    spans = {c: (df[c].first_valid_index(), df[c].last_valid_index())
-             for c in df.columns}
-    if len(set(spans.values())) > 1:
-        warnings_out.append(
-            "Series in this file cover different periods. Each is analysed "
-            "only over the dates where it has data, and the comparison "
-            "series is cut to the same window as the series analysed.")
 
     if label in ("daily", "business-daily", "weekly") and len(df) < 60:
         warnings_out.append(
@@ -556,39 +549,111 @@ def prepare_returns(raw: pd.DataFrame, scale: str = "auto",
     return df, report
 
 
-def analysis_window(rets: pd.DataFrame, main: str,
-                    bench: Optional[str] = None) -> Dict[str, Any]:
-    """The span the analysis runs over: the selected series' own history.
+def returns_from_prices(prices: pd.DataFrame, frequency: str = "Daily") -> pd.DataFrame:
+    """Periodic total returns from adjusted prices, one column per security.
 
-    The base date is the first period the analysed series has a return,
-    the end its last. The comparison series is cut to that same window,
-    and within it to the dates where it has data itself, so neither side
-    is padded with invented zero returns.
+    Each column is computed on its own dates. Computing on the shared index
+    instead would turn a market holiday that only one exchange observes
+    (a Canadian and a US listing side by side, say) into a missing value
+    on the following day as well, and that day's return would be lost.
     """
-    r_main = rets[main]
-    start, end = r_main.first_valid_index(), r_main.last_valid_index()
-    if start is None:
-        raise ReturnStreamError(f"“{main}” has no values in this file.")
-    r_main = r_main.loc[start:end]
-    out: Dict[str, Any] = {"main": r_main, "bench": None, "start": start,
-                           "end": end, "n_periods": len(r_main),
-                           "bench_note": None}
-    if bench:
-        rb = rets[bench].loc[start:end]
-        b0, b1 = rb.first_valid_index(), rb.last_valid_index()
-        if b0 is None:
-            out["bench_note"] = (f"“{bench}” has no data between "
-                                 f"{start.date()} and {end.date()}, so there "
-                                 f"is nothing to compare against.")
-            return out
-        rb = rb.loc[b0:b1]
-        out["bench"] = rb
-        if b0 > start or b1 < end:
-            out["bench_note"] = (
-                f"“{bench}” only has data from {b0.date()} to "
-                f"{b1.date()}, shorter than “{main}”. Its figures "
-                f"and all relative statistics cover that shorter overlap only.")
-    return out
+    px = prices.sort_index()
+    px.index = pd.DatetimeIndex(px.index).tz_localize(None).normalize()
+    rule = {"Daily": None, "Weekly": "W-FRI", "Monthly": "ME"}[frequency]
+    cols = {}
+    for c in px.columns:
+        s = px[c].dropna()
+        s = s[s > 0]
+        if rule:
+            s = s.resample(rule).last().dropna()
+        cols[str(c)] = s.pct_change().iloc[1:]
+    out = pd.DataFrame(cols)
+    out.index.name = "Date"
+    return out.dropna(how="all")
+
+
+def analysis_windows(rets: pd.DataFrame, names: List[str],
+                     bench: Optional[str] = None,
+                     start: Optional[Any] = None, end: Optional[Any] = None,
+                     common: bool = False) -> Dict[str, Any]:
+    """The span each selected series is analysed over.
+
+    Everything is first cut to the requested date range. Then, by default,
+    each series keeps its own history inside that range: its base date is
+    the first period it has a return, so a short-history series is never
+    padded with invented zero returns. With `common=True` every series (and
+    the benchmark) is cut to the dates they all share, which is what a
+    like-for-like comparison of CAGR or Sharpe needs.
+
+    The benchmark is cut to the span of the analysed series, and within it
+    to the dates where it has data itself.
+    """
+    lo = pd.Timestamp(start) if start is not None else rets.index.min()
+    hi = pd.Timestamp(end) if end is not None else rets.index.max()
+    notes: List[str] = []
+    series: Dict[str, pd.Series] = {}
+
+    def _trim(s: pd.Series) -> Optional[pd.Series]:
+        s = s.loc[lo:hi]
+        a, b = s.first_valid_index(), s.last_valid_index()
+        return None if a is None else s.loc[a:b]
+
+    for n in names:
+        s = _trim(rets[n])
+        if s is None:
+            notes.append(f"“{n}” has no data between {lo.date()} and "
+                         f"{hi.date()} and is left out.")
+        else:
+            series[n] = s
+    if not series:
+        raise ReturnStreamError(
+            f"None of the selected series has data between {lo.date()} and "
+            f"{hi.date()}.")
+
+    rb = _trim(rets[bench]) if bench else None
+    if bench and rb is None:
+        notes.append(f"“{bench}” has no data in this period, so there "
+                     f"is nothing to compare against.")
+
+    starts = {n: s.index[0] for n, s in series.items()}
+    ends = {n: s.index[-1] for n, s in series.items()}
+    if common:
+        c0 = max(list(starts.values()) + ([rb.index[0]] if rb is not None else []))
+        c1 = min(list(ends.values()) + ([rb.index[-1]] if rb is not None else []))
+        if c0 >= c1:
+            raise ReturnStreamError(
+                "The selected series do not share any dates in this period, "
+                "so there is no common period to compare them over.")
+        series = {n: s.loc[c0:c1] for n, s in series.items()}
+        if rb is not None:
+            rb = rb.loc[c0:c1]
+        if len(set(starts.values())) > 1 or (rb is not None and c0 > lo):
+            notes.append(f"Common period: every series is measured from "
+                         f"{c0.date()} to {c1.date()}.")
+    else:
+        if len(set(starts.values())) > 1:
+            late = max(starts, key=starts.get)
+            notes.append(
+                f"The series start on different dates (“{late}” only "
+                f"from {starts[late].date()}). Each is measured over its own "
+                f"history, so their statistics cover different periods; turn "
+                f"on “Common period only” to compare them over the "
+                f"same dates.")
+        if rb is not None:
+            s0, s1 = min(starts.values()), max(ends.values())
+            rb = rb.loc[s0:s1]
+            rb = rb.loc[rb.first_valid_index():rb.last_valid_index()]
+            if rb.index[0] > s0 or rb.index[-1] < s1:
+                notes.append(
+                    f"“{bench}” only has data from {rb.index[0].date()} "
+                    f"to {rb.index[-1].date()}, shorter than the series "
+                    f"analysed. Its figures and all relative statistics cover "
+                    f"that overlap only.")
+
+    return {"series": series, "bench": rb,
+            "start": min(s.index[0] for s in series.values()),
+            "end": max(s.index[-1] for s in series.values()),
+            "notes": notes}
 
 
 def equity_from_returns(returns: pd.Series, initial: float = 100_000.0) -> pd.Series:

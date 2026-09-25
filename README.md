@@ -459,6 +459,43 @@ stability, Monte Carlo, and the tearsheet. Positions, frictions, cost
 sensitivity and parameter sweeps do not apply: there is no portfolio being
 simulated, only a realized stream.
 
+**Yahoo Finance instead of a file.** Switch *Returns from* to Yahoo
+Finance and type tickers (`SPY, QQQ, TLT, GLD`, `XIU.TO`, `^GSPC`). Prices
+are downloaded with dividends reinvested and turned into daily, weekly or
+monthly total returns, each security on its own trading calendar so a
+holiday on one exchange never erases a day's return on another.
+
+**Up to ten series side by side.** Pick several series and, optionally, a
+benchmark. The Results tab shows a side-by-side statistics table,
+overlaid value and drawdown curves, a correlation matrix, and trailing and
+calendar-year returns for every series; the heatmap, distribution, rolling
+Sharpe, robustness tests and tearsheet cover one series at a time, chosen
+under *Detailed charts for*.
+
+**Date range and history.** *From* and *To* restrict the analysis. Inside
+that range each series is measured over its own history by default -- its
+base date is its first return, and blanks before a series starts are never
+counted as zero returns. *Common period only* cuts every series and the
+benchmark to the dates they all share, for a like-for-like comparison.
+
+**Market regimes** (`qbt/regimes.py`) group every period by the state of
+the world at the time and report annualized return, volatility, Sharpe,
+hit rate and share of time in each regime, with excess return against the
+benchmark:
+
+| Dimension | Regimes | Source |
+|---|---|---|
+| Economy | Expansion, recession | NBER business-cycle dates |
+| Short rates | Rising, stable, falling (3-month T-bill, > 0.25 pp over ~6 months) | Yahoo `^IRX` |
+| Long rates | Rising, stable, falling (10-year Treasury, same rule) | Yahoo `^TNX` |
+| Yield curve | Normal, inverted (10Y minus 3M) | Yahoo `^TNX`, `^IRX` |
+| Equity market | Near high, pullback, correction, bear (S&P 500 drawdown) | Yahoo `^GSPC` |
+| Volatility | Calm, normal, stressed, panic (VIX 15 / 25 / 35) | Yahoo `^VIX`, from 1990 |
+
+Each return is assigned the regime that prevailed on most days of the
+period it covers, so daily and monthly returns give consistent answers.
+When the NBER dates a new recession, add it to `NBER_RECESSIONS`.
+
 **The reader is a separate, self-contained module**
 (`qbt/returns_input.py`) that does not call the shared file loader used by
 prices, exogenous series or target weights. It exists on its own precisely
@@ -1178,7 +1215,7 @@ the link between exploring on screen and reproducing in a script.
 | Parameter surface | Is the result a plateau or a lone spike? |
 | Cost sensitivity | At what cost level does the strategy stop paying off? |
 | Trading-day sweep | Does the result survive rebalancing on a different day of the period? |
-| Stress test periods | What did the strategy's own returns actually do in sixteen named historical episodes? |
+| Stress test periods | What did the strategy's own returns actually do in twenty-four named historical episodes? |
 | Block-resampled Monte Carlo | How much of the result depends on the order of returns? |
 | Expected Sharpe by chance | What Sharpe would *n* trials produce with no real edge? |
 
@@ -1207,9 +1244,12 @@ more concrete question: what did the strategy actually do in October 1987,
 in the autumn of 2008, in March 2020? That is closer to the question a
 manager or an allocator asks in practice than any resampling exercise is.
 
-**This reads the backtest's own realized returns inside sixteen named
-windows** -- Black Monday (1987) through the yen carry-trade unwind
-(August 2024) -- and reports the return, the max drawdown inside the
+**This reads the backtest's own realized returns inside twenty-four named
+windows** -- Black Monday (1987) through the 2025 tariff tantrum (February
+19 to April 8, 2025, S&P 500 -18.9%), grouped as crashes, bear markets,
+liquidity events, rate shocks (1994, the 2013 taper tantrum, 2023),
+geopolitical events (Iraq 2003, Brexit, Ukraine 2022) and trade-policy
+shocks (2019, 2025) -- and reports the return, the max drawdown inside the
 window, the best and worst single day, and, when a benchmark is set,
 **the benchmark's own return alongside the excess, not just the
 difference**. A bare excess number collapses two very different stories
@@ -1259,6 +1299,7 @@ qbt/
   allocation.py            sleeves: asset-class budgets and composition
   monitor.py               market monitor analytics
   stress.py                stress test periods against named historical episodes
+  regimes.py               market regimes: rates, recessions, yield curve, drawdown, VIX
   tax.py                   Canadian tax friendliness: ACB gains, eligible/foreign dividends
   full_report.py           detailed HTML + PDF report combining every module
   report_charts.py         matplotlib chart rendering shared by the detailed report's HTML and PDF

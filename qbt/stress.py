@@ -44,11 +44,12 @@ class StressPeriod:
     start: str                     # "YYYY-MM-DD"
     end: str                       # "YYYY-MM-DD"
     category: str                  # Crash | Bear market | Liquidity event | Rate shock
+                                   # | Geopolitical | Trade policy
     note: str = ""
 
 
 # ----------------------------------------------------------------------
-# Sixteen episodes, 1987 to 2024. Categories follow the shape of the
+# Twenty-four episodes, 1987 to 2025. Categories follow the shape of the
 # stress, not just its size: a single-session crash tests a strategy's
 # execution and gap risk in a way a slow-motion bear market never does,
 # and the two should not be judged by the same yardstick.
@@ -65,6 +66,12 @@ DEFAULT_PERIODS: List[StressPeriod] = [
         "A ~20% decline tied to the Iraqi invasion of Kuwait, an oil-price "
         "spike, and the domestic savings-and-loan crisis; one of the "
         "fastest-resolving bears on record."),
+    StressPeriod(
+        "Bond market massacre (1994)", "1994-02-02", "1994-04-04", "Rate shock",
+        "The Fed's surprise February hike started a tightening cycle that "
+        "pushed the 10-year yield up about 1.4 points in two months; the "
+        "S&P 500 fell roughly 9% as bonds suffered their worst year in "
+        "decades."),
     StressPeriod(
         "Asian financial crisis (1997)", "1997-10-01", "1998-01-30", "Liquidity event",
         "Contagion from the Thai baht's July float; the US equity impact "
@@ -86,6 +93,11 @@ DEFAULT_PERIODS: List[StressPeriod] = [
         "through September 21 for a cumulative decline of about 12% in "
         "four trading sessions, nested inside the broader dot-com bear."),
     StressPeriod(
+        "Iraq war run-up (2003)", "2003-01-14", "2003-03-11", "Geopolitical",
+        "Uncertainty ahead of the US-led invasion of Iraq pushed the S&P 500 "
+        "down about 14%; the market bottomed days before the March 20 "
+        "invasion and rallied once it began."),
+    StressPeriod(
         "Global Financial Crisis (2007-2009)", "2007-10-09", "2009-03-09", "Bear market",
         "The deepest post-war US bear market: roughly 57% peak to trough "
         "over 17 months, triggered by the subprime mortgage collapse and "
@@ -102,10 +114,20 @@ DEFAULT_PERIODS: List[StressPeriod] = [
         "fell close to 19% peak to trough, just under the conventional bear "
         "threshold on some closing-price measures."),
     StressPeriod(
+        "Taper tantrum (2013)", "2013-05-21", "2013-06-24", "Rate shock",
+        "Bernanke's hint that the Fed would slow its bond purchases sent the "
+        "10-year yield up about 0.6 points in a month; the S&P 500 fell "
+        "about 6% and emerging markets were hit harder."),
+    StressPeriod(
         "China slowdown / oil crash (2015-2016)", "2015-08-18", "2016-02-11", "Bear market",
         "A Chinese growth scare and the August 24, 2015 intraday break, "
         "compounded by crude oil falling below $30, produced a shallow but "
         "sustained ~15% decline into early 2016."),
+    StressPeriod(
+        "Brexit vote (2016)", "2016-06-23", "2016-06-27", "Geopolitical",
+        "The UK's unexpected vote to leave the EU: the S&P 500 fell about 5% "
+        "in two sessions and sterling had its largest one-day fall on "
+        "record, before a quick recovery."),
     StressPeriod(
         "Volmageddon (February 2018)", "2018-02-02", "2018-02-09", "Liquidity event",
         "A rapid, technically-driven unwind of short-volatility positioning; "
@@ -117,6 +139,11 @@ DEFAULT_PERIODS: List[StressPeriod] = [
         "A Fed-tightening and trade-war-driven decline of almost 20%, "
         "concentrated in the final quarter and bottoming on Christmas Eve."),
     StressPeriod(
+        "US-China trade war escalation (2019)", "2019-05-03", "2019-06-03", "Trade policy",
+        "Tariffs on $200bn of Chinese imports were raised from 10% to 25% and "
+        "talks broke down; the S&P 500 fell about 7% in a month until the "
+        "Fed signalled cuts."),
+    StressPeriod(
         "COVID-19 crash (2020)", "2020-02-19", "2020-03-23", "Crash",
         "The fastest 30%+ drawdown in S&P 500 history: about 34% in 33 "
         "calendar days, followed by the fastest recovery of any bear "
@@ -127,15 +154,32 @@ DEFAULT_PERIODS: List[StressPeriod] = [
         "over nine months; unusually, government bonds fell alongside "
         "equities rather than cushioning the drawdown."),
     StressPeriod(
+        "Russia invades Ukraine (2022)", "2022-02-09", "2022-03-08", "Geopolitical",
+        "The build-up to and outbreak of war on February 24, with an energy "
+        "and commodity price shock; the S&P 500 fell about 9%, inside the "
+        "broader 2022 bear market."),
+    StressPeriod(
         "SVB / regional banking crisis (2023)", "2023-03-08", "2023-03-24", "Liquidity event",
         "Silicon Valley Bank's failure (March 10) and Signature Bank's "
         "(March 12), followed by Credit Suisse's forced sale (March 19), "
         "produced an acute, bank-concentrated stress episode."),
     StressPeriod(
+        "Higher-for-longer bond selloff (2023)", "2023-07-31", "2023-10-27", "Rate shock",
+        "The 10-year yield climbed about 0.9 points to 5% on expectations of "
+        "rates staying high, compounded by the outbreak of the Israel-Hamas "
+        "war on October 7; the S&P 500 fell about 10%."),
+    StressPeriod(
         "Yen carry-trade unwind (August 2024)", "2024-07-31", "2024-08-09", "Liquidity event",
         "A Bank of Japan rate rise triggered a rapid unwind of yen-funded "
         "carry positioning; the VIX spiked from the mid-teens to 65 "
         "intraday on August 5 and normalized within about a week."),
+    StressPeriod(
+        "Tariff tantrum (2025)", "2025-02-19", "2025-04-08", "Trade policy",
+        "From the S&P 500's record close on February 19 (6,144) to its trough "
+        "on April 8 (4,983), down 18.9%: escalating US tariffs culminated in "
+        "the April 2 'Liberation Day' announcement, and the VIX closed at 52 "
+        "on April 8. The 90-day tariff pause announced April 9 set off a 9.5% "
+        "one-day rally; the prior high was regained on June 27."),
 ]
 
 CATEGORIES = sorted({p.category for p in DEFAULT_PERIODS})

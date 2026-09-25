@@ -329,7 +329,8 @@ def bar_compare(labels, series: Dict[str, list], title: str = "",
     """
     pal, colors = _colors(theme)
     fig = go.Figure()
-    palette = [pal["brass"], pal["slate"], pal["teal"], pal["rust"]]
+    palette = ([pal["brass"], pal["slate"], pal["teal"], pal["rust"]]
+               if len(series) <= 4 else colors)
     for i, (name, values) in enumerate(series.items()):
         fig.add_trace(go.Bar(
             x=list(labels), y=list(values), name=str(name),
@@ -410,4 +411,39 @@ def multi_line(df: pd.DataFrame, title: str = "", suffix: str = "",
         fig.add_hline(y=ref, line=dict(color=pal["muted"], width=1, dash="dot"))
     _base(fig, 340, title, theme)
     fig.update_yaxes(ticksuffix=suffix)
+    return fig
+
+
+def regime_timeline(price: pd.Series, segments: pd.DataFrame, order: list,
+                    title: str = "", theme: str = "dark") -> go.Figure:
+    """A price line over shaded regime bands, one colour per regime.
+
+    Colours run from calm to stressed in the order the regimes are listed,
+    so the eye reads danger as red whichever dimension is on screen.
+    """
+    pal, _ = _colors(theme)
+    ramp = {2: [pal["teal"], pal["rust"]],
+            3: [pal["rust"], "#C9B896", pal["teal"]],
+            4: [pal["teal"], "#C9B896", "#D08C4E", pal["rust"]]}
+    shades = ramp.get(len(order), SERIES_COLORS)
+    color = {lab: shades[i % len(shades)] for i, lab in enumerate(order)}
+    # The price line goes first: the legend placeholders below carry no
+    # x values, and as the first trace they would stop Plotly from
+    # recognising the axis as dates.
+    fig = go.Figure(go.Scatter(x=price.index, y=price, name=str(price.name or "Index"),
+                               mode="lines", line=dict(color=pal["text"], width=1.3),
+                               hovertemplate="%{y:,.0f}<extra></extra>"))
+    seg = segments.reset_index(drop=True)
+    for i, row in seg.iterrows():
+        x1 = seg.loc[i + 1, "start"] if i + 1 < len(seg) else row["end"]
+        fig.add_vrect(x0=row["start"], x1=x1, fillcolor=color.get(row["label"], pal["muted"]),
+                      opacity=0.22, line_width=0, layer="below")
+    for lab in order:
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers", name=lab,
+                                 marker=dict(size=11, symbol="square",
+                                             color=color[lab], opacity=0.6)))
+    _base(fig, 360, title, theme)
+    fig.update_xaxes(type="date")
+    fig.update_yaxes(type="log")
+    fig.update_layout(legend=dict(orientation="h", y=-0.12, x=0))
     return fig

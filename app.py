@@ -30,6 +30,7 @@ from qbt import metrics as M
 from qbt import charts as C
 from qbt import robustness as R
 from qbt import stress as STRESS
+from qbt import regimes as RG
 from qbt import tax as TAX
 from qbt import full_report as FULLREPORT
 from qbt import report as REPORT
@@ -540,6 +541,21 @@ def fetch_vix(start: str, end: Optional[str]) -> Optional[pd.Series]:
         return None
 
 
+@st.cache_data(show_spinner="Loading market regime data…", ttl=6 * 3600)
+def fetch_regime_market() -> Optional[pd.DataFrame]:
+    """S&P 500, VIX and Treasury yields for the regime analysis. Best effort:
+    None if Yahoo Finance is unreachable, and the tab says so."""
+    try:
+        return RG.load_market()
+    except Exception:
+        return None
+
+
+@st.cache_data(show_spinner=False, ttl=6 * 3600)
+def regime_labels(mkt: pd.DataFrame) -> Dict[str, pd.Series]:
+    return RG.build_labels(mkt)
+
+
 @st.cache_data(show_spinner=False)
 def parse_upload(content: bytes, name: str, sheet: Optional[str]) -> pd.DataFrame:
     buf = io.BytesIO(content)
@@ -1001,166 +1017,352 @@ source = st.sidebar.radio("Source", SOURCES, index=_src_idx,
 if source == "Return stream":
     st.sidebar.markdown('<div class="eyebrow">Return stream</div>',
                         unsafe_allow_html=True)
-    rfile = st.sidebar.file_uploader("Returns file",
-                                     type=["csv", "xlsx", "xls", "txt"], key="rsup")
+    rs_from = st.sidebar.radio(
+        "Returns from", ["Upload a file", "Yahoo Finance"], key="rsfrom",
+        horizontal=True,
+        help="A file of periodic returns you already have, or prices "
+             "downloaded from Yahoo Finance and turned into total returns "
+             "(dividends reinvested).")
+
+    rfile = None
     rsheet = None
-    if rfile is not None and rfile.name.lower().endswith((".xlsx", ".xls")):
-        try:
-            names = RS.sheet_names(rfile.getvalue())
-        except Exception:
-            names = []
-        if len(names) > 1:
-            rsheet = st.sidebar.selectbox(
-                "Sheet", names, key="rssheet",
-                help="The first sheet with a readable date column and "
-                     "numbers is used automatically if you don't pick one.")
+    scale = "auto"
+    day_first = None
+    yf_tickers: List[str] = []
+    yf_freq = "Daily"
+    if rs_from == "Upload a file":
+        rfile = st.sidebar.file_uploader("Returns file",
+                                         type=["csv", "xlsx", "xls", "txt"], key="rsup")
+        if rfile is not None and rfile.name.lower().endswith((".xlsx", ".xls")):
+            try:
+                names = RS.sheet_names(rfile.getvalue())
+            except Exception:
+                names = []
+            if len(names) > 1:
+                rsheet = st.sidebar.selectbox(
+                    "Sheet", names, key="rssheet",
+                    help="The first sheet with a readable date column and "
+                         "numbers is used automatically if you don't pick one.")
 
-    scale_label = st.sidebar.selectbox(
-        "Value scale", ["Detect automatically", "Decimals (0.0213)",
-                        "Percentages (2.13)"],
-        help="Only override if the automatic reading is wrong.")
-    scale = {"Detect automatically": "auto", "Decimals (0.0213)": "decimal",
-             "Percentages (2.13)": "percentage"}[scale_label]
+        scale_label = st.sidebar.selectbox(
+            "Value scale", ["Detect automatically", "Decimals (0.0213)",
+                            "Percentages (2.13)"],
+            help="Only override if the automatic reading is wrong.")
+        scale = {"Detect automatically": "auto", "Decimals (0.0213)": "decimal",
+                 "Percentages (2.13)": "percentage"}[scale_label]
 
-    order_label = st.sidebar.selectbox(
-        "Date order in file", ["Auto-detect", "Day first (31/12/2024)",
-                               "Month first (12/31/2024)"], key="rsorder",
-        help="Only matters for dates like 05/06/2020 where day and month "
-             "could both be valid. Auto-detect picks the reading that gives "
-             "the more regular spacing; if the dates below look shifted by "
-             "a month, switch this.")
-    day_first = {"Auto-detect": None, "Day first (31/12/2024)": True,
-                "Month first (12/31/2024)": False}[order_label]
+        order_label = st.sidebar.selectbox(
+            "Date order in file", ["Auto-detect", "Day first (31/12/2024)",
+                                   "Month first (12/31/2024)"], key="rsorder",
+            help="Only matters for dates like 05/06/2020 where day and month "
+                 "could both be valid. Auto-detect picks the reading that gives "
+                 "the more regular spacing; if the dates below look shifted by "
+                 "a month, switch this.")
+        day_first = {"Auto-detect": None, "Day first (31/12/2024)": True,
+                     "Month first (12/31/2024)": False}[order_label]
+    else:
+        yf_text = st.sidebar.text_input(
+            "Tickers", "SPY, QQQ, TLT, GLD", key="rsyft",
+            help="Comma-separated Yahoo Finance symbols: .TO for Toronto "
+                 "listings (XIU.TO), ^ for indices (^GSPC). Up to 10 can be "
+                 "analysed side by side.")
+        yf_tickers = list(dict.fromkeys(
+            t.strip().upper() for t in yf_text.replace(";", ",").split(",")
+            if t.strip()))
+        yf_freq = st.sidebar.selectbox(
+            "Return frequency", ["Daily", "Weekly", "Monthly"], key="rsyffreq",
+            help="Daily returns give the most detail for short stress "
+                 "episodes; monthly returns are the convention for comparing "
+                 "managers and funds.")
 
     rs_capital = st.sidebar.number_input("Base value ($)", 1_000, 1_000_000_000,
                                          100_000, 10_000, key="rscap")
 
     st.markdown(
         '<div class="masthead"><h1>Quant Backtest Studio</h1>'
-        '<div class="sub">Return stream &nbsp;\u00b7&nbsp; Statistics</div></div>',
+        '<div class="sub">Return stream &nbsp;·&nbsp; Statistics</div></div>',
         unsafe_allow_html=True)
 
-    if rfile is None:
-        note("Upload a file of periodic returns: one date column, then one "
-             "column per series. Daily, weekly, monthly or quarterly \u2014 the "
-             "frequency is inferred from the dates and drives the "
-             "annualization. Values may be decimals (0.0213) or percentages "
-             "(2.13).<br><br>Long format (date, name, return) is also "
-             "recognized. This mode analyses the track record directly: there "
-             "is no portfolio to simulate, so positions, frictions and "
-             "parameter tests do not apply.")
-        st.download_button("Monthly CSV template", RS.template("monthly"),
-                           "returns_template.csv", "text/csv")
-        st.stop()
-
-    try:
-        rs_raw, rs_meta = RS.load_return_stream(rfile.getvalue(), rfile.name,
-                                                rsheet, day_first)
-        rets, rrep = RS.prepare_returns(rs_raw, scale, rs_meta)
-    except RS.ReturnStreamError as exc:
-        st.error(str(exc))
-        st.stop()
-    except Exception as exc:
-        st.error(f"The file could not be read: {exc}")
-        st.stop()
+    if rs_from == "Upload a file":
+        if rfile is None:
+            note("Upload a file of periodic returns: one date column, then one "
+                 "column per series. Daily, weekly, monthly or quarterly — the "
+                 "frequency is inferred from the dates and drives the "
+                 "annualization. Values may be decimals (0.0213) or percentages "
+                 "(2.13).<br><br>Long format (date, name, return) is also "
+                 "recognized. Or switch the sidebar to Yahoo Finance to analyse "
+                 "listed securities directly. This mode analyses the track "
+                 "record itself: there is no portfolio to simulate, so "
+                 "positions, frictions and parameter tests do not apply.")
+            st.download_button("Monthly CSV template", RS.template("monthly"),
+                               "returns_template.csv", "text/csv")
+            st.stop()
+        try:
+            rs_raw, rs_meta = RS.load_return_stream(rfile.getvalue(), rfile.name,
+                                                    rsheet, day_first)
+            rets, rrep = RS.prepare_returns(rs_raw, scale, rs_meta)
+        except RS.ReturnStreamError as exc:
+            st.error(str(exc))
+            st.stop()
+        except Exception as exc:
+            st.error(f"The file could not be read: {exc}")
+            st.stop()
+        rs_source = rfile.name
+    else:
+        if not yf_tickers:
+            note("Enter one or more Yahoo Finance tickers in the sidebar.")
+            st.stop()
+        try:
+            with st.spinner("Downloading prices from Yahoo Finance…"):
+                yf_px = fetch_yf(tuple(yf_tickers), "1970-01-01", None, "Close")
+        except Exception as exc:
+            st.error(f"Yahoo Finance download failed: {exc}")
+            st.stop()
+        yf_missing = [t for t in yf_tickers
+                      if t not in yf_px.columns or yf_px[t].dropna().empty]
+        yf_px = yf_px[[t for t in yf_tickers if t not in yf_missing]]
+        if yf_px.empty:
+            st.error("No data came back for any of these tickers. Check the "
+                     "symbols (.TO suffix for Canada, ^ for indices).")
+            st.stop()
+        try:
+            rets, rrep = RS.prepare_returns(
+                RS.returns_from_prices(yf_px, yf_freq), "decimal", {})
+        except RS.ReturnStreamError as exc:
+            st.error(str(exc))
+            st.stop()
+        if yf_missing:
+            rrep.warnings.insert(0, "No data for " + ", ".join(yf_missing)
+                                 + ": left out.")
+        if yf_freq != "Daily":
+            rrep.warnings.append(
+                f"The latest {yf_freq.lower()[:-2]} is still in progress, so "
+                f"its return is to date only.")
+        rs_source = "Yahoo Finance: " + ", ".join(yf_px.columns)
 
     cols = list(rets.columns)
-    c1, c2 = st.columns(2)
-    main_col = c1.selectbox("Series analysed", cols)
-    bench_opts = ["\u2014 none \u2014"] + [c for c in cols if c != main_col]
-    bench_col = c2.selectbox("Compare against", bench_opts)
-    bench_col = None if bench_col.startswith("\u2014") else bench_col
-
     ppy = rrep.periods_per_year
-    # The analysis runs over the selected series' own history, not the
-    # whole file: a short-history ticker must not inherit the blank years
-    # of a longer one. The benchmark is cut to the same window.
+
+    # ------------------------------------------------------------------
+    # What to analyse, and over which dates.
+    # ------------------------------------------------------------------
+    c1, c2 = st.columns([2.2, 1])
+    _default = cols[:10] if rs_from == "Yahoo Finance" else cols[:1]
+    sel = c1.multiselect(
+        "Series analysed", cols, default=_default, max_selections=10,
+        key=f"rssel_{'|'.join(cols)}",
+        help="Up to 10 series, shown side by side. Detailed charts are drawn "
+             "for one of them at a time.")
+    bench_opts = ["— none —"] + [c for c in cols if c not in sel]
+    bench_col = c2.selectbox("Compare against", bench_opts, key="rsbench")
+    bench_col = None if bench_col.startswith("—") else bench_col
+    if not sel:
+        note("Pick at least one series to analyse.")
+        st.stop()
+
+    d_min, d_max = rets.index.min().date(), rets.index.max().date()
+    d1, d2, d3 = st.columns([1, 1, 1.2])
+    _dk = f"{d_min}_{d_max}"
+    start_d = d1.date_input("From", value=d_min, min_value=d_min,
+                            max_value=d_max, key=f"rsd0_{_dk}")
+    end_d = d2.date_input("To", value=d_max, min_value=d_min,
+                          max_value=d_max, key=f"rsd1_{_dk}")
+    with d3:
+        st.write("")
+        common = st.toggle(
+            "Common period only", value=False, key="rscommon",
+            help="Off: each series is measured over its own history inside "
+                 "the dates above. On: every series, and the benchmark, is "
+                 "cut to the dates they all share, for a like-for-like "
+                 "comparison.")
+    if start_d >= end_d:
+        st.error("The start date must be before the end date.")
+        st.stop()
+
     try:
-        rs_win = RS.analysis_window(rets, main_col, bench_col)
+        rs_win = RS.analysis_windows(rets, sel, bench_col, start_d, end_d, common)
     except RS.ReturnStreamError as exc:
         st.error(str(exc))
         st.stop()
-    r_main = rs_win["main"]
-    eq_main = RS.equity_from_returns(r_main, rs_capital)
+
+    series: Dict[str, pd.Series] = rs_win["series"]
+    names = list(series)
     r_bench = rs_win["bench"]
     if r_bench is None:
         bench_col = None
+    eqs = {n: RS.equity_from_returns(r, rs_capital) for n, r in series.items()}
+    eq_bench = RS.equity_from_returns(r_bench, rs_capital) if bench_col else None
+    stats_all = {n: M.summary(r, eqs[n], r_bench, None, None, 0.0, ppy)
+                 for n, r in series.items()}
+    bstats = (M.summary(r_bench, eq_bench, None, None, None, 0.0, ppy)
+              if bench_col else {})
+    rs_start, rs_end = rs_win["start"], rs_win["end"]
+    rs_n = max(len(r) for r in series.values())
+    everyone = dict(series)
     if bench_col:
-        # A later-starting benchmark begins at the main series' value just
-        # before its first return, so both curves share one scale.
-        _b0 = r_bench.index[0]
-        _b_base = float(eq_main.loc[_b0] / (1.0 + r_main.loc[_b0]))
-        eq_bench = RS.equity_from_returns(r_bench, _b_base)
-    else:
-        eq_bench = None
-    rs_start, rs_end, rs_n = rs_win["start"], rs_win["end"], rs_win["n_periods"]
-
-    stats = M.summary(r_main, eq_main, r_bench, None, None, 0.0, ppy)
-    bstats = M.summary(r_bench, eq_bench, None, None, None, 0.0, ppy) if bench_col else {}
+        everyone[bench_col] = r_bench
 
     a, b, c, d = st.columns(4)
     with a:
         dial("Frequency", rrep.frequency.capitalize(), f"{ppy} periods/year")
     with b:
-        dial("Observations", f"{rs_n:,}")
+        dial("Observations", f"{rs_n:,}",
+             f"{len(names)} series" if len(names) > 1 else "")
     with c:
         dial("Period", str(rs_start.date()), f"to {rs_end.date()}")
     with d:
-        dial("Scale read", rrep.scale.capitalize())
-    note(f"Dates read from \u201c{rrep.date_column}\u201d, "
-         f"{rrep.date_convention}. If the period above looks shifted by a "
-         f"month from what you expect, set \u201cDate order in file\u201d "
-         f"in the sidebar.")
-    for w in rrep.warnings:
+        if rs_from == "Yahoo Finance":
+            dial("Source", "Yahoo Finance", "total return, dividends reinvested")
+        else:
+            dial("Scale read", rrep.scale.capitalize())
+    if rs_from == "Upload a file":
+        note(f"Dates read from “{rrep.date_column}”, "
+             f"{rrep.date_convention}. If the period above looks shifted by a "
+             f"month from what you expect, set “Date order in file” "
+             f"in the sidebar.")
+    for w in rrep.warnings + rs_win["notes"]:
         st.markdown(f'<div class="flag">{w}</div>', unsafe_allow_html=True)
-    if rs_win["bench_note"]:
-        st.markdown(f'<div class="flag">{rs_win["bench_note"]}</div>',
-                    unsafe_allow_html=True)
 
-    _rb = [f'<span class="lead">{main_col}</span>',
+    _rb = [f'<span class="lead">{", ".join(map(str, names[:4]))}'
+           f'{f" +{len(names) - 4}" if len(names) > 4 else ""}</span>',
            f'<span class="item">{rs_start.date()} &rarr; {rs_end.date()}</span>',
            f'<span class="item">{rs_n:,} {rrep.frequency} periods</span>']
     if bench_col:
         _rb.append(f'<span class="item">vs <b>{bench_col}</b></span>')
-    _rc = stats.get("CAGR", float("nan"))
-    if _rc == _rc:
-        _rb.append(f'<span class="item">CAGR <b>{M.format_metric("CAGR", _rc)}</b></span>')
+    if len(names) == 1:
+        _rc = stats_all[names[0]].get("CAGR", float("nan"))
+        if _rc == _rc:
+            _rb.append(f'<span class="item">CAGR <b>{M.format_metric("CAGR", _rc)}</b></span>')
     st.markdown(f'<div class="runbar">{"".join(_rb)}</div>', unsafe_allow_html=True)
 
-    rs_tabs = st.tabs(["Results", "Robustness", "Export"])
+    # The series the single-series charts, robustness tests and exports use.
+    if len(names) > 1:
+        focus = st.selectbox(
+            "Detailed charts for", names, key="rsfocus",
+            help="Heatmap, distribution, rolling Sharpe, drawdown episodes, "
+                 "robustness tests and the tearsheet cover one series at a time.")
+    else:
+        focus = names[0]
+    r_main, eq_main, stats = series[focus], eqs[focus], stats_all[focus]
+    main_col = focus
 
+    def _pct(v):
+        return "—" if pd.isna(v) else f"{v * 100:+.2f}%"
+
+    rs_tabs = st.tabs(["Results", "Stress tests", "Market regimes",
+                       "Robustness", "Export"])
+
+    # ==================================================================
+    # Results
+    # ==================================================================
     with rs_tabs[0]:
-        keys = ["CAGR", "Volatility", "Sharpe", "Max Drawdown", "Calmar", "Sortino"]
-        kcols = st.columns(len(keys))
-        for col, k in zip(kcols, keys):
-            with col:
-                v = stats.get(k, np.nan)
-                tone = ""
-                if k in ("CAGR", "Sharpe", "Calmar", "Sortino"):
-                    tone = "pos" if (v == v and v > 0) else "neg"
-                elif k == "Max Drawdown":
-                    tone = "neg"
-                sub = ""
-                if bstats:
-                    bv = bstats.get(k, np.nan)
-                    if bv == bv:
-                        sub = f"bench. {M.format_metric(k, bv)}"
-                dial(k, M.format_metric(k, v), sub, tone)
+        if len(names) == 1:
+            keys = ["CAGR", "Volatility", "Sharpe", "Max Drawdown", "Calmar", "Sortino"]
+            kcols = st.columns(len(keys))
+            for col, k in zip(kcols, keys):
+                with col:
+                    v = stats.get(k, np.nan)
+                    tone = ""
+                    if k in ("CAGR", "Sharpe", "Calmar", "Sortino"):
+                        tone = "pos" if (v == v and v > 0) else "neg"
+                    elif k == "Max Drawdown":
+                        tone = "neg"
+                    sub = ""
+                    if bstats:
+                        bv = bstats.get(k, np.nan)
+                        if bv == bv:
+                            sub = f"bench. {M.format_metric(k, bv)}"
+                    dial(k, M.format_metric(k, v), sub, tone)
+        else:
+            eyebrow("Side by side")
+            keys = ["CAGR", "Volatility", "Sharpe", "Sortino", "Max Drawdown", "Calmar"]
+            _cmp = pd.DataFrame({
+                "Series": names + ([bench_col] if bench_col else []),
+                "From": [str(series[n].index[0].date()) for n in names]
+                        + ([str(r_bench.index[0].date())] if bench_col else []),
+                **{k: [M.format_metric(k, stats_all[n].get(k, np.nan)) for n in names]
+                      + ([M.format_metric(k, bstats.get(k, np.nan))] if bench_col else [])
+                   for k in keys}})
+            st.dataframe(_cmp, use_container_width=True, hide_index=True)
 
         st.write("")
-        curves = {main_col: eq_main}
+        curves = {n: eqs[n] for n in names}
         if bench_col:
             curves[bench_col] = eq_bench
         logs = st.toggle("Log scale", value=True, key="rslog")
-        # Rebased to 100 at the analysed series' base date. A shorter
-        # benchmark joins where its data begins rather than cutting the
-        # main curve down to the overlap.
+        # Each curve starts at 100 on its own first date. With "Common
+        # period only" on, they all start together.
         st.plotly_chart(C.equity_curve(pd.DataFrame(curves) / rs_capital * 100.0,
                                        logs),
                         use_container_width=True, config={"displaylogo": False})
         st.plotly_chart(C.underwater(curves), use_container_width=True,
                         config={"displaylogo": False})
 
+        if len(everyone) > 1:
+            eyebrow("Correlation")
+            _corr_src = pd.DataFrame(everyone).dropna()
+            if len(_corr_src) >= 12:
+                st.plotly_chart(
+                    C.correlation_matrix(
+                        _corr_src.corr(),
+                        f"Correlation of {rrep.frequency} returns "
+                        f"({_corr_src.index[0].date()} to {_corr_src.index[-1].date()})"),
+                    use_container_width=True, config={"displaylogo": False})
+                note("Measured only over the dates every series has data.")
+            else:
+                note("Too few shared dates to measure correlation.")
+
+        eyebrow("Trailing periods")
+        _tr_cols, _tr_ann = {}, {}
+        for n, eq in list(eqs.items()) + ([(bench_col, eq_bench)] if bench_col else []):
+            t = M.trailing_returns(eq, ppy)
+            if not t.empty:
+                _tr_cols[n] = t.set_index("Period")["Return"]
+                _tr_ann.update(t.set_index("Period")["Annualized"].to_dict())
+        if _tr_cols:
+            _order = [p for p, _ in M.TRAILING_PERIODS]
+            trt = pd.DataFrame(_tr_cols)
+            trt = trt.reindex([p for p in _order if p in trt.index])
+            if bench_col and len(names) == 1:
+                trt["Excess"] = trt[names[0]] - trt[bench_col]
+            trt.insert(0, "Annualized", [_tr_ann.get(p, "") for p in trt.index])
+            trt = trt.reset_index().rename(columns={"index": "Period"})
+            _rc = [c for c in trt.columns if c not in ("Period", "Annualized")]
+            st.dataframe(signed(trt.assign(**{c: trt[c].map(_pct) for c in _rc}), _rc),
+                         use_container_width=True, hide_index=True)
+            note("Periods longer than one year are annualized; shorter ones "
+                 "are cumulative. A blank means that series' history does not "
+                 "cover the whole window.")
+
+        eyebrow("Calendar years")
+        _cy = {}
+        for n, r in everyone.items():
+            t = M.calendar_years(r)
+            if not t.empty:
+                _cy[n] = t.set_index("Year")["Return"]
+        if _cy:
+            cyt = pd.DataFrame(_cy).sort_index()
+            if bench_col and len(names) == 1:
+                cyt["Excess"] = cyt[names[0]] - cyt[bench_col]
+            _rc = list(cyt.columns)
+            cyd = cyt.reset_index().rename(columns={"index": "Year"})
+            cyd["Year"] = cyd["Year"].astype(str)
+            st.dataframe(signed(cyd.assign(**{c: cyd[c].map(_pct) for c in _rc}), _rc),
+                         use_container_width=True, hide_index=True)
+            note("The first and last years are partial when a series starts "
+                 "or ends mid-year.")
+            _bars = {n: (cyt[n] * 100).tolist() for n in everyone if n in cyt.columns}
+            if len(_bars) == 1:
+                st.plotly_chart(C.bar_series([str(y) for y in cyt.index],
+                                             list(_bars.values())[0],
+                                             "Return by calendar year", "%"),
+                                use_container_width=True, config={"displaylogo": False})
+            else:
+                st.plotly_chart(C.bar_compare([str(y) for y in cyt.index], _bars,
+                                              "Return by calendar year", "%"),
+                                use_container_width=True, config={"displaylogo": False})
+
+        eyebrow(f"Detail · {focus}" if len(names) > 1 else "Detail")
         left, right = st.columns([1.15, 1])
         with left:
             st.plotly_chart(C.monthly_heatmap(r_main, ppy=ppy),
@@ -1180,40 +1382,17 @@ if source == "Return stream":
 
         eyebrow("Full statistics")
         order = list(stats.keys())
-        tbl = pd.DataFrame({"Metric": order,
-                            main_col: [M.format_metric(k, stats[k]) for k in order]})
+        tbl = pd.DataFrame({"Metric": order})
+        for n in names:
+            tbl[n] = [M.format_metric(k, stats_all[n].get(k, np.nan)) for k in order]
         if bstats:
             tbl[bench_col] = [M.format_metric(k, bstats.get(k, np.nan)) for k in order]
         st.dataframe(tbl, use_container_width=True, hide_index=True, height=560)
+        if bench_col:
+            note(f"Beta, alpha, tracking error and information ratio are "
+                 f"measured against “{bench_col}”.")
 
-        eyebrow("Trailing periods")
-        rp = M.period_table(eq_main, r_main, eq_bench, r_bench, ppy,
-                            str(main_col), str(bench_col or "Benchmark"))
-        rfmt = _fmt_period_tables(rp, str(main_col),
-                                  str(bench_col) if bench_col else None)
-        if not rfmt["trailing"].empty:
-            _rc = [c for c in rfmt["trailing"].columns
-                   if c not in ("Period", "Annualized", "From", "To")]
-            st.dataframe(signed(rfmt["trailing"], _rc, emphasise=["Excess"]),
-                         use_container_width=True, hide_index=True)
-            note("Periods longer than one year are annualized; shorter ones "
-                 "are cumulative.")
-
-        eyebrow("Calendar years")
-        if not rfmt["calendar"].empty:
-            _rc = [c for c in rfmt["calendar"].columns
-                   if c not in ("Year", "Partial")]
-            st.dataframe(signed(rfmt["calendar"], _rc, emphasise=["Excess"]),
-                         use_container_width=True, hide_index=True)
-            cyr = rp["calendar"]
-            if str(main_col) in cyr.columns:
-                st.plotly_chart(
-                    C.bar_series([str(y) for y in cyr["Year"]],
-                                 (cyr[str(main_col)] * 100).tolist(),
-                                 "Return by calendar year", "%"),
-                    use_container_width=True, config={"displaylogo": False})
-
-        eyebrow("Main drawdown episodes")
+        eyebrow(f"Main drawdown episodes · {focus}")
         dd = M.drawdown_table(eq_main, 6, ppy)
         if not dd.empty:
             dd["Drawdown"] = dd["Drawdown"].map(lambda v: f"{v*100:.2f}%")
@@ -1221,16 +1400,233 @@ if source == "Return stream":
         st.dataframe(signed(dd, ["Drawdown"]), use_container_width=True,
                      hide_index=True)
 
-        eyebrow("Period returns")
+        eyebrow(f"Period returns · {focus}")
         pr = M.monthly_returns(r_main, ppy)
         if not pr.empty:
             st.dataframe(signed((pr * 100).round(2)), use_container_width=True)
 
+    # ==================================================================
+    # Stress tests
+    # ==================================================================
     with rs_tabs[1]:
-        note("A track record is one sample. These tests ask how much of it "
-             "survives being cut up or reshuffled. Parameter and cost tests "
-             "do not apply: there is no model here to re-run, only the "
-             "realized stream.")
+        note(f"What each series' own realized returns did inside "
+             f"{len(STRESS.DEFAULT_PERIODS)} named historical episodes, from "
+             f"1987 to the 2025 tariff tantrum: crashes, bear markets, "
+             f"liquidity events, rate shocks, geopolitical events and trade "
+             f"policy shocks. For a track record this is often the most "
+             f"direct question of all: what did it actually do in 2008, in "
+             f"2020, in 2022?")
+        _rs_cats = ["All"] + STRESS.CATEGORIES
+        _rs_cat = st.selectbox("Category", _rs_cats, key="rs_stress_cat")
+        _rs_periods = (STRESS.DEFAULT_PERIODS if _rs_cat == "All"
+                       else [p for p in STRESS.DEFAULT_PERIODS if p.category == _rs_cat])
+        with st.expander("Add custom periods", expanded=False):
+            st.markdown('<div class="note">One per line: '
+                        '<code>Name, YYYY-MM-DD, YYYY-MM-DD[, Category]</code>.'
+                        '</div>', unsafe_allow_html=True)
+            _rs_custom_txt = st.text_area("Custom periods", key="rs_stress_custom",
+                                          height=70, label_visibility="collapsed")
+            _rs_periods = _rs_periods + STRESS.from_text(_rs_custom_txt)
+        _rs_periods = sorted(_rs_periods, key=lambda p: p.start)
+
+        _ev = {n: STRESS.evaluate_periods(r, _rs_periods, r_bench)
+               for n, r in series.items()}
+        _ev = {n: e for n, e in _ev.items() if not e.empty}
+        if bench_col:
+            _evb = STRESS.evaluate_periods(r_bench, _rs_periods)
+        if not _ev:
+            note("No return data to evaluate.")
+        else:
+            _first = next(iter(_ev.values()))
+            mat = _first[["Period", "Category", "Start", "End"]].copy()
+            for n, e in _ev.items():
+                mat[n] = e["Return"].values
+            if bench_col and not _evb.empty:
+                mat[bench_col] = _evb["Return"].values
+            _vals = [c for c in mat.columns if c not in ("Period", "Category", "Start", "End")]
+            mat = mat[mat[_vals].notna().any(axis=1)]
+            if mat.empty:
+                st.markdown('<div class="flag">None of these periods fall inside '
+                            'the dates analysed.</div>', unsafe_allow_html=True)
+            else:
+                # Headline per series.
+                _sum_rows = []
+                for n, e in _ev.items():
+                    s_ = STRESS.summary_stats(e)
+                    if not s_.get("n_covered"):
+                        continue
+                    row = {"Series": n,
+                           "Periods covered": f"{s_['n_covered']} / {s_['n_total']}",
+                           "Positive in": s_.get("n_positive", 0),
+                           "Median return": s_.get("median_return", np.nan),
+                           "Worst period": s_.get("worst_period") or "—",
+                           "Worst return": s_.get("worst_return", np.nan),
+                           "Deepest drawdown": s_.get("worst_drawdown", np.nan)}
+                    if "n_vs_benchmark" in s_:
+                        row["Beat benchmark in"] = (f"{s_['n_beat_benchmark']} / "
+                                                    f"{s_['n_vs_benchmark']}")
+                    _sum_rows.append(row)
+                if _sum_rows:
+                    sdf = pd.DataFrame(_sum_rows)
+                    _pc = ["Median return", "Worst return", "Deepest drawdown"]
+                    st.dataframe(signed(sdf.assign(**{c: sdf[c].map(_pct) for c in _pc}), _pc),
+                                 use_container_width=True, hide_index=True)
+
+                eyebrow("Return in each period")
+                _chart = {n: (mat[n] * 100).tolist() for n in _vals}
+                st.plotly_chart(
+                    C.bar_compare(mat["Period"], _chart, "Return during each period", "%")
+                    if len(_chart) > 1 else
+                    C.bar_series(mat["Period"], list(_chart.values())[0],
+                                 "Return during each period", "%"),
+                    use_container_width=True, config={"displaylogo": False})
+                disp = mat.copy()
+                disp["Start"] = disp["Start"].dt.date
+                disp["End"] = disp["End"].dt.date
+                st.dataframe(signed(disp.assign(**{c: disp[c].map(_pct) for c in _vals}), _vals),
+                             use_container_width=True, hide_index=True)
+                _partial = sorted({p for n, e in _ev.items()
+                                   for p in e.loc[e["Coverage"] == "Partial", "Period"]})
+                if _partial:
+                    st.markdown(
+                        f'<div class="flag">Only partly inside a series’ '
+                        f'dates, so measured over the days available: '
+                        f'{", ".join(_partial)}.</div>', unsafe_allow_html=True)
+                if not bench_col and len(names) == 1:
+                    note("No benchmark is selected, so these figures show this "
+                         "series alone. A benchmark shows whether a decline "
+                         "here was worse or better than the market's own "
+                         "decline over the same window.")
+
+                with st.expander(f"Full detail · {focus}", expanded=False):
+                    ev_f = _ev.get(focus)
+                    if ev_f is not None:
+                        fd = ev_f[ev_f["Coverage"] != "No data"].copy()
+                        fd["Start"] = fd["Start"].dt.date
+                        fd["End"] = fd["End"].dt.date
+                        _fc = ["Return", "Max Drawdown", "Best Day", "Worst Day",
+                               "Benchmark Return", "Excess vs Benchmark"]
+                        st.dataframe(signed(fd.assign(**{c: fd[c].map(_pct) for c in _fc}), _fc),
+                                     use_container_width=True, hide_index=True)
+                        _shown = set(fd["Period"])
+                        for p in _rs_periods:
+                            if p.note and p.name in _shown:
+                                note(f"<b>{p.name}</b> — {p.note}")
+
+                st.download_button(
+                    "Download stress test results (CSV)",
+                    mat.to_csv(index=False).encode("utf-8"),
+                    "stress_periods.csv", "text/csv", key="rsdlstress")
+
+    # ==================================================================
+    # Market regimes
+    # ==================================================================
+    with rs_tabs[2]:
+        note("Stress tests look at a handful of dramatic episodes. This looks "
+             "at every period in the sample, grouped by the state of the "
+             "world at the time: rising or falling rates, recession or "
+             "expansion, calm or panicked markets. Each return is assigned "
+             "the regime that prevailed over most of the period it covers.")
+        mkt = fetch_regime_market()
+        if mkt is None:
+            st.markdown('<div class="flag">The market data behind the regimes '
+                        '(S&P 500, VIX, Treasury yields from Yahoo Finance) '
+                        'could not be downloaded. Try again in a moment.</div>',
+                        unsafe_allow_html=True)
+        else:
+            labels = regime_labels(mkt)
+            _dims = [k for k in RG.DIMENSIONS if k in labels]
+            _choices = ["Overview"] + [RG.DIMENSIONS[k].title for k in _dims]
+            _pick = st.selectbox("Regime", _choices, key="rs_regime_dim")
+
+            if _pick == "Overview":
+                rows = []
+                for k in _dims:
+                    dim = RG.DIMENSIONS[k]
+                    t = RG.regime_table(everyone, labels[k], dim.order, ppy)
+                    t = t[t["Periods"] > 0]
+                    for _, r_ in t.iterrows():
+                        rows.append({"Dimension": dim.title, "Regime": r_["Regime"],
+                                     "Series": r_["Series"], "v": r_["Ann. return"]})
+                if rows:
+                    ov = (pd.DataFrame(rows)
+                          .pivot_table(index=["Dimension", "Regime"], columns="Series",
+                                       values="v", sort=False)
+                          .reindex(columns=list(everyone)))
+                    _ord = [(RG.DIMENSIONS[k].title, lab) for k in _dims
+                            for lab in RG.DIMENSIONS[k].order]
+                    ov = ov.reindex([i for i in _ord if i in ov.index]).reset_index()
+                    _vc = list(everyone)
+                    st.dataframe(heat(ov, _vc), use_container_width=True,
+                                 hide_index=True, height=min(760, 38 + 35 * len(ov)))
+                    note("Annualized return of each series while each regime "
+                         "prevailed. Pick a regime above for volatility, "
+                         "Sharpe, hit rate and how much time each state "
+                         "covers. A regime that covers only a few periods "
+                         "gives a noisy figure.")
+            else:
+                k = _dims[_choices.index(_pick) - 1]
+                dim = RG.DIMENSIONS[k]
+                note(dim.description)
+                lab = labels[k].loc[rs_start:rs_end]
+                if lab.empty:
+                    st.markdown('<div class="flag">No regime data covers the '
+                                'dates analysed.</div>', unsafe_allow_html=True)
+                else:
+                    spx = mkt["^GSPC"].dropna().loc[rs_start:rs_end].rename("S&P 500")
+                    wk = lab.resample("W-FRI").last().dropna()
+                    st.plotly_chart(
+                        C.regime_timeline(spx, RG.segments(wk), dim.order,
+                                          f"S&P 500 through each regime"),
+                        use_container_width=True, config={"displaylogo": False})
+                    rt = RG.regime_table(everyone, labels[k], dim.order, ppy,
+                                         r_bench if bench_col else None)
+                    rt = rt[rt["Periods"] > 0]
+                    if rt.empty:
+                        note("No returns fall inside these regimes.")
+                    else:
+                        _ann = rt.set_index(["Series", "Regime"])["Ann. return"] * 100
+                        _bars = {n: [_ann.get((n, g), np.nan) for g in dim.order]
+                                 for n in everyone}
+                        st.plotly_chart(
+                            C.bar_compare(dim.order, _bars,
+                                          "Annualized return in each regime", "%")
+                            if len(_bars) > 1 else
+                            C.bar_series(dim.order, list(_bars.values())[0],
+                                         "Annualized return in each regime", "%"),
+                            use_container_width=True, config={"displaylogo": False})
+                        disp = rt.copy()
+                        _pc = [c for c in ["Ann. return", "Ann. volatility", "Worst period",
+                                           "Benchmark ann. return", "Excess ann. return"]
+                               if c in disp.columns]
+                        for c_ in _pc:
+                            disp[c_] = disp[c_].map(_pct)
+                        disp["% of time"] = disp["% of time"].map(
+                            lambda v: "—" if pd.isna(v) else f"{v*100:.0f}%")
+                        disp["Hit rate"] = disp["Hit rate"].map(
+                            lambda v: "—" if pd.isna(v) else f"{v*100:.0f}%")
+                        disp["Sharpe"] = disp["Sharpe"].map(
+                            lambda v: "—" if pd.isna(v) else f"{v:.2f}")
+                        st.dataframe(signed(disp, [c for c in _pc if c != "Ann. volatility"]),
+                                     use_container_width=True, hide_index=True)
+                        note("% of time is the share of each series' own "
+                             "periods spent in that regime. Hit rate is the "
+                             "share of periods with a positive return. Sharpe "
+                             "assumes a zero risk-free rate."
+                             + (" Excess compares against the benchmark over "
+                                "the same periods." if bench_col else ""))
+            note("Regime inputs: S&P 500, VIX, 3-month T-bill and 10-year "
+                 "Treasury yields from Yahoo Finance; recessions from the NBER "
+                 "business-cycle chronology.")
+
+    # ==================================================================
+    # Robustness
+    # ==================================================================
+    with rs_tabs[3]:
+        note(f"A track record is one sample. These tests ask how much of "
+             f"“{focus}” survives being cut up or reshuffled. "
+             f"Parameter and cost tests do not apply: there is no model here "
+             f"to re-run, only the realized stream.")
         eyebrow("Stability over sub-periods")
         nf = st.slider("Number of folds", 3, 10, 5, key="rsfold")
         wf = R.fold_stats(r_main, nf, ppy)
@@ -1249,10 +1645,11 @@ if source == "Return stream":
         nsim = s1.slider("Simulations", 100, 2000, 500, 100, key="rsmc")
         blk = s2.slider("Block size (periods)", 2, max(3, min(63, len(r_main) // 8)),
                         min(21, max(3, len(r_main) // 20)), 1, key="rsblk")
+        _mc_key = f"rsmc_res_{focus}_{rs_start.date()}_{rs_end.date()}"
         if st.button("Run Monte Carlo simulation", key="rsmcbtn"):
-            st.session_state["rsmc_res"] = R.monte_carlo(r_main, nsim, blk, ppy)
-        if "rsmc_res" in st.session_state:
-            mc = st.session_state["rsmc_res"]
+            st.session_state[_mc_key] = R.monte_carlo(r_main, nsim, blk, ppy)
+        if _mc_key in st.session_state:
+            mc = st.session_state[_mc_key]
             if not mc["paths"].empty:
                 st.plotly_chart(C.monte_carlo_fan(mc["paths"], eq_main),
                                 use_container_width=True, config={"displaylogo": False})
@@ -1272,113 +1669,13 @@ if source == "Return stream":
             else:
                 note("Not enough observations to resample meaningfully.")
 
-        eyebrow("Stress test periods")
-        note("What this series' own realized returns did inside sixteen "
-             "specific historical episodes -- 1987 through the 2024 yen "
-             "carry-trade unwind. For an imported track record this is "
-             "often the most direct question of all: what did it actually "
-             "do in 2008, in 2020, in 2022?")
-
-        _rs_cats = ["All"] + STRESS.CATEGORIES
-        _rs_cat = st.selectbox("Category", _rs_cats, key="rs_stress_cat")
-        _rs_periods = (STRESS.DEFAULT_PERIODS if _rs_cat == "All"
-                      else [p for p in STRESS.DEFAULT_PERIODS if p.category == _rs_cat])
-        with st.expander("Add custom periods", expanded=False):
-            st.markdown('<div class="note">One per line: '
-                        '<code>Name, YYYY-MM-DD, YYYY-MM-DD[, Category]</code>.'
-                        '</div>', unsafe_allow_html=True)
-            _rs_custom_txt = st.text_area("Custom periods", key="rs_stress_custom",
-                                          height=70, label_visibility="collapsed")
-            _rs_periods = _rs_periods + STRESS.from_text(_rs_custom_txt)
-
-        rs_ev = STRESS.evaluate_periods(
-            r_main, _rs_periods, r_bench if bench_col else None)
-        if rs_ev.empty:
-            note("No return data to evaluate.")
-        else:
-            rs_summ = STRESS.summary_stats(rs_ev)
-            n_cov = rs_summ.get("n_covered", 0)
-            if n_cov == 0:
-                st.markdown(
-                    '<div class="flag">None of these periods fall inside '
-                    'this series\u2019 date range.</div>', unsafe_allow_html=True)
-            else:
-                rs_has_bench = "n_vs_benchmark" in rs_summ
-                rc1, rc2, rc3, rc4, *rc5 = st.columns(5 if rs_has_bench else 4)
-                with rc1:
-                    dial("Periods covered", f"{n_cov} / {rs_summ['n_total']}")
-                with rc2:
-                    dial("Positive in", f"{rs_summ.get('n_positive', 0)} / {n_cov}")
-                with rc3:
-                    wp = rs_summ.get("worst_period") or "\u2014"
-                    dial("Worst period", f"{rs_summ.get('worst_return', float('nan'))*100:+.1f}%",
-                        wp if len(wp) <= 28 else wp[:26] + "\u2026")
-                with rc4:
-                    dial("Deepest drawdown", f"{rs_summ.get('worst_drawdown', float('nan'))*100:.1f}%")
-                if rs_has_bench:
-                    with rc5[0]:
-                        dial("Beat benchmark in",
-                            f"{rs_summ['n_beat_benchmark']} / {rs_summ['n_vs_benchmark']}",
-                            f"median excess {rs_summ['median_excess']*100:+.1f}%")
-                elif not bench_col:
-                    note("No benchmark column is selected, so these figures "
-                         "show this series alone. A benchmark shows whether "
-                         "a decline here was worse or better than the "
-                         "market's own decline over the same window, which "
-                         "a single number cannot.")
-
-                partial_n = int((rs_ev["Coverage"] == "Partial").sum())
-                no_data_n = int((rs_ev["Coverage"] == "No data").sum())
-                if partial_n:
-                    st.markdown(
-                        f'<div class="flag">{partial_n} period(s) are only '
-                        f'partly inside this series\u2019 date range -- those '
-                        f'figures cover only the days actually available.'
-                        f'</div>', unsafe_allow_html=True)
-                if no_data_n:
-                    note(f"{no_data_n} period(s) fall entirely outside this "
-                         f"series' date range and are omitted below.")
-
-                rs_shown = rs_ev[rs_ev["Coverage"] != "No data"].copy()
-                if not rs_shown.empty:
-                    rs_order = rs_shown.sort_values("Start")["Period"]
-                    rs_ordered = rs_shown.set_index("Period").loc[rs_order]
-                    if rs_has_bench and rs_ordered["Benchmark Return"].notna().any():
-                        st.plotly_chart(
-                            C.bar_compare(
-                                rs_order,
-                                {str(main_col): (rs_ordered["Return"] * 100).tolist(),
-                                 str(bench_col or "Benchmark"):
-                                     (rs_ordered["Benchmark Return"] * 100).tolist()},
-                                "Return during each period", "%"),
-                            use_container_width=True, config={"displaylogo": False})
-                        note("Excess return is the gap between the two bars, "
-                             "not a substitute for seeing both.")
-                    else:
-                        st.plotly_chart(
-                            C.bar_series(rs_order, (rs_ordered["Return"] * 100).tolist(),
-                                        "Return during each period", "%"),
-                            use_container_width=True, config={"displaylogo": False})
-
-                rs_disp = rs_ev.copy()
-                rs_disp["Start"] = rs_disp["Start"].dt.date
-                rs_disp["End"] = rs_disp["End"].dt.date
-                for c in ("Return", "Max Drawdown", "Best Day", "Worst Day",
-                         "Benchmark Return", "Excess vs Benchmark"):
-                    rs_disp[c] = rs_disp[c].map(
-                        lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
-                st.dataframe(signed(rs_disp, ["Return", "Max Drawdown", "Best Day",
-                                             "Worst Day", "Benchmark Return",
-                                             "Excess vs Benchmark"]),
-                            use_container_width=True, hide_index=True)
-                st.download_button(
-                    "Download stress test results (CSV)",
-                    rs_ev.to_csv(index=False).encode("utf-8"),
-                    "stress_periods.csv", "text/csv", key="rsdlstress")
-
-    with rs_tabs[2]:
-        note("Exports reproduce the statistics shown above for the selected "
-             "series.")
+    # ==================================================================
+    # Export
+    # ==================================================================
+    with rs_tabs[4]:
+        note(f"The tearsheet and the Excel report cover “{focus}”"
+             f"{f' against {bench_col}' if bench_col else ''}. The CSV files "
+             f"cover every series analysed.")
         rs_cfg = RunConfig(label=str(main_col),
                            engine=EngineConfig(initial_capital=float(rs_capital),
                                                periods_per_year=ppy))
@@ -1389,15 +1686,17 @@ if source == "Return stream":
         st.download_button("Download tearsheet report (HTML)", ts.encode("utf-8"),
                            f"tearsheet_{main_col}.html", "text/html", key="rsts")
 
-        out = pd.DataFrame({"return": r_main, "value": eq_main})
-        if bench_col:
-            out["benchmark_return"] = r_bench
-            out["benchmark_value"] = eq_bench
+        out = pd.DataFrame(everyone)
+        out.index.name = "Date"
+        vals = pd.DataFrame({f"{n} value": RS.equity_from_returns(r, rs_capital)
+                             for n, r in everyone.items()})
+        out = out.join(vals)
         e1, e2, e3 = st.columns(3)
         e1.download_button("Series (CSV)", out.to_csv().encode("utf-8"),
-                           "return_stream.csv", "text/csv", key="rscsv")
-        stat_df = pd.DataFrame({"Metric": list(stats.keys()),
-                                main_col: list(stats.values())})
+                           "return_streams.csv", "text/csv", key="rscsv")
+        stat_df = pd.DataFrame({"Metric": list(stats.keys())})
+        for n in names:
+            stat_df[n] = [stats_all[n].get(k, np.nan) for k in stats]
         if bstats:
             stat_df[bench_col] = [bstats.get(k, np.nan) for k in stats]
         e2.download_button("Statistics (CSV)", stat_df.to_csv(index=False).encode("utf-8"),
@@ -1406,9 +1705,10 @@ if source == "Return stream":
             rbook = XL.workbook_from_returns(
                 r_main, eq_main, stats, r_bench, eq_bench, bstats or None,
                 ppy, str(main_col), str(bench_col or "Benchmark"),
-                all_series=rets,
+                all_series=pd.DataFrame(everyone),
                 report_notes={"Scale read": rrep.scale,
-                              "Source file": rfile.name})
+                              "Source": rs_source,
+                              "Period": f"{rs_start.date()} to {rs_end.date()}"})
             e3.download_button("Full report (Excel)", rbook,
                                f"return_stream_{main_col}.xlsx",
                                "application/vnd.openxmlformats-officedocument."
@@ -1418,8 +1718,8 @@ if source == "Return stream":
                         unsafe_allow_html=True)
         note("The workbook carries every table behind this report: "
              "statistics, trailing periods, calendar years, drawdown "
-             "episodes, monthly returns, the full series, and every column "
-             "from the uploaded file \u2014 plus a Notes sheet recording the "
+             "episodes, monthly returns, the full series, and every series "
+             "analysed — plus a Notes sheet recording the source, "
              "frequency and scale that were read.")
     st.stop()
 
