@@ -232,9 +232,14 @@ def risk_return_points(prices: pd.DataFrame, ppy: int = 252) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def correlation_pairs(prices: pd.DataFrame, top: int = 10) -> Dict[str, pd.DataFrame]:
-    """The most and least correlated pairs in the watchlist."""
-    corr = prices.pct_change().corr()
+def correlation_pairs(prices: pd.DataFrame, top: int = 10,
+                      returns: Optional[pd.DataFrame] = None) -> Dict[str, pd.DataFrame]:
+    """The most and least correlated pairs in the watchlist.
+
+    `returns` overrides the default daily returns, e.g. with weekly or
+    monthly ones, so the pairs match the matrix shown next to them.
+    """
+    corr = (returns if returns is not None else prices.pct_change()).corr()
     if corr.empty or len(corr) < 2:
         return {"highest": pd.DataFrame(), "lowest": pd.DataFrame()}
     pairs = []

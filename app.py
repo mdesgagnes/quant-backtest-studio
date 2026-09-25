@@ -852,9 +852,34 @@ if workspace == "Markets":
                  "itself rose.")
 
         eyebrow("Correlation")
-        st.plotly_chart(C.correlation_matrix(prices.pct_change().corr()),
-                        use_container_width=True, config={"displaylogo": False})
-        pairs = MON.correlation_pairs(prices, 8)
+        _mcf = st.radio(
+            "Correlation of", ["Daily returns", "Weekly returns", "Monthly returns"],
+            index=2, horizontal=True, key="mkcorrfreq",
+            help="Daily correlations are biased toward zero when a security "
+                 "trades thinly (stale prices show as 0% days) or on a "
+                 "different clock (Canada or Asia against the US). "
+                 "Compounding to weekly or monthly returns lets the delayed "
+                 "moves catch up.").split()[0]
+        # Each instrument on its own calendar, so a holiday on one exchange
+        # never erases a day's return on another.
+        _mret = RS.returns_from_prices(prices, _mcf)
+        _mret.columns = list(prices.columns)
+        _mcorr = _mret.corr(min_periods=12)
+        _mn = int(_mret.dropna().shape[0])
+        st.plotly_chart(
+            C.correlation_matrix(
+                _mcorr, f"Correlation of {_mcf.lower()} returns"
+                        f"{f', {_mn:,} shared observations' if _mn else ''}"),
+            use_container_width=True, config={"displaylogo": False})
+        if _mn < 36:
+            note(f"Only {_mn} {_mcf.lower()} observations are shared by every "
+                 f"instrument, so these correlations are imprecise. Widen the "
+                 f"date range or use a finer frequency.")
+        else:
+            note("Each pair uses every date both instruments have data. A "
+                 "blank cell has fewer than 12 shared observations. Rolling "
+                 "correlation and beta below stay on daily returns.")
+        pairs = MON.correlation_pairs(prices, 8, returns=_mret)
 
         def _label_pair(p: str) -> str:
             a, _, b = p.partition(" / ")
