@@ -144,6 +144,11 @@ def workbook_from_backtest(res: BacktestResult,
         _write(xw, mr, "Monthly Returns", index=True)
         _write(xw, series, "Daily Series", index=True)
         _write(xw, holdings, "Current Holdings")
+        if res.contributions is not None:
+            from . import attribution as ATTR
+            _write(xw, ATTR.summary(res, None, ppy), "Contribution")
+            _write(xw, ATTR.by_period(res, "Year"), "Contribution by Year", index=True)
+            _write(xw, res.contributions, "Daily Contributions", index=True)
         _write(xw, res.weights, "Holdings History", index=True)
         _write(xw, res.target_weights, "Target Weights", index=True)
         _write(xw, res.trades, "Trades")

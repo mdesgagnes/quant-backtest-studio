@@ -45,6 +45,12 @@ from .schedule import RebalanceSpec, build_calendar
 _RESAMPLE = {"D": None, "W": "W-FRI", "M": "ME", "Q": "QE", "A": "YE"}
 
 
+# Non-instrument lines of the contribution ledger.
+CASH_LINE = "Cash & financing"
+COST_LINE = "Trading costs"
+FEE_LINE = "Management fee"
+
+
 @dataclass
 class BacktestResult:
     equity: pd.Series             # portfolio value
@@ -63,6 +69,11 @@ class BacktestResult:
     warmup_start: Optional[pd.Timestamp] = None   # first day actually invested
     shares: Optional[pd.DataFrame] = None         # units held, the real state
     fees: Optional[pd.Series] = None              # management fee, as a fraction
+    # Daily contribution to the net return, as a fraction of the previous
+    # day's value: one column per instrument (price move plus dividends),
+    # then cash and financing, trading costs and the management fee. Each
+    # row sums to that day's net return exactly.
+    contributions: Optional[pd.DataFrame] = None
 
     @property
     def nav(self) -> pd.Series:
@@ -100,7 +111,11 @@ def _cash_returns(index: pd.DatetimeIndex, cash_prices: Optional[pd.Series],
                   rate_pa: float, ppy: int) -> pd.Series:
     if cash_prices is not None and len(cash_prices.dropna()) > 1:
         return cash_prices.reindex(index).ffill().pct_change().fillna(0.0)
-    return pd.Series(rate_pa / ppy, index=index)
+    # The daily rate that compounds to the stated annual rate. Dividing by
+    # the number of periods instead (3% / 252 per day) compounds to 3.045%
+    # a year, so the cash leg would quietly earn more than the rate typed.
+    daily = (1.0 + float(rate_pa)) ** (1.0 / max(1, int(ppy))) - 1.0 if rate_pa > -1 else 0.0
+    return pd.Series(daily, index=index)
 
 
 # ----------------------------------------------------------------------
@@ -259,6 +274,10 @@ def run_backtest(prices: pd.DataFrame,
     turn = np.zeros(n); cost_arr = np.zeros(n); div_arr = np.zeros(n)
     fee_arr = np.zeros(n)
     W = np.zeros((n, m)); cash_w = np.zeros(n); SH = np.zeros((n, m))
+    # Contribution ledger, in currency: instruments, then cash & financing,
+    # trading costs, management fee. Built from the same marks and share
+    # counts as the book itself, so it reconciles to the NAV by construction.
+    PNL = np.zeros((n, m + 3))
 
     shares = np.zeros(m)              # units held, the actual state
     cash = float(engine.initial_capital)
@@ -360,17 +379,23 @@ def run_backtest(prices: pd.DataFrame,
         cost_i = 0.0
         div_i = 0.0
         fee_i = 0.0
+        shares_open = shares.copy()        # units carried into the day
+        cash_pnl = 0.0
+        div_vec = np.zeros(m)
 
         if i > 0:
             # 1) Cash earns overnight; leverage is charged for.
+            cash_pnl = cash * Rc[i]
             cash *= (1.0 + Rc[i])
             gross_prev = float(np.abs(shares * np.nan_to_num(close_px[i - 1])).sum())
             lev = max(0.0, gross_prev - prev_value)
             cash -= lev * borrow_daily
+            cash_pnl -= lev * borrow_daily
 
             # 2) Dividends go ex at the open, on the units held into the day.
             if div_ps[i].any():
-                div_i = float((shares * div_ps[i]).sum())
+                div_vec = shares * div_ps[i]
+                div_i = float(div_vec.sum())
                 cash += div_i
 
         # 3) Trade. At the open the book is valued at open prices first, so
@@ -385,6 +410,22 @@ def run_backtest(prices: pd.DataFrame,
         # 4) Mark to the close.
         mark = np.where(_valid(close_px[i]), close_px[i], 0.0)
         value = float((shares * mark).sum()) + cash
+
+        # Price P&L per instrument. Trading at the open splits the day:
+        # the overnight move on the units carried in, the intraday move on
+        # the units held after the trade. Trading at the close earns the
+        # whole day on the units carried in. A trade itself swaps cash for
+        # units at the fill price, so only its cost touches the P&L.
+        if i > 0:
+            mark_prev = np.where(_valid(close_px[i - 1]), close_px[i - 1], 0.0)
+            if can_trade and trade_at_open:
+                mark_open = np.where(_valid(exec_px[i]), exec_px[i], 0.0)
+                price_pnl = (shares_open * (mark_open - mark_prev)
+                             + shares * (mark - mark_open))
+            else:
+                price_pnl = shares_open * (mark - mark_prev)
+            PNL[i, :m] = price_pnl + div_vec
+            PNL[i, m] = cash_pnl
 
         if can_trade and not trade_at_open:
             cost_i, tr = _execute(i, date, close_px[i], value)
@@ -461,6 +502,9 @@ def run_backtest(prices: pd.DataFrame,
                 value = float((shares * mark).sum()) + cash
 
         nav[i] = value
+        if i > 0:
+            PNL[i, m + 1] = -(cost_i + liq_cost)
+            PNL[i, m + 2] = -fee_i
         r_port = (value / prev_value - 1.0) if (i > 0 and prev_value > 0) else 0.0
         net_r[i] = r_port
         gross_r[i] = ((value + cost_i + liq_cost + fee_i) / prev_value - 1.0) if (i > 0 and prev_value > 0) else 0.0
@@ -484,6 +528,13 @@ def run_backtest(prices: pd.DataFrame,
     exposure = weights.abs().sum(axis=1)
     active = exposure[exposure > 1e-9]
 
+    prev_nav = np.concatenate([[float(engine.initial_capital)], nav[:-1]])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        contrib = np.where(prev_nav[:, None] > 0, PNL / prev_nav[:, None], 0.0)
+    contributions = pd.DataFrame(
+        contrib, index=idx,
+        columns=assets + [CASH_LINE, COST_LINE, FEE_LINE])
+
     return BacktestResult(
         equity=pd.Series(nav, index=idx, name=label),
         returns=pd.Series(net_r, index=idx, name=label),
@@ -501,6 +552,7 @@ def run_backtest(prices: pd.DataFrame,
         warmup_start=active.index[0] if len(active) else None,
         shares=pd.DataFrame(SH, index=idx, columns=assets),
         fees=pd.Series(fee_arr, index=idx),
+        contributions=contributions,
     )
 
 
@@ -568,7 +620,19 @@ def trim_warmup(res: BacktestResult, start: Optional[pd.Timestamp] = None,
         # above; both are carried through exactly like every other field.
         shares=(res.shares.loc[keep] if res.shares is not None else None),
         fees=(res.fees.loc[keep] if res.fees is not None else None),
+        contributions=_trim_contrib(res.contributions, keep),
     )
+
+
+def _trim_contrib(c: Optional[pd.DataFrame],
+                  keep: pd.DatetimeIndex) -> Optional[pd.DataFrame]:
+    """Contributions from the new origin on. Its first row is zeroed, as
+    the first retained return is: that day is the base, not a result."""
+    if c is None:
+        return None
+    out = c.loc[keep].copy()
+    out.iloc[0] = 0.0
+    return out
 
 
 def align_start(*results: Optional[BacktestResult],

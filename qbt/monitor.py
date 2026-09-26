@@ -113,7 +113,7 @@ def risk_grid(prices: pd.DataFrame, ppy: int = 252,
             "Sharpe": M.sharpe(r, ppy=ppy),
             "Sortino": M.sortino(r, ppy=ppy),
             "Skew": float(r.skew()),
-            "Kurtosis": float(r.kurtosis()),
+            "Excess Kurtosis": float(r.kurtosis()),
             "% Positive Days": float((r > 0).mean()),
         })
     return pd.DataFrame(rows)

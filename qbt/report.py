@@ -262,7 +262,7 @@ def render_tearsheet(res: BacktestResult,
             f"Rebalance: {REBALANCE_RULES.get(cfg.engine.rebalance, cfg.engine.rebalance)} &middot; "
             f"Execution lag: {cfg.engine.execution_lag} session(s) &middot; "
             f"Execution price: {'open, marked at close' if cfg.engine.execute_at_open else 'close'} &middot; "
-            f"Costs: {cfg.costs.commission_bps + cfg.costs.slippage_bps:.0f} bps round-trip &middot; "
+            f"Costs: {cfg.costs.commission_bps + cfg.costs.slippage_bps:.0f} bps per trade &middot; "
             f"Dividends: {'credited as cash' if cfg.data.use_dividends else 'inside adjusted prices'} &middot; "
             f"Initial capital: {currency}{cfg.engine.initial_capital:,.0f} &middot; "
             f"Max leverage: {cfg.engine.max_leverage:.2f}x"

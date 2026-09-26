@@ -30,6 +30,7 @@ from qbt import metrics as M
 from qbt import charts as C
 from qbt import robustness as R
 from qbt import stress as STRESS
+from qbt import attribution as ATTR
 from qbt import regimes as RG
 from qbt import tax as TAX
 from qbt import full_report as FULLREPORT
@@ -804,7 +805,7 @@ if workspace == "Markets":
             if c in disp:
                 disp[c] = disp[c].map(
                     lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
-        for c in ("Sharpe", "Sortino", "Skew", "Kurtosis"):
+        for c in ("Sharpe", "Sortino", "Skew", "Excess Kurtosis"):
             if c in disp:
                 disp[c] = disp[c].map(
                     lambda v: "\u2014" if pd.isna(v) else f"{v:.2f}")
@@ -2741,7 +2742,13 @@ if run_clicked and not blocking:
             "cash_series": cash_series,
             "volume": vol_px,
             "dividends": div_px,
+            "open": open_px,
             "construction": construction,
+            # Asset class per instrument, for the Attribution tab: the
+            # sleeve assignment when the run was built by asset class,
+            # otherwise the preset's own tags.
+            "classes": (dict(class_map) if class_map else PRESETS.classes_for(
+                st.session_state.get("_preset_applied", ""), list(universe.columns))),
             "market": market,
             "bench_mode": bench_mode,
             "raw_start": raw_start,
@@ -2829,8 +2836,8 @@ if run.get("trimmed"):
     _bits.append('<span class="item">warm-up trimmed</span>')
 st.markdown(f'<div class="runbar">{"".join(_bits)}</div>', unsafe_allow_html=True)
 
-tabs = st.tabs(["Results", "Signals", "Positions", "Tax", "Robustness",
-                "Data", "Builder", "Export"])
+tabs = st.tabs(["Results", "Signals", "Positions", "Attribution", "Tax",
+                "Robustness", "Data", "Builder", "Export"])
 
 # --------------------------- RESULTS -----------------------------------
 with tabs[0]:
@@ -3115,7 +3122,7 @@ with tabs[2]:
     with c3:
         drag = float(res.costs.sum())
         dial("Cumulative friction cost", f"{drag*100:,.2f}%",
-             "compounded as a percentage of value", "neg")
+             "each day's cost as % of value, summed", "neg")
 
     if res.fees is not None and float(res.fees.sum()) > 0:
         eyebrow("Management fee")
@@ -3129,9 +3136,11 @@ with tabs[2]:
                  f"headline rate {rcfg.costs.management_fee_pa*100:.2f}%")
         with g3:
             dial("Charges", f"{int(res.fees.gt(0).sum()):,}", "monthly deductions")
-        note("Accrued daily, deducted at each month-end. The realized drag "
-             "runs slightly above the headline rate because the fee "
-             "compounds against a growing balance.")
+        note("Accrued daily on the value, deducted at each month-end. The "
+             "average per year can differ slightly from the headline rate: "
+             "each deduction is measured against the value on the day it is "
+             "taken, which is not the average value it accrued on, and a "
+             "partial first or last year is annualized.")
 
     if res.dividend_income is not None and float(res.dividend_income.sum()) > 0:
         eyebrow("Dividends")
@@ -3210,8 +3219,157 @@ with tabs[2]:
                            res.trades.to_csv(index=False).encode("utf-8"),
                            "trades.csv", "text/csv")
 
-# --------------------------- TAX ------------------------------------------
+# --------------------------- ATTRIBUTION -------------------------------
 with tabs[3]:
+    if res.contributions is None:
+        note("Run the backtest again to see return contribution: this "
+             "result was produced before the engine recorded it.")
+    else:
+        note("Where the return came from. Each instrument's contribution is "
+             "its price move plus dividends on the units actually held, day "
+             "by day; cash interest and borrowing, trading costs and the "
+             "management fee are shown as their own lines. Days are linked "
+             "in currency, so the contributions add up to the portfolio's "
+             "return exactly, for the whole backtest and for every period.")
+        _assets = list(res.weights.columns)
+        a1, a2 = st.columns([1.2, 1])
+        _view = a1.radio("Group by", ["Security", "Asset class"], horizontal=True,
+                         key="attr_view")
+        _period = a2.selectbox("Period table by", ["Year", "Quarter", "Month"],
+                               key="attr_period")
+
+        _groups: Optional[Dict[str, str]] = None
+        if _view == "Asset class":
+            _cls0 = dict(run.get("classes") or {})
+            _unc = [a for a in _assets if _cls0.get(a, "Unclassified") == "Unclassified"]
+            with st.expander("Asset class of each instrument", expanded=bool(_unc)):
+                if _unc:
+                    note(f"{len(_unc)} instrument(s) have no asset class yet. "
+                         f"Assign them here; this only changes the grouping "
+                         f"below, not the backtest.")
+                _ed = st.data_editor(
+                    pd.DataFrame({"Instrument": _assets,
+                                  "Name": [N.label(a) for a in _assets],
+                                  "Asset class": [_cls0.get(a, "Unclassified")
+                                                  for a in _assets]}),
+                    column_config={"Asset class": st.column_config.SelectboxColumn(
+                        options=ALLOC.DEFAULT_CLASSES + ["Unclassified"], required=True)},
+                    disabled=["Instrument", "Name"], hide_index=True,
+                    use_container_width=True, key="attr_cls_editor")
+            _groups = dict(zip(_ed["Instrument"], _ed["Asset class"]))
+        elif len(_assets) > 12:
+            # Thirty lines on one chart is unreadable: the ten largest
+            # contributors by size keep their own line, the rest are pooled.
+            _tot = ATTR.cumulative(res).iloc[-1][_assets].abs()
+            _top = set(_tot.sort_values(ascending=False).index[:10])
+            _groups = {a: (a if a in _top else "Other holdings") for a in _assets}
+            note(f"The ten largest contributors are shown individually; the "
+                 f"other {len(_assets) - 10} are pooled as “Other holdings”.")
+
+        _summ = ATTR.summary(res, _groups, ppy)
+        _total = ATTR.total_return(res)
+        _check = float(_summ["Contribution"].sum())
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            dial("Total return", f"{_total * 100:+.2f}%",
+                 f"contributions add up to {_check * 100:+.2f}%",
+                 "pos" if _total > 0 else "neg")
+        _inst = _summ[~_summ["Name"].isin(ATTR.NON_ASSET_LINES)]
+        if len(_inst) >= 2:
+            _best = _inst.loc[_inst["Contribution"].idxmax()]
+            _worst = _inst.loc[_inst["Contribution"].idxmin()]
+            _nm = lambda a: a
+            with k2:
+                dial("Largest contributor", str(_nm(_best["Name"])),
+                     f"{_best['Contribution'] * 100:+.2f}%",
+                     "pos" if _best["Contribution"] > 0 else "neg")
+            with k3:
+                _neg = _worst["Contribution"] < 0
+                dial("Largest detractor" if _neg else "Smallest contributor",
+                     str(_nm(_worst["Name"])),
+                     f"{_worst['Contribution'] * 100:+.2f}%", "neg" if _neg else "")
+
+        eyebrow("Cumulative contribution")
+        _cum = ATTR.cumulative(res, _groups)
+        _cum = _cum.loc[:, (_cum.abs() > 1e-12).any()]
+        _cum_plot = _cum.copy()
+        _cum_plot["Portfolio"] = _cum.sum(axis=1)
+        if _view == "Security":
+            _cum_plot = _cum_plot.rename(columns={a: N.label(a) for a in _assets
+                                                  if a in _cum_plot.columns})
+        st.plotly_chart(C.multi_line(_cum_plot * 100,
+                                     "Running contribution, % of starting capital",
+                                     "%", ref=0.0),
+                        use_container_width=True, config={"displaylogo": False})
+        note("Each line is what that holding has added to the portfolio since "
+             "the start, in percent of starting capital. The lines add up to "
+             "the Portfolio line on every date.")
+
+        eyebrow("Contribution and risk")
+        _disp = _summ.copy()
+        _disp = _disp.loc[_disp["Contribution"].abs().sort_values(ascending=False).index]
+        _short = _disp["Name"].tolist()          # tickers: short enough for an axis
+        if _view == "Security":
+            _disp["Name"] = _disp["Name"].map(lambda a: N.label(a) if a in _assets else a)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.plotly_chart(C.bar_series(_short, (_disp["Contribution"] * 100).tolist(),
+                                         "Contribution to total return", "%"),
+                            use_container_width=True, config={"displaylogo": False})
+        with c2:
+            _rk_mask = _disp["Share of risk"].notna().tolist()
+            _rk = _disp[_disp["Share of risk"].notna()]
+            st.plotly_chart(C.bar_series([n for n, k in zip(_short, _rk_mask) if k],
+                                         (_rk["Share of risk"] * 100).tolist(),
+                                         "Share of portfolio risk", "%"),
+                            use_container_width=True, config={"displaylogo": False})
+        _fmt = _disp.copy()
+        for c_ in ["Average weight", "Time held"]:
+            _fmt[c_] = _fmt[c_].map(lambda v: "—" if pd.isna(v) else f"{v * 100:.1f}%")
+        for c_ in ["Contribution", "Share of result", "Share of risk"]:
+            _fmt[c_] = _fmt[c_].map(lambda v: "—" if pd.isna(v) else f"{v * 100:+.2f}%")
+        st.dataframe(signed(_fmt, ["Contribution", "Share of result"]),
+                     use_container_width=True, hide_index=True)
+        note("Contribution is in percent of starting capital. Share of result "
+             "divides it by the total return, so it can exceed 100% when "
+             "other lines detracted. Share of risk is each line's share of "
+             "the variance of daily returns; the shares add up to 100%, and "
+             "a negative share means the holding reduced the portfolio's "
+             "volatility. Weights are end-of-day averages over the whole "
+             "backtest, including days at zero.")
+
+        eyebrow(f"Contribution by {_period.lower()}")
+        _bp = ATTR.by_period(res, _period, _groups)
+        _bp = _bp.loc[:, [(c == "Total") or bool((_bp[c].abs() > 1e-12).any())
+                          for c in _bp.columns]]
+        if _view == "Security":
+            _bp = _bp.rename(columns={a: N.label(a) for a in _assets if a in _bp.columns})
+        _lbl = {"Year": lambda d: str(d.year),
+                "Quarter": lambda d: f"{d.year} Q{d.quarter}",
+                "Month": lambda d: d.strftime("%Y-%m")}[_period]
+        _bpd = _bp.copy()
+        _bpd.index = [_lbl(d) for d in _bpd.index]
+        _bpd = _bpd.iloc[::-1].reset_index().rename(columns={"index": _period})
+        st.dataframe(heat(_bpd, [c for c in _bpd.columns if c != _period]),
+                     use_container_width=True, hide_index=True,
+                     height=min(560, 38 + 35 * len(_bpd)))
+        note(f"Each row adds up to that {_period.lower()}’s return (Total), "
+             f"measured from the portfolio's value at the start of the "
+             f"{_period.lower()}. The first and last periods may be partial.")
+
+        _dl = ATTR.group_columns(res.contributions, _groups)
+        _dl["Portfolio return"] = res.returns
+        d1, d2 = st.columns(2)
+        d1.download_button("Daily contributions (CSV)", _dl.to_csv().encode("utf-8"),
+                           "daily_contributions.csv", "text/csv", key="attr_dl1")
+        d2.download_button(f"Contribution by {_period.lower()} (CSV)",
+                           _bpd.to_csv(index=False).encode("utf-8"),
+                           f"contribution_by_{_period.lower()}.csv", "text/csv",
+                           key="attr_dl2")
+
+
+# --------------------------- TAX ------------------------------------------
+with tabs[4]:
     note("Tax friendliness for a Canadian non-registered account, where "
          "the fiscal year is the calendar year. Realized capital gains use "
          "the Adjusted Cost Base method Canadian tax law requires, not "
@@ -3431,7 +3589,7 @@ with tabs[3]:
                                "tax_realized_sales.csv", "text/csv", key="dltaxsales")
 
 # --------------------------- ROBUSTNESS ----------------------------------
-with tabs[4]:
+with tabs[5]:
     note("A single backtest is only one observation. These four tests probe "
          "whether the result holds up beyond the exact parameter set chosen.")
 
@@ -3439,10 +3597,14 @@ with tabs[4]:
     strategy_obj = None if is_external else REGISTRY[run["strategy_key"]]
     params_run = run["params"]
     fixed_w = run["weights"] if is_external else None
+    # Every re-run sees the same dividends and execution price as the
+    # headline result, and starts on the same date, so the tests describe
+    # the backtest on screen rather than a variant of it.
+    _same = dict(dividends=run.get("dividends"), open_prices=run.get("open"))
     kw = dict(cash_prices=run.get("cash_series") if run.get("cash_series")
               is not None else run["cash"],
               exog=exog_used, weights=fixed_w, rebalance_dates=run_rebal,
-              volume=run.get("volume"))
+              volume=run.get("volume"), start=res.equity.index[0], **_same)
 
     eyebrow("1. Stability over time")
     n_folds = st.slider("Number of folds", 3, 10, 5, key="wf")
@@ -3510,7 +3672,8 @@ with tabs[4]:
             with st.spinner("Sweeping..."):
                 sw = R.parameter_sweep(universe, strategy_obj, params_run, grid,
                                        rcfg.engine, rcfg.costs, run["cash"],
-                                       exog=exog_used, volume=run.get("volume"))
+                                       exog=exog_used, volume=run.get("volume"),
+                                       **_same)
             st.session_state["sweep"] = (sw, px_, py_, metric_choice)
 
         if "sweep" in st.session_state:
@@ -3554,7 +3717,7 @@ with tabs[4]:
                         f'sign; a lone spike on the chosen parameter set is '
                         f'not.</div>', unsafe_allow_html=True)
                     dsr = R.deflated_sharpe_note(stats.get("Sharpe", np.nan),
-                                                 len(sw), len(res.returns))
+                                                 len(sw), len(res.returns), ppy)
                     if dsr["expected_max_sharpe"] == dsr["expected_max_sharpe"]:
                         st.markdown(
                             f'<div class="flag">Across {len(sw)} trials, a Sharpe '
@@ -3575,7 +3738,7 @@ with tabs[4]:
             st.session_state["daysweep"] = R.rebalance_day_sweep(
                 universe, strategy_obj, params_run, rcfg.engine, rcfg.costs,
                 run["cash"], exog=exog_used, weights=fixed_w,
-                volume=run.get("volume"))
+                volume=run.get("volume"), **_same)
     if "daysweep" in st.session_state:
         ds = st.session_state["daysweep"]
         if not ds.empty and "CAGR" in ds.columns:
@@ -3621,7 +3784,7 @@ with tabs[4]:
     _kw_flat = {k: v for k, v in kw.items() if k != "volume"}
     cs = R.cost_sensitivity(universe, strategy_obj, params_run, rcfg.engine,
                             rcfg.costs, None, **_kw_flat)
-    st.plotly_chart(C.sweep_line(cs, "Costs (bps round-trip)", "CAGR",
+    st.plotly_chart(C.sweep_line(cs, R.COST_AXIS, "CAGR",
                                  "CAGR by level of frictions"),
                     use_container_width=True, config={"displaylogo": False})
     cd = cs.copy()
@@ -3776,7 +3939,7 @@ with tabs[4]:
                          use_container_width=True, hide_index=True)
 
 # --------------------------- DATA ----------------------------------------
-with tabs[5]:
+with tabs[6]:
     a, b, c = st.columns(3)
     with a:
         dial("Sessions", f"{quality.rows:,}")
@@ -3844,7 +4007,7 @@ with tabs[5]:
                        universe.to_csv().encode("utf-8"), "prices.csv", "text/csv")
 
 # --------------------------- BUILDER --------------------------------------
-with tabs[6]:
+with tabs[7]:
     note("Build a strategy from criteria. Each rule is an indicator, a "
          "comparison and a value; rules combine into a filter that decides "
          "what is eligible and a score that ranks it. The result compiles to "
@@ -4014,7 +4177,7 @@ with tabs[6]:
 
 
 # --------------------------- EXPORT ---------------------------------------
-with tabs[7]:
+with tabs[8]:
     note("Every export below reproduces the backtest currently on screen. "
          "The tearsheet is the fastest way to share a result; the workbook "
          "and CSVs are for further analysis elsewhere.")
@@ -4189,4 +4352,4 @@ with tabs[7]:
         f'execution lag {rcfg.engine.execution_lag}d \u00b7 '
         f'{REBALANCE_RULES[rcfg.engine.rebalance].lower()} \u00b7 '
         f'{rcfg.costs.commission_bps + rcfg.costs.slippage_bps:.0f} bps of '
-        f'frictions per weight round-trip.</div>', unsafe_allow_html=True)
+        f'costs per trade.</div>', unsafe_allow_html=True)

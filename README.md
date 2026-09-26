@@ -1223,6 +1223,67 @@ That last point deserves attention: after 200 combinations tested, a Sharpe
 of 0.4 is achievable on pure noise. The displayed gap is the model's net
 edge.
 
+**Every re-run tests the backtest on screen.** Each test re-runs the engine
+with the same dividends, the same execution price (open or close) and the
+same start date as the headline result, so the folds chain back to the
+headline total return exactly and the cost test at the configured cost
+level reproduces the headline CAGR. Cost levels are in bps of each trade's
+value, charged on every buy and every sale.
+
+---
+
+## 8 bis. Attribution: where the return came from
+
+The **Attribution** tab breaks the backtest's return down by security or by
+asset class. The engine records, for every day, each instrument's P&L on
+the units actually held (price move plus dividends; an open-price trade
+splits the day into its overnight and intraday legs), plus separate lines
+for cash interest and borrowing, trading costs and the management fee.
+Each day's lines add up to that day's return exactly.
+
+Days are linked in currency: a line's contribution over any period is its
+summed P&L divided by the portfolio's value at the start of the period. The
+contributions therefore add up to the period's compounded return exactly --
+for the whole backtest, each year, quarter or month -- with no residual.
+
+- **Cumulative contribution**: each holding's running contribution in % of
+  starting capital; the lines add up to the portfolio's cumulative return.
+- **Contribution and risk**: total contribution, share of the result,
+  average weight, time held, and share of risk (each line's share of the
+  variance of daily returns: cov(line, portfolio) / var(portfolio); the
+  shares add up to 100%, and a negative share is a diversifier).
+- **By period**: a year, quarter or month table where each row adds up to
+  that period's return.
+- **Asset classes** come from the sleeve assignment or the preset, and can
+  be reassigned in the tab without re-running the backtest.
+
+The Excel export carries the contribution summary, the contribution by
+year and the daily ledger.
+
+## 8 ter. Math checks
+
+`tests/test_math.py` checks the reported figures against independent
+calculations: every summary statistic against plain numpy formulas, the
+engine against a hand-written 60/40 reference, the contribution ledger
+against the returns, the robustness re-runs against the headline result,
+and the tax module against hand-computed ACB. Run it with
+`python tests/test_math.py` (or `python -m pytest tests`).
+
+Conventions worth knowing:
+
+- A value curve built from returns starts at the base value one period
+  before the first return, so the first return counts in total return,
+  CAGR, drawdown and "since inception". CAGR spans N - 1 periods for N
+  values.
+- Sortino uses the downside deviation: the root mean square of shortfalls
+  below the risk-free rate over all periods.
+- Drawdown episodes start at the peak they fall from.
+- The cash rate compounds to the stated annual rate (3% a year earns 3.00%).
+- Skew and excess kurtosis are sample statistics; a normal distribution has
+  an excess kurtosis of 0.
+- Capital gains for tax include trading costs in the cost base and the
+  proceeds.
+
 ### Parameter surface, in 3D
 
 Sweeping two parameters against a metric is exactly three variables, and a
@@ -1301,6 +1362,7 @@ qbt/
   stress.py                stress test periods against named historical episodes
   regimes.py               market regimes: rates, recessions, yield curve, drawdown, VIX
   tax.py                   Canadian tax friendliness: ACB gains, eligible/foreign dividends
+  attribution.py           return contribution by security / asset class, and risk share
   full_report.py           detailed HTML + PDF report combining every module
   report_charts.py         matplotlib chart rendering shared by the detailed report's HTML and PDF
   tvchart.py               TradingView Lightweight Charts integration

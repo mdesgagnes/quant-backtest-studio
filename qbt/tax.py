@@ -185,7 +185,8 @@ def realized_gains(trades: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=["Date", "Instrument", "Shares Sold",
                                      "Proceeds", "ACB of Shares Sold",
                                      "Realized Gain"])
-    t = trades.sort_values("Date")
+    t = trades.sort_values("Date", kind="stable")
+    has_cost = "Effective Cost (bps)" in t.columns
     rows = []
     acb_total: Dict[str, float] = {}
     shares_held: Dict[str, float] = {}
@@ -196,9 +197,14 @@ def realized_gains(trades: pd.DataFrame) -> pd.DataFrame:
         price = float(r["Price"])
         acb_total.setdefault(inst, 0.0)
         shares_held.setdefault(inst, 0.0)
+        # Commission and slippage paid on this trade. A purchase's costs
+        # are part of its cost base; a sale's costs reduce its proceeds.
+        # Both lower the taxable gain, as the Income Tax Act allows.
+        bps = float(r["Effective Cost (bps)"]) if has_cost else 0.0
+        fee = abs(change) * price * (bps if bps == bps else 0.0) / 10_000.0
 
         if change > 1e-12:
-            acb_total[inst] += change * price
+            acb_total[inst] += change * price + fee
             shares_held[inst] += change
         elif change < -1e-12:
             sold = -change
@@ -207,7 +213,7 @@ def realized_gains(trades: pd.DataFrame) -> pd.DataFrame:
                 acb_per_share = acb_total[inst] / held
                 sold_eff = min(sold, held)   # never sell more than the model held
                 cost = sold_eff * acb_per_share
-                proceeds = sold_eff * price
+                proceeds = sold_eff * price - fee * (sold_eff / sold)
                 rows.append({
                     "Date": r["Date"], "Instrument": inst,
                     "Shares Sold": sold_eff, "Proceeds": proceeds,
@@ -335,18 +341,22 @@ def evaluate(trades: pd.DataFrame, shares: pd.DataFrame, dividends: pd.DataFrame
     tax_by_year = by_year.set_index("Year")["Total Tax"]
     after_tax_equity = pd.Series(index=equity.index, dtype=float)
     level_at_year_start = float(equity.iloc[0]) if len(equity) else 0.0
+    base_pretax = float(equity.iloc[0]) if len(equity) else 0.0
     for y in sorted(set(equity.index.year)):
         in_year = equity.index.year == y
         year_eq = equity.loc[in_year]
-        if year_eq.empty or float(year_eq.iloc[0]) == 0:
+        if year_eq.empty or base_pretax == 0:
             continue
-        # Same daily path as the pretax series, rebased to 1.0 at this
-        # year's first session, then scaled to the post-tax level carried
-        # in from the prior year.
-        daily_growth = year_eq / float(year_eq.iloc[0])
+        # Same daily path as the pretax series, measured from the PRIOR
+        # year's final value, then scaled to the post-tax level carried in
+        # from that year. Rebasing on this year's first session instead
+        # would drop the return of that first session -- one day lost at
+        # every year boundary.
+        daily_growth = year_eq / base_pretax
         after_tax_equity.loc[year_eq.index] = level_at_year_start * daily_growth
         level_at_year_start = (float(after_tax_equity.loc[year_eq.index[-1]])
                                - float(tax_by_year.get(y, 0.0)))
+        base_pretax = float(year_eq.iloc[-1])
     after_tax_equity = after_tax_equity.dropna()
     if after_tax_equity.empty:
         after_tax_equity = equity.copy()

@@ -45,15 +45,52 @@ def cvar_label(ppy: int = TRADING_DAYS) -> str:
 # ----------------------------------------------------------------------
 # Building blocks
 # ----------------------------------------------------------------------
+def _base_date(idx: pd.DatetimeIndex) -> pd.Timestamp:
+    """The date one period before the first observation. Month-, quarter-
+    and year-end series step back a whole calendar period (31 Jan -> 31
+    Dec), since their day gaps vary; anything finer steps back the typical
+    gap between observations."""
+    first = idx[0]
+    gaps = np.diff(idx.values).astype("timedelta64[D]").astype(float) if len(idx) > 1 else np.array([1.0])
+    med = float(np.median(gaps)) if len(gaps) else 1.0
+    if first.is_month_end and 25 <= med <= 35:
+        return first - pd.offsets.MonthEnd(1)
+    if first.is_quarter_end and 85 <= med <= 95:
+        return first - pd.offsets.QuarterEnd(1)
+    if first.is_year_end and 360 <= med <= 370:
+        return first - pd.offsets.YearEnd(1)
+    return first - pd.Timedelta(days=max(1.0, round(med)))
+
+
 def to_equity(returns: pd.Series, initial: float = 1.0) -> pd.Series:
-    return initial * (1.0 + returns.fillna(0.0)).cumprod()
+    """Value curve from returns, starting at `initial` one period BEFORE
+    the first return.
+
+    The base point matters. Without it the curve's first value already
+    includes the first period's return, so every measure read off the curve
+    -- total return, CAGR, max drawdown, "since inception" -- silently
+    starts one period late and never sees the first return at all. On a
+    monthly track record that opens with a bad month, the loss simply
+    vanished from the headline numbers.
+    """
+    r = returns.fillna(0.0)
+    if r.empty:
+        return pd.Series(dtype=float)
+    idx = r.index
+    base_date = _base_date(idx) if isinstance(idx, pd.DatetimeIndex) else -1
+    eq = initial * (1.0 + r).cumprod()
+    base = pd.Series([float(initial)], index=[base_date])
+    out = pd.concat([base, eq])
+    out.name = returns.name
+    return out
 
 
 def cagr(equity: pd.Series, ppy: int = TRADING_DAYS) -> float:
     equity = equity.dropna()
     if len(equity) < 2 or equity.iloc[0] <= 0:
         return np.nan
-    years = len(equity) / ppy
+    # N values span N - 1 periods of growth.
+    years = (len(equity) - 1) / ppy
     return float((equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1) if years > 0 else np.nan
 
 
@@ -73,9 +110,22 @@ def sharpe(returns: pd.Series, rf_pa: float = 0.0, ppy: int = TRADING_DAYS) -> f
     return float(ex.mean() / sd * np.sqrt(ppy)) if sd and sd > RISKLESS_SD else np.nan
 
 
+def downside_deviation(returns: pd.Series, rf_pa: float = 0.0,
+                       ppy: int = TRADING_DAYS) -> float:
+    """Per-period downside deviation below the risk-free target: the root
+    mean square of shortfalls, taken over ALL periods (a period above the
+    target counts as a zero shortfall). Not the standard deviation of the
+    losing periods around their own mean, which measures how much the
+    losses vary rather than how large they are."""
+    ex = (returns - rf_pa / ppy).dropna()
+    if ex.empty:
+        return np.nan
+    return float(np.sqrt((np.minimum(ex, 0.0) ** 2).mean()))
+
+
 def sortino(returns: pd.Series, rf_pa: float = 0.0, ppy: int = TRADING_DAYS) -> float:
     ex = returns - rf_pa / ppy
-    down = ex[ex < 0].std(ddof=1)
+    down = downside_deviation(returns, rf_pa, ppy)
     return float(ex.mean() / down * np.sqrt(ppy)) if down and down > RISKLESS_SD else np.nan
 
 
@@ -118,6 +168,14 @@ def drawdown_table(equity: pd.Series, top: int = 5,
     obs_plural = "Sessions" if ppy >= 200 else obs_plural.capitalize()
     to_trough = f"{obs_plural} to Trough"
     total = f"Total {obs_plural}"
+
+    # An episode starts at the peak it falls from -- the last observation
+    # before the first one under water -- not on that first underwater
+    # observation, which would make a one-session crash take "0 sessions
+    # to trough" and shorten every duration by one period.
+    pos = {d: i for i, d in enumerate(equity.index)}
+    episodes = [(equity.index[pos[s] - 1] if pos[s] > 0 else s, t, rec, depth)
+                for s, t, rec, depth in episodes]
 
     rows = []
     for s, trough, rec, depth in sorted(episodes, key=lambda x: x[3])[:top]:
@@ -228,7 +286,7 @@ def summary(returns: pd.Series,
         var_label(ppy): vc["var"],
         cvar_label(ppy): vc["cvar"],
         "Skew": float(returns.skew()),
-        "Kurtosis": float(returns.kurtosis()),
+        "Excess Kurtosis": float(returns.kurtosis()),
         f"% Positive {units}": float((monthly > 0).mean()) if len(monthly) else np.nan,
         f"Best {unit}": float(monthly.max()) if len(monthly) else np.nan,
         f"Worst {unit}": float(monthly.min()) if len(monthly) else np.nan,

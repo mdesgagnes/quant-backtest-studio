@@ -673,8 +673,10 @@ def analysis_windows(rets: pd.DataFrame, names: List[str],
 
 
 def equity_from_returns(returns: pd.Series, initial: float = 100_000.0) -> pd.Series:
-    """Compounds a return stream into a value curve."""
-    return initial * (1.0 + returns.fillna(0.0)).cumprod()
+    """Compounds a return stream into a value curve that starts at
+    `initial` one period before the first return (see `metrics.to_equity`)."""
+    from . import metrics as M
+    return M.to_equity(returns, initial)
 
 
 def template(freq: str = "monthly") -> str:
