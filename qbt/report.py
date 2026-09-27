@@ -178,7 +178,7 @@ def _period_tables_html(res: BacktestResult, bench, ppy: int,
             for c in cols:
                 v = row[c]
                 if c in (label, bench_label, "Excess"):
-                    v = "\u2014" if pd.isna(v) else f"{v*100:+.2f}%"
+                    v = "n/a" if pd.isna(v) else f"{v*100:+.2f}%"
                 cells += f"<td>{_esc(v)}</td>"
             body += f"<tr>{cells}</tr>"
         return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"

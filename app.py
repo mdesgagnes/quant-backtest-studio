@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from dataclasses import asdict
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
@@ -57,33 +58,44 @@ st.set_page_config(page_title="Quant Backtest Studio",
 # ----------------------------------------------------------------------
 CSS = ("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
 /* ---------------------------------------------------------------
    National Bank of Canada palette. Red #E41C23 is the signature
    and is spent deliberately: the active tab, the primary action,
-   the rule under the masthead. Everything structural is slate and
-   grey, so when red appears it means something. Gains and losses
-   get a separate green/red pair -- a chart where "up" and "brand"
-   share a colour cannot be read.
+   the rule under the masthead. Everything structural is warm grey,
+   so when red appears it means something. Gains and losses get a
+   separate green/red pair: a chart where "up" and "brand" share a
+   colour cannot be read.
+
+   One type family (IBM Plex: Sans for words, Mono for figures), one
+   corner radius (3px), no drop shadows and no hover lifts. Figures
+   do not move when the pointer passes over them.
    --------------------------------------------------------------- */
 :root{
   """ + css_variables() + """
   --slate:#3F3A34;
-  --sans:'Inter',-apple-system,Segoe UI,sans-serif;
+  --sans:'IBM Plex Sans',-apple-system,Segoe UI,sans-serif;
   --mono:'IBM Plex Mono',SFMono-Regular,Consolas,monospace;
-  --shadow:0 1px 2px rgba(0,0,0,.35);
-  --shadow-lift:0 3px 10px rgba(0,0,0,.45);
+  --radius:3px;
 }
 
 html, body, [class*="css"]{ font-family:var(--sans); color:var(--ink); }
 .stApp{ background:var(--bg); }
-.block-container{ padding-top:2.1rem; max-width:1500px; }
+.block-container{ padding-top:1.6rem; max-width:1500px; }
 
 /* Numbers must align on the decimal to be scanned down a column. */
 .dial .v,.dial .d,[data-testid="stDataFrame"],table,code,
 .stTabs [data-baseweb="tab"],.runbar{
   font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1; }
+
+/* ---------------- Streamlit chrome ---------------- */
+[data-testid="stHeader"]{ background:transparent; }
+[data-testid="stAppDeployButton"], [data-testid="stMainMenu"],
+[data-testid="stDecoration"], #MainMenu, footer{ display:none !important; }
+/* Heading anchors: the link icon Streamlit adds next to every title. */
+[data-testid="stHeaderActionElements"], .stMarkdown h1 a, .stMarkdown h2 a,
+.stMarkdown h3 a, .stMarkdown h4 a{ display:none !important; }
 
 /* ---------------- Sidebar ---------------- */
 section[data-testid="stSidebar"]{
@@ -98,103 +110,120 @@ section[data-testid="stSidebar"] .stTextArea,
 section[data-testid="stSidebar"] .stRadio{ margin-bottom:-.3rem; }
 section[data-testid="stSidebar"] [data-testid="stExpander"]{
   border:0; border-top:1px solid var(--rule); background:transparent;
-  border-radius:0; box-shadow:none; }
-section[data-testid="stSidebar"] [data-testid="stExpander"] summary{
-  font-family:var(--mono); font-size:.66rem; letter-spacing:.14em;
-  text-transform:uppercase; color:var(--muted); padding:.55rem 0;
-  font-weight:600; }
-section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
-  color:var(--nb-red); }
+  border-radius:0; }
+section[data-testid="stSidebar"] [data-testid="stExpander"] summary,
+section[data-testid="stSidebar"] [data-testid="stExpander"] summary p{
+  font-family:var(--sans); font-size:.8rem; font-weight:600;
+  color:#C4BDB1; padding:.5rem 0; letter-spacing:0; text-transform:none; }
+section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover,
+section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover p{
+  color:var(--ink); }
+/* One label style for every sidebar group heading. */
+section[data-testid="stSidebar"] .eyebrow, .side-label{
+  font-family:var(--sans); font-size:.8rem; font-weight:600; color:var(--ink);
+  margin:1.1rem 0 .45rem; padding-bottom:.3rem; border-bottom:1px solid var(--rule);
+  text-transform:none; letter-spacing:0; }
+
+/* Selected tickers: neutral chips. Red is for actions, not data. */
+[data-baseweb="tag"], [data-testid="stMultiSelectTagsContainer"] [data-tag]{
+  background:var(--panel-2) !important; border:1px solid var(--rule) !important;
+  border-radius:var(--radius) !important; color:var(--ink) !important;
+  font-family:var(--mono); font-size:.74rem; }
+[data-baseweb="tag"] span, [data-baseweb="tag"] svg,
+[data-testid="stMultiSelectTagsContainer"] [data-tag] *{
+  color:var(--ink) !important; fill:var(--muted) !important; }
 
 /* ---------------- Masthead ---------------- */
 .masthead{
-  border-bottom:2px solid var(--nb-red); padding:.1rem 0 .8rem;
-  margin-bottom:.5rem; display:flex; justify-content:space-between;
-  align-items:flex-end; flex-wrap:wrap; gap:.6rem; }
+  border-bottom:2px solid var(--nb-red); padding:.1rem 0 .7rem;
+  margin-bottom:.6rem; display:flex; justify-content:space-between;
+  align-items:baseline; flex-wrap:wrap; gap:.6rem; }
 .masthead h1{
-  font-family:var(--sans); font-weight:700; font-size:1.72rem;
-  letter-spacing:-.028em; color:var(--ink); margin:0; line-height:1.12; }
+  font-family:var(--sans); font-weight:700; font-size:1.6rem;
+  letter-spacing:-.02em; color:var(--ink); margin:0; padding:0; line-height:1.15; }
 .masthead .sub{
-  font-family:var(--mono); font-size:.68rem; letter-spacing:.16em;
-  text-transform:uppercase; color:var(--faint); margin-top:.3rem; }
+  font-family:var(--sans); font-size:.85rem; font-weight:500;
+  color:var(--muted); }
 
-/* ---------------- Section rules ---------------- */
+/* ---------------- Section headers ---------------- */
 .eyebrow{
-  font-family:var(--mono); font-size:.66rem; letter-spacing:.15em;
-  text-transform:uppercase; color:var(--muted); font-weight:600;
-  margin:1.75rem 0 .65rem; display:flex; align-items:center; gap:.75rem; }
-.eyebrow::after{ content:""; flex:1; height:1px; background:var(--rule); }
+  font-family:var(--sans); font-size:.95rem; font-weight:600;
+  color:var(--ink); letter-spacing:-.005em;
+  margin:2rem 0 .7rem; padding-bottom:.4rem;
+  border-bottom:1px solid var(--rule); }
 
 /* ---------------- Dials ---------------- */
 .dial{
   background:var(--panel-2); border:1px solid var(--rule);
-  border-top:2px solid var(--nb-black); border-radius:3px;
-  padding:.7rem .85rem; height:100%; box-shadow:var(--shadow);
-  transition:box-shadow .16s ease, transform .16s ease; }
-.dial:hover{ background:#232320; box-shadow:var(--shadow-lift); transform:translateY(-1px); }
+  border-top:2px solid var(--rule); border-radius:var(--radius);
+  padding:.7rem .85rem; height:100%; }
 .dial .k{
-  font-family:var(--mono); font-size:.6rem; letter-spacing:.1em;
+  font-family:var(--mono); font-size:.62rem; letter-spacing:.08em;
   text-transform:uppercase; color:var(--faint); display:block;
   margin-bottom:.3rem; font-weight:600; }
 .dial .v{
   font-family:var(--mono); font-size:1.3rem; font-weight:600;
   color:var(--ink); line-height:1.1; letter-spacing:-.02em; }
 .dial .d{
-  font-family:var(--mono); font-size:.66rem; color:var(--faint);
-  margin-top:.18rem; }
+  font-family:var(--mono); font-size:.68rem; color:var(--faint);
+  margin-top:.2rem; }
 .dial.pos{ border-top-color:var(--gain); } .dial.pos .v{ color:var(--gain); }
 .dial.neg{ border-top-color:var(--loss); } .dial.neg .v{ color:var(--loss); }
 
 /* ---------------- Notes and flags ---------------- */
 .note{
-  border-left:2px solid var(--rule); padding:.3rem 0 .3rem .85rem;
-  color:var(--muted); font-size:.83rem; line-height:1.6; }
+  border-left:2px solid var(--rule); padding:.25rem 0 .25rem .8rem;
+  color:var(--muted); font-size:.82rem; line-height:1.6; margin:.2rem 0 .4rem; }
+details.note summary{ cursor:pointer; list-style:none; }
+details.note summary::-webkit-details-marker{ display:none; }
+details.note summary .more{
+  color:var(--nb-sand-dark); margin-left:.45rem; font-weight:500;
+  border-bottom:1px dotted var(--nb-sand-dark); }
+details.note[open] summary .more{ display:none; }
+details.note[open] summary{ margin-bottom:.2rem; }
 .flag{
   background:var(--nb-red-wash); border-left:2px solid var(--nb-red);
-  border-radius:0 2px 2px 0; padding:.5rem .8rem; color:#F2A6A2;
+  border-radius:0 var(--radius) var(--radius) 0; padding:.5rem .8rem; color:#F2A6A2;
   font-size:.81rem; line-height:1.55; margin:.35rem 0; }
 
 /* ---------------- Run context strip ---------------- */
 .runbar{
   display:flex; flex-wrap:wrap; gap:.2rem 1.7rem; align-items:baseline;
   background:var(--panel); border:1px solid var(--rule);
-  border-left:3px solid var(--nb-red); border-radius:3px;
+  border-left:3px solid var(--nb-red); border-radius:var(--radius);
   padding:.55rem .9rem; margin:.35rem 0 .2rem; }
 .runbar .item{ font-family:var(--mono); font-size:.72rem; color:var(--muted); }
 .runbar .item b{ color:var(--ink); font-weight:600; }
 .runbar .lead{
   font-family:var(--sans); font-size:.95rem; font-weight:700;
-  color:var(--ink); letter-spacing:-.02em; margin-right:.35rem; }
+  color:var(--ink); letter-spacing:-.015em; margin-right:.35rem; }
 
 /* ---------------- Tabs ---------------- */
 .stTabs [data-baseweb="tab-list"]{
-  gap:.35rem; border-bottom:1px solid var(--rule);
+  gap:.2rem; border-bottom:1px solid var(--rule);
   position:sticky; top:0; z-index:99;
-  background:rgba(15,15,14,.94); backdrop-filter:blur(8px);
-  padding-top:.4rem; }
+  background:rgba(15,15,14,.96); padding-top:.4rem; }
 .stTabs [data-baseweb="tab"]{
-  font-family:var(--sans); font-size:.79rem; font-weight:600;
-  letter-spacing:.01em; color:var(--muted); padding:.5rem .95rem;
-  border-radius:3px 3px 0 0; transition:color .14s ease, background .14s ease; }
-.stTabs [data-baseweb="tab"]:hover{ color:var(--ink); background:var(--panel); }
-.stTabs [aria-selected="true"]{ color:var(--nb-red) !important; }
+  font-family:var(--sans); font-size:.82rem; font-weight:600;
+  color:var(--muted); padding:.5rem .9rem;
+  border-radius:var(--radius) var(--radius) 0 0; transition:color .12s ease; }
+.stTabs [data-baseweb="tab"]:hover{ color:var(--ink); }
+.stTabs [aria-selected="true"]{ color:var(--ink) !important; }
 .stTabs [data-baseweb="tab-highlight"]{ background:var(--nb-red); height:2px; }
 .stTabs [data-baseweb="tab-border"]{ background:transparent; }
 
 /* ---------------- Controls ---------------- */
 .stButton>button{
-  font-family:var(--sans); font-size:.8rem; font-weight:600;
-  letter-spacing:.01em; background:var(--nb-red); color:#fff;
-  border:1px solid var(--nb-red); border-radius:3px; width:100%;
-  padding:.55rem; box-shadow:var(--shadow);
-  transition:background .15s ease, box-shadow .15s ease, transform .1s ease; }
+  font-family:var(--sans); font-size:.82rem; font-weight:600;
+  background:var(--nb-red); color:#fff;
+  border:1px solid var(--nb-red); border-radius:var(--radius); width:100%;
+  padding:.55rem; transition:background .12s ease; }
 .stButton>button:hover{
-  background:var(--nb-red-dark); border-color:var(--nb-red-dark);
-  color:#fff; box-shadow:var(--shadow-lift); }
+  background:var(--nb-red-dark); border-color:var(--nb-red-dark); color:#fff; }
 .stButton>button:active{ transform:translateY(1px); }
 .stDownloadButton>button{
   background:transparent; color:var(--nb-sand-dark);
-  border:1px solid var(--rule); font-weight:500; }
+  border:1px solid var(--rule); font-weight:500; border-radius:var(--radius); }
 .stDownloadButton>button:hover{
   background:var(--panel); border-color:var(--nb-sand-dark);
   color:var(--nb-sand); }
@@ -204,7 +233,7 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
 /* ---------------- Inputs ---------------- */
 [data-baseweb="select"] > div, .stTextInput input, .stNumberInput input,
 .stTextArea textarea{
-  border-radius:3px !important; border-color:var(--rule) !important;
+  border-radius:var(--radius) !important; border-color:var(--rule) !important;
   background:var(--panel) !important; font-size:.84rem !important; }
 [data-baseweb="select"] > div:focus-within, .stTextInput input:focus,
 .stTextArea textarea:focus{ border-color:var(--nb-red) !important; }
@@ -212,7 +241,7 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
 
 /* ---------------- Tables ---------------- */
 [data-testid="stDataFrame"]{
-  border:1px solid var(--rule); border-radius:3px; font-family:var(--mono); }
+  border:1px solid var(--rule); border-radius:var(--radius); font-family:var(--mono); }
 [data-testid="stDataFrame"] [role="columnheader"]{
   font-family:var(--mono) !important; font-size:.64rem !important;
   letter-spacing:.06em; text-transform:uppercase;
@@ -221,43 +250,35 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
 
 /* ---------------- Charts ---------------- */
 .js-plotly-plot{
-  border:1px solid var(--rule); border-radius:3px; background:var(--panel);
-  box-shadow:var(--shadow); padding:.3rem; }
+  border:1px solid var(--rule); border-radius:var(--radius);
+  background:var(--panel); padding:.3rem; }
 
 /* ---------------- Expanders ---------------- */
 [data-testid="stExpander"]{
-  border:1px solid var(--rule); border-radius:3px; background:var(--panel);
-  box-shadow:var(--shadow); }
+  border:1px solid var(--rule); border-radius:var(--radius); background:var(--panel); }
 [data-testid="stExpander"] summary{
   font-family:var(--sans); font-size:.82rem; font-weight:600;
   color:var(--nb-sand-dark); }
-[data-testid="stExpander"] summary:hover{ color:var(--nb-red); }
+[data-testid="stExpander"] summary:hover{ color:var(--ink); }
 
-/* ---------------- Cards ---------------- */
-.startcard{
-  background:var(--panel); border:1px solid var(--rule);
-  border-top:2px solid var(--nb-red); border-radius:3px;
-  padding:1rem 1.1rem; height:100%; box-shadow:var(--shadow);
-  transition:box-shadow .16s ease, transform .16s ease; }
-.startcard:hover{ box-shadow:var(--shadow-lift); transform:translateY(-2px); }
-.startcard .n{
-  font-family:var(--mono); font-size:.6rem; letter-spacing:.13em;
-  color:var(--nb-red); text-transform:uppercase; font-weight:600; }
-.startcard .t{
-  font-size:1.02rem; font-weight:700; color:var(--ink);
-  margin:.35rem 0 .3rem; letter-spacing:-.02em; }
-.startcard .b{ font-size:.82rem; color:var(--muted); line-height:1.55; }
-
-.strat{ border-top:1px solid var(--rule-soft); padding:.6rem 0; }
-.strat .nm{ font-size:.87rem; font-weight:600; color:var(--nb-sand-dark); }
-.strat .ds{ font-size:.81rem; color:var(--muted); line-height:1.55; margin-top:.2rem; }
+/* ---------------- Start screens ---------------- */
+.route{ padding:.75rem 0; border-bottom:1px solid var(--rule-soft); }
+.route:first-of-type{ padding-top:.1rem; }
+.route .t{ font-size:.95rem; font-weight:600; color:var(--ink); }
+.route .b{ font-size:.83rem; color:var(--muted); line-height:1.55; margin-top:.2rem; }
+details.strat{ border-bottom:1px solid var(--rule-soft); padding:.5rem 0; }
+details.strat summary{
+  cursor:pointer; font-size:.87rem; font-weight:500; color:var(--nb-sand-dark);
+  list-style:none; }
+details.strat summary::-webkit-details-marker{ display:none; }
+details.strat summary:hover{ color:var(--ink); }
+details.strat .ds{ font-size:.81rem; color:var(--muted); line-height:1.55; margin-top:.3rem; }
 
 /* ---------------- Rule chips (Builder) ---------------- */
 .rulecard{
   background:var(--panel); border:1px solid var(--rule);
   border-left:3px solid var(--nb-red);
-  border-radius:3px; padding:.55rem .8rem; margin-bottom:.4rem;
-  box-shadow:var(--shadow); }
+  border-radius:var(--radius); padding:.55rem .8rem; margin-bottom:.4rem; }
 .rulecard .idx{
   font-family:var(--mono); font-size:.62rem; color:var(--faint);
   letter-spacing:.1em; text-transform:uppercase; }
@@ -275,18 +296,15 @@ section[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover{
   border:2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover{ background:#4E4B44; }
 
-/* ---------------- Chrome ---------------- */
-[data-testid="stHeader"]{ background:transparent; }
 .stSpinner > div{ border-top-color:var(--nb-red) !important; }
 hr{ border-color:var(--rule-soft); }
-#MainMenu, footer{ visibility:hidden; }
 
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{ animation-duration:.001ms !important;
     transition-duration:.001ms !important; } }
 
 @media (max-width: 640px){
-  .masthead h1{ font-size:1.35rem; }
+  .masthead h1{ font-size:1.3rem; }
   .dial .v{ font-size:1.05rem; }
   .stTabs [data-baseweb="tab-list"]{ gap:.1rem; overflow-x:auto; }
   .stTabs [data-baseweb="tab"]{ padding:.45rem .6rem; font-size:.74rem; } }
@@ -344,7 +362,7 @@ def _sign_color(v) -> str:
         return f"color:{DIM}"
     if isinstance(v, str):
         t = v.strip()
-        if t in ("", "\u2014", "nan", "None"):
+        if t in ("", "\u2014", "n/a", "nan", "None"):
             return f"color:{DIM}"
         if t.startswith("-"):
             return f"color:{RUST}"
@@ -396,7 +414,7 @@ def heat(df, cols, pct: bool = True):
 
     styler = df.style.map(_cell, subset=use)
     fmt = "{:+.2%}" if pct else "{:+.2f}"
-    return styler.format({c: (lambda v, f=fmt: "\u2014" if pd.isna(v)
+    return styler.format({c: (lambda v, f=fmt: "n/a" if pd.isna(v)
                               else f.format(v)) for c in use})
 
 
@@ -466,13 +484,65 @@ def _fmt_period_tables(tables, main_label, bench_label=None):
             continue
         for c in [main_label] + ([bench_label] if bench_label else []) + ["Excess"]:
             if c in t.columns:
-                t[c] = t[c].map(lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
+                t[c] = t[c].map(lambda v: "n/a" if pd.isna(v) else f"{v*100:+.2f}%")
         out[key] = t
     return out
 
 
 def note(text: str):
-    st.markdown(f'<div class="note">{text}</div>', unsafe_allow_html=True)
+    """A grey explanatory note. A long one shows its first sentence and
+    folds the rest behind "More", so a screen leads with its figures and
+    the explanation is one click away rather than in the way."""
+    head, sep, rest = text.partition(". ")
+    foldable = (sep and len(text) > 170 and len(head) <= 160 and rest.strip()
+                and head.count("<") == head.count(">")
+                and head.count("<b>") == head.count("</b>"))
+    if foldable:
+        st.markdown(f'<details class="note"><summary>{head}.'
+                    f'<span class="more">More</span></summary>{rest}</details>',
+                    unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="note">{text}</div>', unsafe_allow_html=True)
+
+
+# Tables. Streamlit left-aligns any column formatted as text, which is most
+# of them here ("+1.23%"). Figures are right-aligned so they can be scanned
+# down a column, and a short table is shown whole rather than inside its
+# own scroll box.
+_st_dataframe = st.dataframe
+_FIGURE = re.compile(
+    r"^\s*(n/a|[+\-\u2212]?\$?[\d,]*\.?\d+(e[+\-]?\d+)?\s*(%|x|bps|pp)?)\s*$",
+    re.IGNORECASE)
+
+
+def _is_figures(col: pd.Series) -> bool:
+    if pd.api.types.is_bool_dtype(col):
+        return False
+    if pd.api.types.is_numeric_dtype(col):
+        return True
+    vals = [str(v) for v in col.dropna().tolist()[:300]]
+    vals = [v for v in vals if v.strip() not in ("", "n/a")]
+    return bool(vals) and all(_FIGURE.match(v) for v in vals)
+
+
+def _dataframe(data=None, *args, **kwargs):
+    frame = getattr(data, "data", data)          # a Styler wraps its frame
+    if isinstance(frame, pd.DataFrame) and not frame.empty \
+            and not isinstance(frame.columns, pd.MultiIndex):
+        try:
+            cfg = dict(kwargs.get("column_config") or {})
+            for c in frame.columns:
+                if str(c) not in cfg and _is_figures(frame[c]):
+                    cfg[str(c)] = st.column_config.Column(alignment="right")
+            kwargs["column_config"] = cfg
+        except Exception:
+            pass
+        if kwargs.get("height") is None and len(frame) <= 40:
+            kwargs["height"] = 35 * (len(frame) + 1) + 3
+    return _st_dataframe(data, *args, **kwargs)
+
+
+st.dataframe = _dataframe
 
 
 require_password()
@@ -590,10 +660,8 @@ WORKSPACES = ["Backtest", "Markets"]
 workspace = st.sidebar.radio("Workspace", WORKSPACES, horizontal=True,
                              label_visibility="collapsed", key="workspace")
 
-st.sidebar.markdown(
-    '<div style="font-family:IBM Plex Mono,monospace;font-size:.68rem;'
-    'letter-spacing:.18em;text-transform:uppercase;color:#C9A227;'
-    'padding:.2rem 0 .8rem;">Settings</div>', unsafe_allow_html=True)
+st.sidebar.markdown('<div class="side-label">Settings</div>',
+                    unsafe_allow_html=True)
 
 # ======================================================================
 # MARKETS WORKSPACE
@@ -601,11 +669,11 @@ st.sidebar.markdown(
 if workspace == "Markets":
     st.sidebar.markdown('<div class="eyebrow">Watchlist</div>',
                         unsafe_allow_html=True)
-    _mk_preset_names = ["\u2014 custom \u2014"] + PRESETS.names()
+    _mk_preset_names = ["Custom"] + PRESETS.names()
     mk_preset = st.sidebar.selectbox("Preset", _mk_preset_names, key="mk_preset")
     if mk_preset != st.session_state.get("_mk_applied"):
         st.session_state["_mk_applied"] = mk_preset
-        if not mk_preset.startswith("\u2014"):
+        if mk_preset != "Custom":
             st.session_state["mk_tickers"] = "\n".join(
                 PRESETS.get(mk_preset)["tickers"])
     st.session_state.setdefault(
@@ -622,7 +690,7 @@ if workspace == "Markets":
     mk_end = mc2.date_input("To", value=date.today(), min_value=date(1971, 1, 1),
                             max_value=date.today(), key="mk_end")
     mk_base = st.sidebar.selectbox(
-        "Reference", mk_tickers or ["\u2014"], key="mk_base",
+        "Reference", mk_tickers or ["n/a"], key="mk_base",
         format_func=lambda t: N.label(t) if t in (mk_tickers or []) else t,
         help="Relative strength, rolling correlation and beta are all "
              "measured against this instrument.")
@@ -633,8 +701,7 @@ if workspace == "Markets":
 
     st.markdown(
         '<div class="masthead"><div><h1>Markets</h1>'
-        '<div class="sub">Performance &nbsp;\u00b7&nbsp; Risk &nbsp;\u00b7&nbsp; '
-        'Relationships</div></div></div>', unsafe_allow_html=True)
+        '<div class="sub">Market monitor</div></div></div>', unsafe_allow_html=True)
 
     if mk_run and mk_tickers:
         try:
@@ -655,7 +722,7 @@ if workspace == "Markets":
     if mk is None:
         note("Enter a watchlist on the left and load it. Everything on this "
              "screen is derived from prices, so it works for any instrument "
-             "the backtester can load \u2014 no fundamentals, and nothing "
+             "the backtester can load: no fundamentals, and nothing "
              "that silently comes back empty for half a list.")
         eyebrow("What this shows")
         _rows = [
@@ -670,12 +737,12 @@ if workspace == "Markets":
             ("Seasonality", "Average return by calendar month, with the number "
                             "of years behind each average shown alongside."),
         ]
-        _c = st.columns(len(_rows))
-        for col, (t, b) in zip(_c, _rows):
-            with col:
-                st.markdown(f'<div class="startcard"><div class="n">{t}</div>'
-                            f'<div class="b" style="margin-top:.4rem;">{b}</div>'
-                            f'</div>', unsafe_allow_html=True)
+        _c = st.columns(2, gap="large")
+        for i, (t, b) in enumerate(_rows):
+            with _c[i % 2]:
+                st.markdown(f'<div class="route"><div class="t">{t}</div>'
+                            f'<div class="b">{b}</div></div>',
+                            unsafe_allow_html=True)
         st.stop()
 
     prices = mk["prices"]
@@ -764,7 +831,7 @@ if workspace == "Markets":
                      hide_index=True, height=min(620, 60 + 36 * len(grid)))
         note("Horizons beyond one year are annualized; shorter ones are "
              "cumulative. A blank means the history does not reach that far "
-             "back \u2014 the window is omitted rather than measured over a "
+             "back: the window is omitted rather than measured over a "
              "shorter span under a longer label.")
 
         eyebrow("Rebased to 100")
@@ -804,11 +871,11 @@ if workspace == "Markets":
                   "Current Drawdown", "% Positive Days"):
             if c in disp:
                 disp[c] = disp[c].map(
-                    lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
+                    lambda v: "n/a" if pd.isna(v) else f"{v*100:+.2f}%")
         for c in ("Sharpe", "Sortino", "Skew", "Excess Kurtosis"):
             if c in disp:
                 disp[c] = disp[c].map(
-                    lambda v: "\u2014" if pd.isna(v) else f"{v:.2f}")
+                    lambda v: "n/a" if pd.isna(v) else f"{v:.2f}")
         st.dataframe(signed(disp, ["Volatility", "Vol (recent)", "Max Drawdown",
                                    "Current Drawdown", "Sharpe", "Sortino"]),
                      use_container_width=True, hide_index=True)
@@ -1106,13 +1173,13 @@ if source == "Return stream":
 
     st.markdown(
         '<div class="masthead"><h1>Quant Backtest Studio</h1>'
-        '<div class="sub">Return stream &nbsp;·&nbsp; Statistics</div></div>',
+        '<div class="sub">Return streams</div></div>',
         unsafe_allow_html=True)
 
     if rs_from == "Upload a file":
         if rfile is None:
             note("Upload a file of periodic returns: one date column, then one "
-                 "column per series. Daily, weekly, monthly or quarterly — the "
+                 "column per series. Daily, weekly, monthly or quarterly: the "
                  "frequency is inferred from the dates and drives the "
                  "annualization. Values may be decimals (0.0213) or percentages "
                  "(2.13).<br><br>Long format (date, name, return) is also "
@@ -1179,9 +1246,9 @@ if source == "Return stream":
         key=f"rssel_{'|'.join(cols)}",
         help="Up to 10 series, shown side by side. Detailed charts are drawn "
              "for one of them at a time.")
-    bench_opts = ["— none —"] + [c for c in cols if c not in sel]
+    bench_opts = ["None"] + [c for c in cols if c not in sel]
     bench_col = c2.selectbox("Compare against", bench_opts, key="rsbench")
-    bench_col = None if bench_col.startswith("—") else bench_col
+    bench_col = None if bench_col == "None" else bench_col
     if not sel:
         note("Pick at least one series to analyse.")
         st.stop()
@@ -1273,7 +1340,7 @@ if source == "Return stream":
     main_col = focus
 
     def _pct(v):
-        return "—" if pd.isna(v) else f"{v * 100:+.2f}%"
+        return "n/a" if pd.isna(v) else f"{v * 100:+.2f}%"
 
     rs_tabs = st.tabs(["Results", "Stress tests", "Market regimes",
                        "Robustness", "Export"])
@@ -1436,7 +1503,7 @@ if source == "Return stream":
             tbl[n] = [M.format_metric(k, stats_all[n].get(k, np.nan)) for k in order]
         if bstats:
             tbl[bench_col] = [M.format_metric(k, bstats.get(k, np.nan)) for k in order]
-        st.dataframe(tbl, use_container_width=True, hide_index=True, height=560)
+        st.dataframe(tbl, use_container_width=True, hide_index=True)
         if bench_col:
             note(f"Beta, alpha, tracking error and information ratio are "
                  f"measured against “{bench_col}”.")
@@ -1508,7 +1575,7 @@ if source == "Return stream":
                            "Periods covered": f"{s_['n_covered']} / {s_['n_total']}",
                            "Positive in": s_.get("n_positive", 0),
                            "Median return": s_.get("median_return", np.nan),
-                           "Worst period": s_.get("worst_period") or "—",
+                           "Worst period": s_.get("worst_period") or "n/a",
                            "Worst return": s_.get("worst_return", np.nan),
                            "Deepest drawdown": s_.get("worst_drawdown", np.nan)}
                     if "n_vs_benchmark" in s_:
@@ -1560,7 +1627,7 @@ if source == "Return stream":
                         _shown = set(fd["Period"])
                         for p in _rs_periods:
                             if p.note and p.name in _shown:
-                                note(f"<b>{p.name}</b> — {p.note}")
+                                note(f"<b>{p.name}</b>: {p.note}")
 
                 st.download_button(
                     "Download stress test results (CSV)",
@@ -1651,11 +1718,11 @@ if source == "Return stream":
                         for c_ in _pc:
                             disp[c_] = disp[c_].map(_pct)
                         disp["% of time"] = disp["% of time"].map(
-                            lambda v: "—" if pd.isna(v) else f"{v*100:.0f}%")
+                            lambda v: "n/a" if pd.isna(v) else f"{v*100:.0f}%")
                         disp["Hit rate"] = disp["Hit rate"].map(
-                            lambda v: "—" if pd.isna(v) else f"{v*100:.0f}%")
+                            lambda v: "n/a" if pd.isna(v) else f"{v*100:.0f}%")
                         disp["Sharpe"] = disp["Sharpe"].map(
-                            lambda v: "—" if pd.isna(v) else f"{v:.2f}")
+                            lambda v: "n/a" if pd.isna(v) else f"{v:.2f}")
                         st.dataframe(signed(disp, [c for c in _pc if c != "Ann. volatility"]),
                                      use_container_width=True, hide_index=True)
                         note("% of time is the share of each series' own "
@@ -1768,7 +1835,7 @@ if source == "Return stream":
         note("The workbook carries every table behind this report: "
              "statistics, trailing periods, calendar years, drawdown "
              "episodes, monthly returns, the full series, and every series "
-             "analysed — plus a Notes sheet recording the source, "
+             "analysed, plus a Notes sheet recording the source, "
              "frequency and scale that were read.")
     st.stop()
 
@@ -1777,7 +1844,7 @@ prices_raw: Optional[pd.DataFrame] = None
 upload_error = None
 
 if source == "Yahoo Finance":
-    preset_names = ["\u2014 custom \u2014"] + PRESETS.names()
+    preset_names = ["Custom"] + PRESETS.names()
     preset = st.sidebar.selectbox(
         "Preset universe", preset_names,
         help="Loads a ready-made set of symbols. Everything stays editable "
@@ -1785,12 +1852,12 @@ if source == "Yahoo Finance":
              "match.")
     if preset != st.session_state.get("_preset_applied"):
         st.session_state["_preset_applied"] = preset
-        if not preset.startswith("\u2014"):
+        if preset != "Custom":
             info = PRESETS.get(preset)
             st.session_state["tickers_box"] = "\n".join(info["tickers"])
             st.session_state["_preset_bench"] = info.get("benchmark")
             st.session_state["_preset_cash"] = info.get("cash")
-    if not preset.startswith("\u2014"):
+    if preset != "Custom":
         st.sidebar.markdown(
             f'<div class="note">{PRESETS.get(preset).get("note","")}</div>',
             unsafe_allow_html=True)
@@ -1836,8 +1903,8 @@ sel_universe = st.sidebar.multiselect(
     default=[t for t in (d0.tickers if source == "Yahoo Finance" else univ_options)
              if t in univ_options] or univ_options)
 
-BLEND = "\u2014 blend of several \u2014"
-bench_choices = ["\u2014 none \u2014"] + univ_options + [BLEND]
+BLEND = "Blend of several"
+bench_choices = ["None"] + univ_options + [BLEND]
 _pb = st.session_state.get("_preset_bench")
 bench_default = _pb if _pb in univ_options else (
     d0.benchmark if d0.benchmark in univ_options else None)
@@ -1880,7 +1947,7 @@ if benchmark == BLEND:
                             'TICKER:WEIGHT.</div>', unsafe_allow_html=True)
     benchmark = BLEND if bench_blend else None
 else:
-    benchmark = None if benchmark == "\u2014 none \u2014" else benchmark
+    benchmark = None if benchmark == "None" else benchmark
 
 BENCH_MODES = ["Total return (adjusted close)",
                "Price return + dividends reinvested at rebalance",
@@ -2214,9 +2281,9 @@ if mode == "builtin" and construction == "Blend of strategies":
                             sp.label, bool(sp.default), help=sp.help or None,
                             key=wkey)
                     elif sp.kind == "series":
-                        opts = exog_columns or ["\u2014 no series imported \u2014"]
+                        opts = exog_columns or ["No series imported"]
                         pick = st.selectbox(sp.label, opts, key=wkey)
-                        params_i[sp.key] = "" if pick.startswith("\u2014") else pick
+                        params_i[sp.key] = "" if pick == "No series imported" else pick
                     elif sp.kind == "formula":
                         params_i[sp.key] = st.text_area(
                             sp.label, str(sp.default or ""), height=70,
@@ -2263,11 +2330,11 @@ for p in (strategy.params if mode == "builtin" else []):
         params[p.key] = st.sidebar.checkbox(p.label, bool(default),
                                             help=p.help or None, key=key)
     elif p.kind == "series":
-        opts = exog_columns or ["\u2014 no series imported \u2014"]
+        opts = exog_columns or ["No series imported"]
         idx = opts.index(default) if default in opts else 0
         choice = st.sidebar.selectbox(p.label, opts, index=idx,
                                       help=p.help or None, key=key)
-        params[p.key] = "" if choice.startswith("\u2014") else choice
+        params[p.key] = "" if choice == "No series imported" else choice
     elif p.kind == "formula":
         params[p.key] = st.sidebar.text_area(
             p.label, str(default or ""), height=80,
@@ -2468,7 +2535,7 @@ _blend_label = (" + ".join(b["label"] for b in blend_sleeves)
                     and blend_sleeves) else None)
 run_label = (_blend_label if _blend_label else
              ((strategy.label + _suffix) if mode == "builtin"
-             else (f"Imported weights \u2014 {w_source}" if w_source
+             else (f"Imported weights: {w_source}" if w_source
                    else "Imported weights")))
 
 cfg = RunConfig(
@@ -2513,7 +2580,7 @@ cfg = RunConfig(
 # ----------------------------------------------------------------------
 st.markdown(
     '<div class="masthead"><h1>Quant Backtest Studio</h1>'
-    '<div class="sub">Signal &nbsp;\u00b7&nbsp; Simulation &nbsp;\u00b7&nbsp; Robustness</div></div>',
+    '<div class="sub">Backtest</div></div>',
     unsafe_allow_html=True)
 
 if upload_error:
@@ -2769,32 +2836,29 @@ if run is None:
         'Everything below fills in from that one action.</div>',
         unsafe_allow_html=True)
 
-    eyebrow("Three ways in")
     routes = [
-        ("Prices", "Simulate a strategy",
+        ("Simulate a strategy",
          "Pull ETFs from Yahoo Finance or upload a price file, choose a model, "
          "and the engine handles drift, frictions and execution."),
-        ("Weights", "Test an allocation you already have",
+        ("Test an allocation you already have",
          "Upload target weights from a spreadsheet or committee and measure "
          "them under the same frictions as any built-in model."),
-        ("Returns", "Analyse a track record",
-         "Upload a stream of periodic returns and get the full statistics with "
-         "no simulation at all."),
+        ("Analyse a track record",
+         "Set the source to Return stream: upload periodic returns or pick "
+         "Yahoo tickers, and get the statistics with no simulation at all."),
     ]
-    cols = st.columns(3)
-    for col, (tag, title, body) in zip(cols, routes):
-        with col:
-            st.markdown(
-                f'<div class="startcard"><div class="n">{tag}</div>'
-                f'<div class="t">{title}</div><div class="b">{body}</div></div>',
-                unsafe_allow_html=True)
-
-    eyebrow("Models available")
-    for k in sorted(REGISTRY, key=lambda x: REGISTRY[x].label):
-        sx = REGISTRY[k]
-        st.markdown(
-            f'<div class="strat"><div class="nm">{sx.label}</div>'
-            f'<div class="ds">{sx.description}</div></div>',
+    left, right = st.columns([1, 1.3], gap="large")
+    with left:
+        eyebrow("Where to start")
+        st.markdown("".join(f'<div class="route"><div class="t">{t}</div>'
+                            f'<div class="b">{b}</div></div>' for t, b in routes),
+                    unsafe_allow_html=True)
+    with right:
+        eyebrow(f"{len(REGISTRY)} models")
+        st.markdown("".join(
+            f'<details class="strat"><summary>{REGISTRY[k].label}</summary>'
+            f'<div class="ds">{REGISTRY[k].description}</div></details>'
+            for k in sorted(REGISTRY, key=lambda x: REGISTRY[x].label)),
             unsafe_allow_html=True)
     st.stop()
 
@@ -2849,7 +2913,7 @@ with tabs[0]:
                 else "the first day the strategy held a position")
         note(f"Warm-up trimmed: the record starts on "
              f"{res.equity.index[0].date()}, {_why}, rather than {dropped}. "
-             f"Anything held before that \u2014 a fixed core, cash \u2014 is "
+             f"Anything held before that (a fixed core, cash) is "
              f"excluded, and the benchmark is measured over the same window.")
     keys = ["CAGR", "Volatility", "Sharpe", "Max Drawdown", "Calmar", "Sortino"]
     cols = st.columns(len(keys))
@@ -2910,7 +2974,7 @@ with tabs[0]:
     })
     if bstats:
         tbl[bench.label] = [M.format_metric(k, bstats.get(k, np.nan)) for k in order]
-    st.dataframe(tbl, use_container_width=True, hide_index=True, height=560)
+    st.dataframe(tbl, use_container_width=True, hide_index=True)
 
     eyebrow("Trailing periods")
     ptabs = M.period_table(res.equity, res.returns,
@@ -2979,8 +3043,8 @@ with tabs[1]:
         _last = _held.index[-1]
 
         if _score is None:
-            note(f"{_strat.label} does not rank on a single number \u2014 it "
-                 f"allocates by rule rather than by score \u2014 so there is "
+            note(f"{_strat.label} does not rank on a single number: it "
+                 f"allocates by rule rather than by score, so there is "
                  f"nothing to display beyond the target weights below.")
         else:
             eyebrow(f"Where each name stands as of {_last.date()}")
@@ -2999,9 +3063,9 @@ with tabs[1]:
                          "Ordered", "Not held"))
             disp = cur_tbl.copy()
             disp["Score"] = disp["Score"].map(
-                lambda v: "\u2014" if pd.isna(v) else f"{v:,.4f}")
+                lambda v: "n/a" if pd.isna(v) else f"{v:,.4f}")
             disp["Rank"] = disp["Rank"].map(
-                lambda v: "\u2014" if pd.isna(v) else f"{int(v)}")
+                lambda v: "n/a" if pd.isna(v) else f"{int(v)}")
             for c in ("Target weight", "Held"):
                 disp[c] = disp[c].map(lambda v: f"{v*100:.2f}%")
             st.dataframe(signed(disp, ["Held", "Target weight"]),
@@ -3009,8 +3073,8 @@ with tabs[1]:
 
             _gap = int((cur_tbl["Status"] == "Not held").sum())
             note("Score is what the model ranks on; it is not the whole "
-                 "decision. Most models apply a filter as well \u2014 an "
-                 "absolute threshold, a trend test, a screen \u2014 so a "
+                 "decision. Most models apply a filter as well (an "
+                 "absolute threshold, a trend test, a screen), so a "
                  "high-scoring name can still be excluded. Read the score "
                  "for the ordering and the status for the outcome."
                  + (f" {_gap} of {len(cur_tbl)} names are currently out."
@@ -3198,7 +3262,7 @@ with tabs[2]:
             if c in t: t[c] = t[c].map(lambda v: f"{v:,.2f}")
         if "Effective Cost (bps)" in t:
             t["Effective Cost (bps)"] = t["Effective Cost (bps)"].map(
-                lambda v: f"{v:.1f}" if pd.notna(v) else "\u2014")
+                lambda v: f"{v:.1f}" if pd.notna(v) else "n/a")
         n_liq = int((res.trades.get("Reason", pd.Series(dtype=str))
                     == "Fee liquidation").sum())
         st.dataframe(t.tail(400), use_container_width=True, hide_index=True, height=380)
@@ -3212,7 +3276,7 @@ with tabs[2]:
             st.markdown(
                 f'<div class="flag">{n_liq} of these are pro-rata sales to '
                 f'raise the management fee, tagged \u201cFee liquidation\u201d '
-                f'rather than \u201cRebalance\u201d \u2014 the model did not '
+                f'rather than \u201cRebalance\u201d: the model did not '
                 f'choose to sell these; the fee did.</div>',
                 unsafe_allow_html=True)
         st.download_button("Download full trade log (CSV)",
@@ -3325,9 +3389,9 @@ with tabs[3]:
                             use_container_width=True, config={"displaylogo": False})
         _fmt = _disp.copy()
         for c_ in ["Average weight", "Time held"]:
-            _fmt[c_] = _fmt[c_].map(lambda v: "—" if pd.isna(v) else f"{v * 100:.1f}%")
+            _fmt[c_] = _fmt[c_].map(lambda v: "n/a" if pd.isna(v) else f"{v * 100:.1f}%")
         for c_ in ["Contribution", "Share of result", "Share of risk"]:
-            _fmt[c_] = _fmt[c_].map(lambda v: "—" if pd.isna(v) else f"{v * 100:+.2f}%")
+            _fmt[c_] = _fmt[c_].map(lambda v: "n/a" if pd.isna(v) else f"{v * 100:+.2f}%")
         st.dataframe(signed(_fmt, ["Contribution", "Share of result"]),
                      use_container_width=True, hide_index=True)
         note("Contribution is in percent of starting capital. Share of result "
@@ -3649,8 +3713,8 @@ with tabs[5]:
         px_ = cols[0].selectbox("First parameter", [p.key for p in numeric],
                                 format_func=lambda k: next(p.label for p in numeric if p.key == k))
         others = [p.key for p in numeric if p.key != px_]
-        py_ = cols[1].selectbox("Second parameter", ["\u2014 none \u2014"] + others,
-                                format_func=lambda k: k if k == "\u2014 none \u2014"
+        py_ = cols[1].selectbox("Second parameter", ["None"] + others,
+                                format_func=lambda k: k if k == "None"
                                 else next(p.label for p in numeric if p.key == k))
         metric_choice = st.selectbox("Metric", ["Sharpe", "CAGR", "Calmar",
                                                 "Max Drawdown", "Annual Turnover"])
@@ -3667,7 +3731,7 @@ with tabs[5]:
 
         if st.button("Compute parameter surface", key="sweepbtn"):
             grid = {px_: _grid(px_)}
-            if py_ != "\u2014 none \u2014":
+            if py_ != "None":
                 grid[py_] = _grid(py_)
             with st.spinner("Sweeping..."):
                 sw = R.parameter_sweep(universe, strategy_obj, params_run, grid,
@@ -3679,7 +3743,7 @@ with tabs[5]:
         if "sweep" in st.session_state:
             sw, sx, sy, sz = st.session_state["sweep"]
             if sz in sw.columns:
-                if sy != "\u2014 none \u2014" and sy in sw.columns:
+                if sy != "None" and sy in sw.columns:
                     view = st.radio("View", ["3D surface", "Heatmap"],
                                     horizontal=True, key="sweepview",
                                     help="Two parameters plus a metric is "
@@ -3778,7 +3842,7 @@ with tabs[5]:
     eyebrow("4. Cost sensitivity")
     note("This sweep rebuilds a clean flat-rate cost for each level on the "
          "axis, independent of the impact model or overrides configured "
-         "above \u2014 it answers a different question (how sensitive is "
+         "above: it answers a different question (how sensitive is "
          "the strategy to costs in general) from the headline result (what "
          "it actually costs given the configured model).")
     _kw_flat = {k: v for k, v in kw.items() if k != "volume"}
@@ -3840,7 +3904,7 @@ with tabs[5]:
             with sc2:
                 dial("Positive in", f"{summ.get('n_positive', 0)} / {n_cov}")
             with sc3:
-                wp = summ.get("worst_period") or "\u2014"
+                wp = summ.get("worst_period") or "n/a"
                 dial("Worst period", f"{summ.get('worst_return', float('nan'))*100:+.1f}%",
                     wp if len(wp) <= 28 else wp[:26] + "\u2026")
             with sc4:
@@ -3901,7 +3965,7 @@ with tabs[5]:
             for c in ("Return", "Max Drawdown", "Best Day", "Worst Day",
                      "Benchmark Return", "Excess vs Benchmark"):
                 disp[c] = disp[c].map(
-                    lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
+                    lambda v: "n/a" if pd.isna(v) else f"{v*100:+.2f}%")
             st.dataframe(signed(disp, ["Return", "Max Drawdown", "Best Day",
                                       "Worst Day", "Benchmark Return",
                                       "Excess vs Benchmark"]),
@@ -3944,9 +4008,9 @@ with tabs[6]:
     with a:
         dial("Sessions", f"{quality.rows:,}")
     with b:
-        dial("Start", str(quality.start.date()) if quality.start is not None else "\u2014")
+        dial("Start", str(quality.start.date()) if quality.start is not None else "n/a")
     with c:
-        dial("End", str(quality.end.date()) if quality.end is not None else "\u2014")
+        dial("End", str(quality.end.date()) if quality.end is not None else "n/a")
 
     eyebrow("Per-instrument diagnostic")
     st.dataframe(quality.per_asset, use_container_width=True, hide_index=True)
@@ -4126,7 +4190,7 @@ with tabs[7]:
             with p3:
                 dial("First value",
                      str(d["first_valid"].date()) if d["first_valid"] is not None
-                     else "\u2014", "warm-up needed")
+                     else "n/a", "warm-up needed")
             with p4:
                 dial("Median", f"{d['median']:.3f}",
                      f"range {d['min']:.2f} to {d['max']:.2f}")
@@ -4237,7 +4301,7 @@ with tabs[8]:
         if "sweep" in st.session_state:
             _sw, _sx, _sy, _sz = st.session_state["sweep"]
             b["parameter_sweep"] = {"df": _sw, "x": _sx,
-                                    "y": None if _sy == "\u2014 none \u2014" else _sy,
+                                    "y": None if _sy == "None" else _sy,
                                     "z": _sz}
         b["day_sweep"] = st.session_state.get("daysweep")
         _mc_res = st.session_state.get("mc")
@@ -4341,7 +4405,7 @@ with tabs[8]:
              "episodes, monthly returns, the full daily series, current and "
              "historical holdings, target weights, the trade log, rebalance "
              "dates, parameters, prices, any imported series, and the data "
-             "diagnostic \u2014 plus a Notes sheet recording the settings "
+             "diagnostic, plus a Notes sheet recording the settings "
              "these figures depend on.")
     except Exception as exc:
         st.markdown(f'<div class="flag">Excel export unavailable: {exc}</div>',

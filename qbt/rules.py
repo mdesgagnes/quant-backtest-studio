@@ -152,7 +152,7 @@ def describe_rule(rule: Rule) -> str:
     spec = INDICATORS.get(rule.indicator, {})
     left = rule.indicator + (f" ({rule.window})" if spec.get("n") else "")
     if rule.kind == "score":
-        return f"{rule.transform} \u2014 {left} \u00b7 weight {rule.weight:g}"
+        return f"{rule.transform}: {left} \u00b7 weight {rule.weight:g}"
     if TARGETS.get(rule.target) == "indicator":
         other = INDICATORS.get(rule.other_indicator, {})
         right = rule.other_indicator + (f" ({rule.other_window})"

@@ -91,11 +91,11 @@ def _df_to_html(df: pd.DataFrame, pct_cols: Optional[List[str]] = None,
     d = df.copy()
     for c in (pct_cols or []):
         if c in d.columns:
-            d[c] = d[c].map(lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
+            d[c] = d[c].map(lambda v: "n/a" if pd.isna(v) else f"{v*100:+.2f}%")
     for c in (money_cols or []):
         if c in d.columns:
-            d[c] = d[c].map(lambda v: "\u2014" if pd.isna(v) else f"${v:,.0f}")
-    return d.to_html(index=False, border=0, escape=True, na_rep="\u2014")
+            d[c] = d[c].map(lambda v: "n/a" if pd.isna(v) else f"${v:,.0f}")
+    return d.to_html(index=False, border=0, escape=True, na_rep="n/a")
 
 
 def render_full_report(bundle: Dict[str, Any], dark: bool = True) -> str:
@@ -119,7 +119,7 @@ def render_full_report(bundle: Dict[str, Any], dark: bool = True) -> str:
     }
     css = CSS_DARK % pal
     parts: List[str] = [f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
-                        f"<title>{bundle.get('label','Backtest')} \u2014 Detailed Report</title>"
+                        f"<title>{bundle.get('label','Backtest')} : detailed report</title>"
                         f"<style>{css}</style></head><body>"]
 
     label = bundle.get("label", "Backtest")
@@ -128,7 +128,7 @@ def render_full_report(bundle: Dict[str, Any], dark: bool = True) -> str:
 
     parts.append(
         f'<div class="masthead"><div><h1>{label}</h1>'
-        f'<div class="note" style="margin:0;">Detailed report \u2014 every module '
+        f'<div class="note" style="margin:0;">Detailed report: every module '
         f'in one document</div></div>'
         f'<div class="meta">Generated {stamp}<br>'
         f'{bundle.get("period","")}<br>'
@@ -287,7 +287,7 @@ def render_full_report(bundle: Dict[str, Any], dark: bool = True) -> str:
                      'year of data.</p></div>')
 
     parts.append(
-        f'<div class="footer">Quant Backtest Studio \u2014 detailed report \u2014 '
+        f'<div class="footer">Quant Backtest Studio, detailed report, '
         f'generated {stamp}. Every figure above comes from the backtest already run; '
         f'this document adds no new calculation of its own.</div>')
     parts.append("</body></html>")
@@ -377,10 +377,10 @@ def render_full_report_pdf(bundle: Dict[str, Any]) -> bytes:
         d = df.tail(max_rows).copy()
         for c in (pct_cols or []):
             if c in d.columns:
-                d[c] = d[c].map(lambda v: "\u2014" if pd.isna(v) else f"{v*100:+.2f}%")
+                d[c] = d[c].map(lambda v: "n/a" if pd.isna(v) else f"{v*100:+.2f}%")
         for c in (money_cols or []):
             if c in d.columns:
-                d[c] = d[c].map(lambda v: "\u2014" if pd.isna(v) else f"${v:,.0f}")
+                d[c] = d[c].map(lambda v: "n/a" if pd.isna(v) else f"${v:,.0f}")
         d = d.astype(str)
         data = [list(d.columns)] + d.values.tolist()
         t = Table(data, repeatRows=1)
@@ -402,7 +402,7 @@ def render_full_report_pdf(bundle: Dict[str, Any]) -> bytes:
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     story.append(Paragraph(label, styles["title"]))
-    story.append(Paragraph(f"Detailed report \u2014 generated {stamp}<br/>"
+    story.append(Paragraph(f"Detailed report, generated {stamp}<br/>"
                            f'{bundle.get("period","")}<br/>{bundle.get("engine_line","")}',
                            styles["meta"]))
     story.append(Spacer(1, 10))
@@ -557,7 +557,7 @@ def render_full_report_pdf(bundle: Dict[str, Any]) -> bytes:
 
     story.append(Spacer(1, 14))
     story.append(Paragraph(
-        f"Quant Backtest Studio \u2014 detailed report \u2014 generated {stamp}. "
+        f"Quant Backtest Studio, detailed report, generated {stamp}. "
         f"Every figure above comes from the backtest already run.", styles["footer"]))
 
     buf = io.BytesIO()

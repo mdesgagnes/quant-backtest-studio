@@ -318,7 +318,7 @@ _PCT_PREFIXES = ("VaR 95%", "CVaR 95%", "% Positive", "Best ", "Worst ")
 
 def format_metric(key: str, value: float) -> str:
     if value is None or (isinstance(value, float) and np.isnan(value)):
-        return "\u2014"
+        return "n/a"
     pct = FORMATS.get(key) == "pct" or key.startswith(_PCT_PREFIXES)
     if pct:
         return f"{value * 100:,.2f}%"

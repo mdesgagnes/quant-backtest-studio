@@ -130,13 +130,13 @@ def name_of(ticker: str) -> Optional[str]:
     return NAMES.get(str(ticker).strip().upper())
 
 
-def label(ticker: str, sep: str = " \u2014 ") -> str:
+def label(ticker: str, sep: str = " \u00b7 ") -> str:
     """"TICKER" alone, or "TICKER — Full Name" when the name is known."""
     t = str(ticker).strip()
     n = name_of(t)
     return f"{t}{sep}{n}" if n else t
 
 
-def label_map(tickers: Iterable[str], sep: str = " \u2014 ") -> Dict[str, str]:
+def label_map(tickers: Iterable[str], sep: str = " \u00b7 ") -> Dict[str, str]:
     """{ticker: label} for a collection, e.g. for a selectbox's format_func."""
     return {t: label(t, sep) for t in tickers}

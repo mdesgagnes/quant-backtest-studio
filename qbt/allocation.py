@@ -153,13 +153,13 @@ def resolve(prices: pd.DataFrame, sleeves: List[Sleeve],
             # numbers typed in: "60, 40" and "0.6, 0.4" mean the same thing.
             tot = sum(abs(v) for v in s.fixed.values()) or 1.0
             detail = ", ".join(f"{k} {abs(v)/tot*100:.0f}%" for k, v in
-                               list(s.fixed.items())[:4]) or "\u2014"
+                               list(s.fixed.items())[:4]) or "n/a"
             if len(s.fixed) > 4:
                 detail += f", +{len(s.fixed)-4} more"
         else:
             f = _strategy_frame(s, prices, registry, exog, cash)
             detail = registry[s.strategy_key].label if s.strategy_key in registry \
-                else "\u2014"
+                else "n/a"
             if s.strategy_key not in registry:
                 warnings.append(
                     f"Sleeve \u201c{s.name}\u201d names an unknown model and "

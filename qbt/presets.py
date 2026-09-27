@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Dict, List
 
 UNIVERSES: Dict[str, Dict[str, object]] = {
-    "Canadian ETFs \u2014 broad": {
+    "Canadian ETFs: broad": {
         "classes": {
             "XIC.TO": "Equities",
             "ZEB.TO": "Equities",
