@@ -33,7 +33,7 @@ Simulation model, explicit and verifiable:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, Optional
 
 import numpy as np
@@ -622,6 +622,46 @@ def trim_warmup(res: BacktestResult, start: Optional[pd.Timestamp] = None,
         fees=(res.fees.loc[keep] if res.fees is not None else None),
         contributions=_trim_contrib(res.contributions, keep),
     )
+
+
+def window(res: BacktestResult, start: Optional[pd.Timestamp] = None,
+           end: Optional[pd.Timestamp] = None) -> BacktestResult:
+    """The result restricted to the sessions from `start` to `end`.
+
+    For reporting on part of a finished run, not for re-running it: the
+    positions, trades and signals are exactly those of the full backtest.
+    The first retained session becomes the origin (its return is zeroed,
+    as in `trim_warmup`), but the value keeps its dollar level, so holdings,
+    share counts and trades still reconcile with the full run.
+    """
+    idx = res.equity.index
+    if start is not None:
+        after = idx[idx >= pd.Timestamp(start)]
+        start = after[0] if len(after) else None
+    out = trim_warmup(res, start) if start is not None and start > idx[0] else res
+    if end is None:
+        return out
+    keep = out.equity.index[out.equity.index <= pd.Timestamp(end)]
+    if len(keep) < 2 or len(keep) == len(out.equity.index):
+        return out
+
+    def cut(x):
+        return None if x is None else x.loc[keep]
+
+    trades = out.trades
+    if not trades.empty and "Date" in trades.columns:
+        trades = trades[trades["Date"] <= keep[-1]].reset_index(drop=True)
+    return replace(
+        out, equity=cut(out.equity), returns=cut(out.returns),
+        gross_returns=cut(out.gross_returns), weights=cut(out.weights),
+        target_weights=cut(out.target_weights), turnover=cut(out.turnover),
+        costs=cut(out.costs), exposure=cut(out.exposure),
+        cash_weight=cut(out.cash_weight),
+        rebalance_dates=pd.DatetimeIndex(
+            [d for d in out.rebalance_dates if d <= keep[-1]]),
+        trades=trades, dividend_income=cut(out.dividend_income),
+        shares=cut(out.shares), fees=cut(out.fees),
+        contributions=cut(out.contributions))
 
 
 def _trim_contrib(c: Optional[pd.DataFrame],

@@ -25,7 +25,8 @@ from qbt.exog import load_exog, prepare_exog, exog_report, split_roles
 from qbt.external import (load_target_weights, prepare_target_weights,
                           weights_template)
 from qbt.engine import (run_backtest, benchmark_result, blended_benchmark,
-                        align_results, align_start, first_active_date)
+                        align_results, align_start, first_active_date,
+                        window as result_window)
 from qbt.strategies import REGISTRY, get as get_strategy
 from qbt import metrics as M
 from qbt import charts as C
@@ -4449,6 +4450,27 @@ with tabs[8]:
         help="Choose what the Full report (Excel) carries. Notes and the "
              "Contents index are always included; the Contents sheet lists "
              "whatever was left out.")
+    _d0, _d1 = res.equity.index[0].date(), res.equity.index[-1].date()
+    # A new run can have a different date range: forget the old window
+    # rather than hold dates the new one may not contain.
+    if st.session_state.get("_xl_stamp") != run["stamp"]:
+        st.session_state["_xl_stamp"] = run["stamp"]
+        st.session_state["xl_start"], st.session_state["xl_end"] = _d0, _d1
+    xw1, xw2 = st.columns(2)
+    xl_start = xw1.date_input(
+        "Excel report from", min_value=_d0, max_value=_d1, key="xl_start",
+        help="Limit the workbook to part of the backtest. The positions and "
+             "trades are those of the full run; statistics, drawdowns, "
+             "attribution, stress tests and regimes are measured over the "
+             "window alone. Robustness tests re-simulate the whole run and "
+             "are marked as such.")
+    xl_end = xw2.date_input("to", min_value=_d0, max_value=_d1, key="xl_end")
+    xl_windowed = (xl_start, xl_end) != (_d0, _d1)
+    if xl_windowed and xl_start >= xl_end:
+        st.markdown('<div class="flag">The Excel window must end after it '
+                    'starts; exporting the full period instead.</div>',
+                    unsafe_allow_html=True)
+        xl_windowed = False
     c1, c2, c3 = st.columns(3)
     c1.download_button("Configuration (YAML)", y.encode("utf-8"),
                        f"config_{run['strategy_key']}.yaml", "text/yaml")
@@ -4463,8 +4485,8 @@ with tabs[8]:
     c2.download_button("Daily series (CSV)",
                        series.to_csv().encode("utf-8"), "series.csv", "text/csv")
 
-    def _workbook_modules(inc):
-        """Every other tab's tables, as (module, sheet, frame, index).
+    def _workbook_modules(inc, res, bench, stats, windowed):
+        """Every other tab's tables, as (module, sheet, frame, index[, note]).
 
         The tabs above have all run by the time this one renders, so their
         results are reused as computed -- with the settings chosen there
@@ -4472,15 +4494,42 @@ with tabs[8]:
         than recomputed with defaults. The parameter surface, trading-day
         sweep and Monte Carlo are included when they have been run for this
         backtest; the Contents sheet says so when they have not.
+
+        `res`, `bench` and `stats` are the window being exported. When that
+        is only part of the run, anything measured on returns is measured
+        again over the window; the robustness tests, which re-simulate the
+        whole run, are kept and marked as covering the full backtest.
         """
         g = globals()
         secs: List[Any] = []
         miss: List[Any] = []
+        w0, w1 = res.equity.index[0], res.equity.index[-1]
+        full = "Covers the full backtest, not the selected window." if windowed else ""
 
-        # Signals
-        _sc, _now = g.get("_score"), g.get("cur_tbl")
+        # Signals, standing as of the last day exported
+        _sc = g.get("_score")
         if run_mode == "builtin" and _sc is not None:
-            secs += [("Signals", "Signals Now", _now, False),
+            _sc = _sc.loc[:w1]
+            _cols = list(universe.columns)
+            _now = None
+            if len(_sc):
+                _s = _sc.iloc[-1]
+                _rk = _s.rank(ascending=False, method="min")
+                _tw = res.target_weights.reindex(columns=_cols).iloc[-1]
+                _hd = res.weights.reindex(columns=_cols).iloc[-1]
+                _now = pd.DataFrame({
+                    "Instrument": _cols,
+                    "Score": [_s.get(c, np.nan) for c in _cols],
+                    "Rank": [_rk.get(c, np.nan) for c in _cols],
+                    "Target weight": [_tw.get(c, 0.0) for c in _cols],
+                    "Held": [_hd.get(c, 0.0) for c in _cols],
+                }).sort_values("Score", ascending=False, na_position="last")
+                _now["Status"] = np.where(
+                    _now["Held"].abs() > 1e-9, "Held",
+                    np.where(_now["Target weight"].abs() > 1e-9,
+                             "Ordered", "Not held"))
+            _sc = _sc.loc[w0:]
+            secs += [("Signals", f"Signals on {w1.date()}", _now, False),
                      ("Signals", "Signal Scores", _sc, True),
                      ("Signals", "Signal Ranks",
                       _sc.rank(axis=1, ascending=False, method="min"), True)]
@@ -4503,10 +4552,12 @@ with tabs[8]:
                           w_report.scale, "Yes" if w_report.has_shorts else "No",
                           ", ".join(map(str, w_report.unknown)),
                           ", ".join(map(str, w_report.absent)),
-                          w_report.dropped_dates]}), False))
+                          w_report.dropped_dates]}), False, full))
         if sleeve_report is not None:
-            secs += [("Positions", "Sleeves", sleeve_report.rows, False),
-                     ("Positions", "Weight by Sleeve", sleeve_report.by_sleeve, True)]
+            _bs = sleeve_report.by_sleeve
+            secs += [("Positions", "Sleeves", sleeve_report.rows, False, full),
+                     ("Positions", "Weight by Sleeve",
+                      _bs.loc[w0:w1] if _bs is not None else None, True)]
         secs.append(("Positions", "Average Weight",
                      res.weights.mean().sort_values(ascending=False)
                      .rename("Average weight").rename_axis("Instrument")
@@ -4539,34 +4590,38 @@ with tabs[8]:
             miss.append(("Attribution", "Contribution",
                          "This result predates contribution tracking; run again."))
 
-        # Tax
+        # Tax: the cost base keeps the full history; the sheets keep the
+        # tax years and sales inside the window.
         if tax_rep is not None:
-            secs += XL.tax_sections(
-                tax_rep, bench_tax_rep, res.label,
-                run["bench"].label if run.get("bench") is not None else "Benchmark",
-                res.equity,
-                run["bench"].equity if run.get("bench") is not None else None)
+            secs += [sec + (("Tax years overlapping the window; cost base "
+                             "from the full history.",) if windowed and len(sec) == 4
+                            else ())
+                     for sec in XL.tax_sections(
+                         tax_rep, bench_tax_rep, res.label,
+                         bench.label if bench is not None else "Benchmark",
+                         res.equity, bench.equity if bench is not None else None,
+                         windowed=windowed)]
         else:
             miss.append(("Tax", "Tax analysis",
                          "No dividend or share data available for this run."))
 
-        # Robustness
+        # Robustness: each test re-simulates the whole run
         _sw = st.session_state.get("sweep")
         _sweep_df, _sweep_setup = None, None
         if _sw is not None:
             _sweep_df = _sw[0]
             _sweep_setup = {"First parameter": _sw[1],
                             "Second parameter": _sw[2], "Metric": _sw[3]}
-            _dsr = R.deflated_sharpe_note(stats.get("Sharpe", np.nan),
-                                          len(_sweep_df), len(res.returns), ppy)
+            _dsr = R.deflated_sharpe_note(g["stats"].get("Sharpe", np.nan),
+                                          len(_sweep_df), len(g["res"].returns), ppy)
             _sweep_setup["Sharpe expected by chance across trials"] = \
                 _dsr["expected_max_sharpe"]
             _sweep_setup["Net edge of the model (Sharpe)"] = _dsr["haircut"]
-        secs += XL.robustness_sections(
+        secs += [sec + ((full,) if full else ()) for sec in XL.robustness_sections(
             walk_forward=g.get("wf"), in_out_sample=g.get("ios"),
             cost_sensitivity=g.get("cs"), parameter_sweep=_sweep_df,
             sweep_setup=_sweep_setup, day_sweep=st.session_state.get("daysweep"),
-            monte_carlo=st.session_state.get("mc"))
+            monte_carlo=st.session_state.get("mc"))]
         if _sw is None:
             miss.append(("Robustness", "Parameter sweep",
                          "Not applicable to imported weights." if is_external else
@@ -4583,8 +4638,14 @@ with tabs[8]:
                          "Not run for this backtest (Robustness tab, "
                          "Run Monte Carlo simulation)."))
 
-        # Stress tests, with the category and custom periods chosen above
-        secs += XL.stress_sections(g.get("ev"))
+        # Stress tests, with the category and custom periods chosen above,
+        # measured again when only part of the run is exported
+        if windowed:
+            secs += XL.stress_sections(STRESS.evaluate_periods(
+                res.returns, g.get("_periods"),
+                bench.returns if bench is not None else None))
+        else:
+            secs += XL.stress_sections(g.get("ev"))
 
         # Market regimes, as on the Return stream tab: the strategy and its
         # benchmark in every rate, volatility, equity and economic regime.
@@ -4606,26 +4667,50 @@ with tabs[8]:
         # Data
         if quality is not None and quality.warnings:
             secs.append(("Data", "Data Flags",
-                         pd.DataFrame({"Flag": quality.warnings}), False))
+                         pd.DataFrame({"Flag": quality.warnings}), False, full))
         if ex_rep is not None:
-            secs.append(("Data", "Exogenous Series Check", ex_rep.per_series, False))
+            secs.append(("Data", "Exogenous Series Check", ex_rep.per_series,
+                         False, full))
         secs.append(("Data", "Return Correlation",
-                     universe.pct_change().corr(), True))
+                     universe.loc[w0:w1].pct_change().corr(), True))
         return secs, miss
 
     try:
+        if xl_windowed:
+            _t0, _t1 = pd.Timestamp(xl_start), pd.Timestamp(xl_end)
+            xres = result_window(res, _t0, _t1)
+            xbench = result_window(bench, _t0, _t1) if bench is not None else None
+            xstats = M.summary(xres.returns, xres.equity,
+                               xbench.returns if xbench is not None else None,
+                               xres.turnover, xres.exposure,
+                               rcfg.costs.cash_rate_pa, ppy)
+            xbstats = (M.summary(xbench.returns, xbench.equity, None, None, None,
+                                 rcfg.costs.cash_rate_pa, ppy)
+                       if xbench is not None else {})
+            _xw0, _xw1 = xres.equity.index[0], xres.equity.index[-1]
+            _xnotes = {"Export window": f"{_xw0.date()} to {_xw1.date()}, of a "
+                                        f"backtest run {_d0} to {_d1}"}
+        else:
+            xres, xbench, xstats, xbstats = res, bench, stats, bstats
+            _xw0, _xw1 = res.equity.index[0], res.equity.index[-1]
+            _xnotes = {}
         try:
-            _xl_secs, _xl_miss = _workbook_modules(set(xl_pick))
+            _xl_secs, _xl_miss = _workbook_modules(set(xl_pick), xres, xbench,
+                                                   xstats, xl_windowed)
         except Exception as exc:
             _xl_secs, _xl_miss = [], [("All", "Additional modules",
                                        f"Could not be assembled: {exc}")]
         book = XL.workbook_from_backtest(
-            res, bench, stats, bstats, rcfg,
-            prices=universe, exog=exog_used,
+            xres, xbench, xstats, xbstats or None, rcfg,
+            prices=universe.loc[_xw0:_xw1],
+            exog=exog_used.loc[_xw0:_xw1] if exog_used is not None else None,
             quality=quality.per_asset if quality is not None else None,
-            sections=_xl_secs, omitted=_xl_miss, include=xl_pick)
+            sections=_xl_secs, omitted=_xl_miss, include=xl_pick,
+            extra_notes=_xnotes)
         c3.download_button("Full report (Excel)", book,
-                           f"backtest_{run['strategy_key']}.xlsx",
+                           f"backtest_{run['strategy_key']}"
+                           + (f"_{_xw0.date()}_{_xw1.date()}" if xl_windowed else "")
+                           + ".xlsx",
                            "application/vnd.openxmlformats-officedocument."
                            "spreadsheetml.sheet", key="dlxl")
         note("The workbook carries every module in one file, indexed on a "

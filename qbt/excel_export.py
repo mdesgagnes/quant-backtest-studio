@@ -47,8 +47,8 @@ BACKTEST_MODULES = ["Results", "Signals", "Positions", "Attribution", "Tax",
 RETURNS_MODULES = ["Results", "Stress tests", "Market regimes", "Robustness",
                    "Data"]
 
-# (module, sheet name, frame, write the index)
-Section = Tuple[str, str, Optional[pd.DataFrame], bool]
+# (module, sheet name, frame, write the index[, note for the Contents sheet])
+Section = Tuple[Any, ...]
 # (module, what is missing, why)
 Omission = Tuple[str, str, str]
 
@@ -83,7 +83,8 @@ class _Book:
         return name
 
     def write(self, df, sheet: str, index: bool = False,
-              module: Optional[str] = None, always: bool = False) -> None:
+              module: Optional[str] = None, always: bool = False,
+              note: str = "") -> None:
         if _empty(df) or not (always or self.wants(module or self.module)):
             return
         if isinstance(df, pd.Series):
@@ -91,7 +92,7 @@ class _Book:
         name = self._name(sheet)
         df.to_excel(self.xw, sheet_name=name, index=index)
         self.rows.append({"Module": module or self.module, "Sheet": name,
-                          "Rows": int(len(df)), "Note": ""})
+                          "Rows": int(len(df)), "Note": note})
 
     def sections(self, sections: Optional[List[Section]],
                  module: Optional[str] = None) -> None:
@@ -100,7 +101,8 @@ class _Book:
         keep = []
         for sec in sections or []:
             if module is None or sec[0] == module:
-                self.write(sec[2], sec[1], sec[3], sec[0])
+                self.write(sec[2], sec[1], sec[3], sec[0],
+                           note=sec[4] if len(sec) > 4 else "")
             else:
                 keep.append(sec)
         if sections is not None:
@@ -244,28 +246,66 @@ def regime_sections(returns: Dict[str, pd.Series],
 
 def tax_sections(rep, bench_rep, label: str, bench_label: str,
                  equity: pd.Series, bench_equity: Optional[pd.Series] = None,
-                 module: str = "Tax") -> List[Section]:
-    """Everything on the Tax tab, strategy and benchmark side by side."""
+                 module: str = "Tax", windowed: bool = False) -> List[Section]:
+    """Everything on the Tax tab, strategy and benchmark side by side.
+
+    `windowed` means `equity` covers only part of the run the reports were
+    computed on. The cost base still carries the full history -- it has to,
+    a sale's gain depends on every earlier purchase -- but the sheets keep
+    only the tax years and sales inside the window, and the summary is
+    re-totalled over them. Tax is assessed per calendar year, so a window
+    that starts or ends mid-year carries that whole year's bill.
+    """
     if rep is None:
         return []
     from . import tax as TAX
+    t0, t1 = equity.index[0], equity.index[-1]
 
-    def _head(r) -> Dict[str, Any]:
-        yrs = r.by_year
+    def _years(r) -> pd.DataFrame:
+        y = r.by_year
+        if windowed and not y.empty:
+            y = y[(y["Year"] >= t0.year) & (y["Year"] <= t1.year)]
+        return y.reset_index(drop=True)
+
+    def _sales(r) -> pd.DataFrame:
+        x = r.realized_trades
+        if windowed and not x.empty and "Date" in x.columns:
+            d = pd.to_datetime(x["Date"])
+            x = x[(d >= t0) & (d <= t1)]
+        return x.reset_index(drop=True)
+
+    def _tcr(r, pretax: pd.Series) -> float:
+        if not windowed:
+            return r.tax_cost_ratio
+        after = r.after_tax_equity.reindex(pretax.index).ffill().bfill()
+        yrs = (t1 - t0).days / 365.25
+        if yrs <= 0 or pretax.iloc[0] <= 0 or after.iloc[0] <= 0:
+            return np.nan
+        g = lambda s_: (float(s_.iloc[-1] / s_.iloc[0])) ** (1 / yrs) - 1
+        return g(pretax) - g(after)
+
+    def _head(r, pretax: pd.Series) -> Dict[str, Any]:
+        yrs, sales = _years(r), _sales(r)
+        tcr = _tcr(r, pretax)
         return {
-            "Total tax": r.total_tax,
-            "Tax Cost Ratio (per year)": r.tax_cost_ratio,
-            "Tax efficiency": TAX.efficiency_label(r.tax_cost_ratio)[0],
-            "Realized gains, net of losses": r.total_pretax_gain,
+            "Total tax": (float(yrs["Total Tax"].sum()) if not yrs.empty else 0.0)
+                         if windowed else r.total_tax,
+            "Tax Cost Ratio (per year)": tcr,
+            "Tax efficiency": (TAX.efficiency_label(tcr)[0]
+                               if tcr == tcr else "n/a"),
+            "Realized gains, net of losses": (
+                (float(sales["Realized Gain"].sum()) if not sales.empty else 0.0)
+                if windowed else r.total_pretax_gain),
             "Years with tax owed": (int((yrs["Total Tax"] > 0).sum())
                                     if not yrs.empty else 0),
             "Tax years": len(yrs),
         }
 
-    h = _head(rep)
+    h = _head(rep, equity)
     head = pd.DataFrame({"Measure": list(h.keys()), label: list(h.values())})
-    if bench_rep is not None:
-        head[bench_label] = list(_head(bench_rep).values())
+    if bench_rep is not None and bench_equity is not None:
+        head[bench_label] = list(_head(
+            bench_rep, bench_equity.reindex(equity.index).ffill().bfill()).values())
 
     # Real dollars on the strategy's own scale, as on the Tax tab.
     curves = pd.DataFrame({label: equity})
@@ -278,14 +318,13 @@ def tax_sections(rep, bench_rep, label: str, bench_label: str,
 
     out: List[Section] = [
         (module, "Tax Summary", head, False),
-        (module, "Tax by Year", rep.by_year, False),
-        (module, "Tax Realized Sales (ACB)", rep.realized_trades, False),
+        (module, "Tax by Year", _years(rep), False),
+        (module, "Tax Realized Sales (ACB)", _sales(rep), False),
         (module, "After-Tax Equity", curves, True),
     ]
     if bench_rep is not None:
-        out.append((module, "Benchmark Tax by Year", bench_rep.by_year, False))
-        out.append((module, "Benchmark Realized Sales",
-                    bench_rep.realized_trades, False))
+        out.append((module, "Benchmark Tax by Year", _years(bench_rep), False))
+        out.append((module, "Benchmark Realized Sales", _sales(bench_rep), False))
     warn = list(rep.warnings) + (list(bench_rep.warnings)
                                  if bench_rep is not None else [])
     if warn:
@@ -328,7 +367,8 @@ def workbook_from_backtest(res: BacktestResult,
                            quality: Optional[pd.DataFrame] = None,
                            sections: Optional[List[Section]] = None,
                            omitted: Optional[List[Omission]] = None,
-                           include: Optional[Iterable[str]] = None) -> bytes:
+                           include: Optional[Iterable[str]] = None,
+                           extra_notes: Optional[Dict[str, Any]] = None) -> bytes:
     """Every table behind a simulated backtest, in one workbook.
 
     `sections` carries the other modules (signals, attribution, tax,
@@ -390,6 +430,7 @@ def workbook_from_backtest(res: BacktestResult,
         "Period start": res.equity.index[0].date(),
         "Period end": res.equity.index[-1].date(),
         "Observations": len(res.equity),
+        **(extra_notes or {}),
     })
 
     params = pd.DataFrame({
