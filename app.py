@@ -1817,14 +1817,82 @@ if source == "Return stream":
             stat_df[bench_col] = [bstats.get(k, np.nan) for k in stats]
         e2.download_button("Statistics (CSV)", stat_df.to_csv(index=False).encode("utf-8"),
                            "statistics.csv", "text/csv", key="rsstat")
+        def _rs_workbook_modules():
+            """The other tabs' tables, as computed with the settings chosen
+            there (stress category and custom periods, fold count)."""
+            g = globals()
+            secs: List[Any] = []
+            miss: List[Any] = []
+
+            # Results, for every series analysed
+            secs.append(("Results", "Statistics, All Series", stat_df, False))
+            _trt, _cyt = g.get("trt"), g.get("cyt")
+            if _trt is not None:
+                secs.append(("Results", "Trailing, All Series", _trt, False))
+            if _cyt is not None:
+                secs.append(("Results", "Calendar, All Series", _cyt, True))
+            _cs = g.get("_corr_src")
+            if len(everyone) > 1 and _cs is not None and len(_cs) >= 12:
+                secs.append(("Results", "Correlation", _cs.corr(), True))
+
+            # Stress tests: the side-by-side matrix, then each series in full
+            _evs = g.get("_ev") or {}
+            if _evs:
+                secs.append(("Stress tests", "Stress Returns, All Series",
+                             g.get("mat"), False))
+                for n, e in _evs.items():
+                    pre = "" if len(_evs) == 1 else f"{n} "
+                    secs += XL.stress_sections(e, prefix=pre)
+                _eb = g.get("_evb")
+                if bench_col and _eb is not None:
+                    secs.append(("Stress tests", f"{bench_col} Stress Periods",
+                                 _eb, False))
+
+            # Market regimes: every dimension, not only the one on screen
+            _lab = g.get("labels")
+            if _lab:
+                _rows = []
+                for k in [k for k in RG.DIMENSIONS if k in _lab]:
+                    dim = RG.DIMENSIONS[k]
+                    t = RG.regime_table(everyone, _lab[k], dim.order, ppy,
+                                        r_bench if bench_col else None)
+                    t = t[t["Periods"] > 0]
+                    if not t.empty:
+                        t.insert(0, "Dimension", dim.title)
+                        _rows.append(t)
+                if _rows:
+                    secs.append(("Market regimes", "Market Regimes",
+                                 pd.concat(_rows, ignore_index=True), False))
+            else:
+                miss.append(("Market regimes", "Regime tables",
+                             "The regime market data could not be downloaded."))
+
+            # Robustness
+            secs += XL.robustness_sections(
+                walk_forward=g.get("wf"),
+                monte_carlo=st.session_state.get(g.get("_mc_key")))
+            if st.session_state.get(g.get("_mc_key")) is None:
+                miss.append(("Robustness", "Monte Carlo",
+                             "Not run for this series and date range "
+                             "(Robustness tab, Run Monte Carlo simulation)."))
+            miss += [("Positions", "Holdings, trades, tax, attribution",
+                      "A return stream carries no positions to analyse.")]
+            return secs, miss
+
         try:
+            try:
+                _rs_secs, _rs_miss = _rs_workbook_modules()
+            except Exception as exc:
+                _rs_secs, _rs_miss = [], [("All", "Additional modules",
+                                           f"Could not be assembled: {exc}")]
             rbook = XL.workbook_from_returns(
                 r_main, eq_main, stats, r_bench, eq_bench, bstats or None,
                 ppy, str(main_col), str(bench_col or "Benchmark"),
                 all_series=pd.DataFrame(everyone),
                 report_notes={"Scale read": rrep.scale,
                               "Source": rs_source,
-                              "Period": f"{rs_start.date()} to {rs_end.date()}"})
+                              "Period": f"{rs_start.date()} to {rs_end.date()}"},
+                sections=_rs_secs, omitted=_rs_miss)
             e3.download_button("Full report (Excel)", rbook,
                                f"return_stream_{main_col}.xlsx",
                                "application/vnd.openxmlformats-officedocument."
@@ -1832,11 +1900,14 @@ if source == "Return stream":
         except Exception as exc:
             st.markdown(f'<div class="flag">Excel export unavailable: {exc}</div>',
                         unsafe_allow_html=True)
-        note("The workbook carries every table behind this report: "
-             "statistics, trailing periods, calendar years, drawdown "
-             "episodes, monthly returns, the full series, and every series "
-             "analysed, plus a Notes sheet recording the source, "
-             "frequency and scale that were read.")
+        note("The workbook carries every module in one file, indexed on a "
+             "Contents sheet: statistics, trailing periods, calendar years, "
+             "drawdown episodes, monthly returns and the full series; the "
+             "same tables across every series analysed, with their "
+             "correlation; stress test periods; returns in every market "
+             "regime; sub-period stability and Monte Carlo when run; plus a "
+             "Notes sheet recording the source, frequency and scale that "
+             "were read.")
     st.stop()
 
 
@@ -2823,7 +2894,7 @@ if run_clicked and not blocking:
                             and result.equity.index[0] > raw_start),
             "stamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
-        for k in ("sweep", "mc"):
+        for k in ("sweep", "mc", "daysweep", "report_html", "report_pdf"):
             st.session_state.pop(k, None)
     except Exception as exc:
         st.error(f"The backtest stopped: {exc}")
@@ -4295,9 +4366,9 @@ with tabs[8]:
                                                  run.get("cash_series"))
             except Exception:
                 pass
-        b["walk_forward"] = wf if "wf" in dir() else None
-        b["in_out_sample"] = ios if "ios" in dir() else None
-        b["cost_sensitivity"] = cs if "cs" in dir() else None
+        b["walk_forward"] = globals().get("wf")
+        b["in_out_sample"] = globals().get("ios")
+        b["cost_sensitivity"] = globals().get("cs")
         if "sweep" in st.session_state:
             _sw, _sx, _sy, _sz = st.session_state["sweep"]
             b["parameter_sweep"] = {"df": _sw, "x": _sx,
@@ -4305,12 +4376,11 @@ with tabs[8]:
                                     "z": _sz}
         b["day_sweep"] = st.session_state.get("daysweep")
         _mc_res = st.session_state.get("mc")
-        if _mc_res is not None and not _mc_res.empty and "CAGR" in _mc_res.columns:
-            good = _mc_res["CAGR"].dropna()
-            if len(good):
-                b["monte_carlo"] = {"median_cagr": float(good.median()),
-                                    "p5": float(good.quantile(0.05)),
-                                    "p95": float(good.quantile(0.95))}
+        if isinstance(_mc_res, dict) and not _mc_res["stats"].empty:
+            _pc = _mc_res["stats"].set_index("Percentile")["CAGR"]
+            b["monte_carlo"] = {"median_cagr": _mc_res["median_cagr"],
+                                "p5": float(_pc.get("5th", np.nan)),
+                                "p95": float(_pc.get("95th", np.nan))}
         try:
             b["stress"] = STRESS.evaluate_periods(
                 res.returns, benchmark=bench.returns if bench is not None else None)
@@ -4391,22 +4461,164 @@ with tabs[8]:
     c2.download_button("Daily series (CSV)",
                        series.to_csv().encode("utf-8"), "series.csv", "text/csv")
 
+    def _workbook_modules():
+        """Every other tab's tables, as (module, sheet, frame, index).
+
+        The tabs above have all run by the time this one renders, so their
+        results are reused as computed -- with the settings chosen there
+        (stress category, custom periods, tax rates, fold count) -- rather
+        than recomputed with defaults. The parameter surface, trading-day
+        sweep and Monte Carlo are included when they have been run for this
+        backtest; the Contents sheet says so when they have not.
+        """
+        g = globals()
+        secs: List[Any] = []
+        miss: List[Any] = []
+
+        # Signals
+        _sc, _now = g.get("_score"), g.get("cur_tbl")
+        if run_mode == "builtin" and _sc is not None:
+            secs += [("Signals", "Signals Now", _now, False),
+                     ("Signals", "Signal Scores", _sc, True),
+                     ("Signals", "Signal Ranks",
+                      _sc.rank(axis=1, ascending=False, method="min"), True)]
+        else:
+            miss.append(("Signals", "Scores",
+                         "Imported target weights carry no model score."
+                         if run_mode != "builtin" else
+                         "This model allocates by rule, not by a score."))
+
+        # Positions
+        if w_report is not None:
+            secs.append(("Positions", "Weights File Check", pd.DataFrame({
+                "Measure": ["Rebalance dates", "Weighted instruments",
+                            "Average exposure", "Maximum exposure",
+                            "Detected scale", "Short positions",
+                            "Unknown instruments", "Instruments absent",
+                            "Dropped dates"],
+                "Value": [w_report.n_dates, w_report.n_instruments,
+                          w_report.mean_gross, w_report.max_gross,
+                          w_report.scale, "Yes" if w_report.has_shorts else "No",
+                          ", ".join(map(str, w_report.unknown)),
+                          ", ".join(map(str, w_report.absent)),
+                          w_report.dropped_dates]}), False))
+        if sleeve_report is not None:
+            secs += [("Positions", "Sleeves", sleeve_report.rows, False),
+                     ("Positions", "Weight by Sleeve", sleeve_report.by_sleeve, True)]
+        secs.append(("Positions", "Average Weight",
+                     res.weights.mean().sort_values(ascending=False)
+                     .rename("Average weight").rename_axis("Instrument")
+                     .reset_index(), False))
+        _inc = {}
+        if res.dividend_income is not None and float(res.dividend_income.sum()) > 0:
+            _inc["Dividend income"] = res.dividend_income
+        if res.fees is not None and float(res.fees.sum()) > 0:
+            _inc["Management fee"] = res.fees
+        _inc["Trading cost"] = res.costs
+        _inc["Turnover"] = res.turnover
+        _yr = pd.DataFrame(_inc).groupby(lambda d: d.year).sum()
+        _yr.index.name = "Year"
+        secs.append(("Positions", "Income and Costs by Year", _yr, True))
+
+        # Attribution: by quarter and month, and by asset class
+        if res.contributions is not None:
+            secs += [("Attribution", "Contribution by Quarter",
+                      ATTR.by_period(res, "Quarter"), True),
+                     ("Attribution", "Contribution by Month",
+                      ATTR.by_period(res, "Month"), True)]
+            _cls = dict(run.get("classes") or {})
+            if _cls:
+                _cls = {a: _cls.get(a, "Unclassified") for a in res.weights.columns}
+                secs += [("Attribution", "Contribution by Class",
+                          ATTR.summary(res, _cls, ppy), False),
+                         ("Attribution", "Class Contribution by Year",
+                          ATTR.by_period(res, "Year", _cls), True)]
+        else:
+            miss.append(("Attribution", "Contribution",
+                         "This result predates contribution tracking; run again."))
+
+        # Tax
+        if tax_rep is not None:
+            secs += XL.tax_sections(
+                tax_rep, bench_tax_rep, res.label,
+                run["bench"].label if run.get("bench") is not None else "Benchmark",
+                res.equity,
+                run["bench"].equity if run.get("bench") is not None else None)
+        else:
+            miss.append(("Tax", "Tax analysis",
+                         "No dividend or share data available for this run."))
+
+        # Robustness
+        _sw = st.session_state.get("sweep")
+        _sweep_df, _sweep_setup = None, None
+        if _sw is not None:
+            _sweep_df = _sw[0]
+            _sweep_setup = {"First parameter": _sw[1],
+                            "Second parameter": _sw[2], "Metric": _sw[3]}
+            _dsr = R.deflated_sharpe_note(stats.get("Sharpe", np.nan),
+                                          len(_sweep_df), len(res.returns), ppy)
+            _sweep_setup["Sharpe expected by chance across trials"] = \
+                _dsr["expected_max_sharpe"]
+            _sweep_setup["Net edge of the model (Sharpe)"] = _dsr["haircut"]
+        secs += XL.robustness_sections(
+            walk_forward=g.get("wf"), in_out_sample=g.get("ios"),
+            cost_sensitivity=g.get("cs"), parameter_sweep=_sweep_df,
+            sweep_setup=_sweep_setup, day_sweep=st.session_state.get("daysweep"),
+            monte_carlo=st.session_state.get("mc"))
+        if _sw is None:
+            miss.append(("Robustness", "Parameter sweep",
+                         "Not applicable to imported weights." if is_external else
+                         "Not run for this backtest (Robustness tab, "
+                         "Compute parameter surface)."))
+        if st.session_state.get("daysweep") is None:
+            miss.append(("Robustness", "Trading-day sweep",
+                         "Not applicable to daily rebalancing."
+                         if rcfg.engine.rebalance == "D" else
+                         "Not run for this backtest (Robustness tab, "
+                         "Sweep trading days)."))
+        if st.session_state.get("mc") is None:
+            miss.append(("Robustness", "Monte Carlo",
+                         "Not run for this backtest (Robustness tab, "
+                         "Run Monte Carlo simulation)."))
+
+        # Stress tests, with the category and custom periods chosen above
+        secs += XL.stress_sections(g.get("ev"))
+
+        # Data
+        if quality is not None and quality.warnings:
+            secs.append(("Data", "Data Flags",
+                         pd.DataFrame({"Flag": quality.warnings}), False))
+        if ex_rep is not None:
+            secs.append(("Data", "Exogenous Series Check", ex_rep.per_series, False))
+        secs.append(("Data", "Return Correlation",
+                     universe.pct_change().corr(), True))
+        return secs, miss
+
     try:
+        try:
+            _xl_secs, _xl_miss = _workbook_modules()
+        except Exception as exc:
+            _xl_secs, _xl_miss = [], [("All", "Additional modules",
+                                       f"Could not be assembled: {exc}")]
         book = XL.workbook_from_backtest(
             res, bench, stats, bstats, rcfg,
             prices=universe, exog=exog_used,
-            quality=quality.per_asset if quality is not None else None)
+            quality=quality.per_asset if quality is not None else None,
+            sections=_xl_secs, omitted=_xl_miss)
         c3.download_button("Full report (Excel)", book,
                            f"backtest_{run['strategy_key']}.xlsx",
                            "application/vnd.openxmlformats-officedocument."
                            "spreadsheetml.sheet", key="dlxl")
-        note("The workbook carries every table behind this report: "
-             "statistics, trailing periods, calendar years, drawdown "
-             "episodes, monthly returns, the full daily series, current and "
-             "historical holdings, target weights, the trade log, rebalance "
-             "dates, parameters, prices, any imported series, and the data "
-             "diagnostic, plus a Notes sheet recording the settings "
-             "these figures depend on.")
+        note("The workbook carries every module in one file, indexed on a "
+             "Contents sheet: statistics, trailing periods, calendar years, "
+             "drawdowns, monthly returns and the daily series; current and "
+             "historical holdings, target weights, the trade log and share "
+             "counts; signals; attribution by security, class and period; "
+             "the full tax analysis; walk-forward, in/out-of-sample, cost "
+             "sensitivity and stress test periods; the parameter surface, "
+             "trading-day sweep and Monte Carlo when run; and prices, "
+             "imported series and data diagnostics, plus a Notes sheet "
+             "recording the settings these figures depend on.")
     except Exception as exc:
         st.markdown(f'<div class="flag">Excel export unavailable: {exc}</div>',
                     unsafe_allow_html=True)

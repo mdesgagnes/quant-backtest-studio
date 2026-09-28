@@ -11,12 +11,19 @@ and nothing here should require the app to interpret it: every sheet
 carries its own headers, percentages stay as real numbers rather than
 pre-formatted strings, and a Notes sheet records the settings the figures
 depend on.
+
+Beyond the core results, the caller passes every other module it has on
+hand -- signals, attribution, tax, robustness, stress tests, regimes, data
+diagnostics -- as `sections`, and names whatever it could not include in
+`omitted`. A Contents sheet at the front lists every sheet by module and
+says which modules are absent and why, so a missing tab is never mistaken
+for a missing result.
 """
 from __future__ import annotations
 
 import io
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,10 +39,208 @@ def _safe(name: str) -> str:
     return (out[:31] or "Sheet")
 
 
+# (module, sheet name, frame, write the index)
+Section = Tuple[str, str, Optional[pd.DataFrame], bool]
+# (module, what is missing, why)
+Omission = Tuple[str, str, str]
+
+
+def _empty(df) -> bool:
+    return df is None or (hasattr(df, "empty") and df.empty)
+
+
+class _Book:
+    """Writes sheets while recording each one for the Contents sheet."""
+
+    def __init__(self, xw):
+        self.xw = xw
+        self.module = "Results"
+        self.rows: List[Dict[str, Any]] = []
+        self.used: set = set()
+
+    def _name(self, sheet: str) -> str:
+        base = _safe(sheet)
+        name, i = base, 2
+        while name.lower() in self.used or name.lower() == "contents":
+            tail = f" ({i})"
+            name = base[:31 - len(tail)] + tail
+            i += 1
+        self.used.add(name.lower())
+        return name
+
+    def write(self, df, sheet: str, index: bool = False,
+              module: Optional[str] = None) -> None:
+        if _empty(df):
+            return
+        if isinstance(df, pd.Series):
+            df = df.to_frame()
+        name = self._name(sheet)
+        df.to_excel(self.xw, sheet_name=name, index=index)
+        self.rows.append({"Module": module or self.module, "Sheet": name,
+                          "Rows": int(len(df)), "Note": ""})
+
+    def sections(self, sections: Optional[List[Section]],
+                 module: Optional[str] = None) -> None:
+        """Writes the pending sections of one module, or all that remain,
+        so each module's extra sheets sit beside its core ones."""
+        keep = []
+        for sec in sections or []:
+            if module is None or sec[0] == module:
+                self.write(sec[2], sec[1], sec[3], sec[0])
+            else:
+                keep.append(sec)
+        if sections is not None:
+            sections[:] = keep
+
+    def omit(self, omitted: Optional[List[Omission]]) -> None:
+        for module, what, why in omitted or []:
+            self.rows.append({"Module": module, "Sheet": f"(not included) {what}",
+                              "Rows": None, "Note": why})
+
+    def contents(self) -> None:
+        df = pd.DataFrame(self.rows, columns=["Module", "Sheet", "Rows", "Note"])
+        df.to_excel(self.xw, sheet_name="Contents", index=False)
+        wb = self.xw.book
+        wb.move_sheet("Contents", offset=-(len(wb.sheetnames) - 1))
+        wb.active = 0
+
+
 def _write(xw, df: Optional[pd.DataFrame], sheet: str, index: bool = False) -> None:
-    if df is None or (hasattr(df, "empty") and df.empty):
+    if _empty(df):
         return
     df.to_excel(xw, sheet_name=_safe(sheet), index=index)
+
+
+def _kv(pairs: Dict[str, Any], key: str = "Measure", value: str = "Value") -> pd.DataFrame:
+    return pd.DataFrame({key: list(pairs.keys()), value: list(pairs.values())})
+
+
+# ----------------------------------------------------------------------
+# Module helpers: each turns one module's output into ready-to-write
+# sections, so both entry points shape them identically.
+def stress_sections(ev: Optional[pd.DataFrame], module: str = "Stress tests",
+                    prefix: str = "") -> List[Section]:
+    """The per-period table plus its headline summary."""
+    if _empty(ev):
+        return []
+    from . import stress as STRESS
+    names = {
+        "n_covered": "Periods covered", "n_total": "Periods listed",
+        "n_positive": "Positive periods", "median_return": "Median return",
+        "best_period": "Best period", "best_return": "Best return",
+        "worst_period": "Worst period", "worst_return": "Worst return",
+        "worst_drawdown": "Deepest drawdown",
+        "n_vs_benchmark": "Periods with a benchmark",
+        "n_beat_benchmark": "Periods beating the benchmark",
+        "median_excess": "Median excess vs benchmark",
+    }
+    summ = STRESS.summary_stats(ev)
+    return [(module, f"{prefix}Stress Periods", ev, False),
+            (module, f"{prefix}Stress Summary",
+             _kv({names.get(k, k): v for k, v in summ.items()}), False)]
+
+
+def monte_carlo_sections(mc: Optional[Dict[str, Any]],
+                         module: str = "Robustness") -> List[Section]:
+    if not isinstance(mc, dict) or _empty(mc.get("stats")):
+        return []
+    head = _kv({"Simulated median CAGR": mc.get("median_cagr"),
+                "Probability of loss": mc.get("prob_loss"),
+                "Probability of a drawdown > 20%": mc.get("prob_dd_20")})
+    return [(module, "Monte Carlo Summary", head, False),
+            (module, "Monte Carlo Percentiles", mc["stats"], False),
+            (module, "Monte Carlo Bands", mc.get("paths"), True)]
+
+
+def _attrs_frame(df: Optional[pd.DataFrame],
+                 labels: Dict[str, str]) -> Optional[pd.DataFrame]:
+    """The summary figures a robustness function stores in `.attrs`."""
+    if _empty(df):
+        return None
+    got = {labels[k]: v for k, v in df.attrs.items() if k in labels}
+    return _kv(got) if got else None
+
+
+def robustness_sections(walk_forward: Optional[pd.DataFrame] = None,
+                        in_out_sample: Optional[pd.DataFrame] = None,
+                        cost_sensitivity: Optional[pd.DataFrame] = None,
+                        parameter_sweep: Optional[pd.DataFrame] = None,
+                        sweep_setup: Optional[Dict[str, Any]] = None,
+                        day_sweep: Optional[pd.DataFrame] = None,
+                        monte_carlo: Optional[Dict[str, Any]] = None,
+                        module: str = "Robustness") -> List[Section]:
+    out: List[Section] = [
+        (module, "Walk-Forward", walk_forward, False),
+        (module, "Walk-Forward Summary", _attrs_frame(walk_forward, {
+            "sharpe_dispersion": "Sharpe dispersion across folds",
+            "sharpe_min": "Lowest fold Sharpe"}), False),
+        (module, "In-Out of Sample", in_out_sample, False),
+        (module, "Parameter Sweep", parameter_sweep, False),
+    ]
+    if sweep_setup and not _empty(parameter_sweep):
+        out.append((module, "Parameter Sweep Setup", _kv(sweep_setup), False))
+    out += [
+        (module, "Trading-Day Sweep", day_sweep, False),
+        (module, "Trading-Day Summary", _attrs_frame(day_sweep, {
+            "cagr_spread": "CAGR spread (best minus worst day)",
+            "cagr_std": "CAGR standard deviation",
+            "cagr_median": "Median CAGR",
+            "sharpe_spread": "Sharpe spread",
+            "sharpe_std": "Sharpe standard deviation"}), False),
+        (module, "Cost Sensitivity", cost_sensitivity, False),
+    ]
+    return out + monte_carlo_sections(monte_carlo, module)
+
+
+def tax_sections(rep, bench_rep, label: str, bench_label: str,
+                 equity: pd.Series, bench_equity: Optional[pd.Series] = None,
+                 module: str = "Tax") -> List[Section]:
+    """Everything on the Tax tab, strategy and benchmark side by side."""
+    if rep is None:
+        return []
+    from . import tax as TAX
+
+    def _head(r) -> Dict[str, Any]:
+        yrs = r.by_year
+        return {
+            "Total tax": r.total_tax,
+            "Tax Cost Ratio (per year)": r.tax_cost_ratio,
+            "Tax efficiency": TAX.efficiency_label(r.tax_cost_ratio)[0],
+            "Realized gains, net of losses": r.total_pretax_gain,
+            "Years with tax owed": (int((yrs["Total Tax"] > 0).sum())
+                                    if not yrs.empty else 0),
+            "Tax years": len(yrs),
+        }
+
+    h = _head(rep)
+    head = pd.DataFrame({"Measure": list(h.keys()), label: list(h.values())})
+    if bench_rep is not None:
+        head[bench_label] = list(_head(bench_rep).values())
+
+    # Real dollars on the strategy's own scale, as on the Tax tab.
+    curves = pd.DataFrame({label: equity})
+    curves[f"{label} (after tax)"] = rep.after_tax_equity.reindex(
+        equity.index).ffill().bfill()
+    if bench_rep is not None and bench_equity is not None:
+        curves[bench_label] = bench_equity.reindex(curves.index).ffill().bfill()
+        curves[f"{bench_label} (after tax)"] = bench_rep.after_tax_equity.reindex(
+            curves.index).ffill().bfill()
+
+    out: List[Section] = [
+        (module, "Tax Summary", head, False),
+        (module, "Tax by Year", rep.by_year, False),
+        (module, "Tax Realized Sales (ACB)", rep.realized_trades, False),
+        (module, "After-Tax Equity", curves, True),
+    ]
+    if bench_rep is not None:
+        out.append((module, "Benchmark Tax by Year", bench_rep.by_year, False))
+        out.append((module, "Benchmark Realized Sales",
+                    bench_rep.realized_trades, False))
+    warn = list(rep.warnings) + (list(bench_rep.warnings)
+                                 if bench_rep is not None else [])
+    if warn:
+        out.append((module, "Tax Warnings", pd.DataFrame({"Warning": warn}), False))
+    return out
 
 
 def _stats_frame(stats: Dict[str, float],
@@ -70,8 +275,15 @@ def workbook_from_backtest(res: BacktestResult,
                            cfg: RunConfig,
                            prices: Optional[pd.DataFrame] = None,
                            exog: Optional[pd.DataFrame] = None,
-                           quality: Optional[pd.DataFrame] = None) -> bytes:
-    """Every table behind a simulated backtest, in one workbook."""
+                           quality: Optional[pd.DataFrame] = None,
+                           sections: Optional[List[Section]] = None,
+                           omitted: Optional[List[Omission]] = None) -> bytes:
+    """Every table behind a simulated backtest, in one workbook.
+
+    `sections` carries the other modules (signals, attribution, tax,
+    robustness, stress tests, data diagnostics) in the order they should
+    appear; `omitted` names the modules that could not be included.
+    """
     ppy = cfg.engine.periods_per_year
     label = res.label
     blabel = bench.label if bench is not None else "Benchmark"
@@ -135,34 +347,48 @@ def workbook_from_backtest(res: BacktestResult,
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
-        _write(xw, notes, "Notes")
-        _write(xw, _stats_frame(stats, bench_stats, label, blabel), "Statistics")
-        _write(xw, periods["trailing"], "Trailing Periods")
-        _write(xw, periods["calendar"], "Calendar Years")
-        _write(xw, M.drawdown_table(res.equity, 25, ppy), "Drawdowns")
-        mr = M.monthly_returns(res.returns, ppy)
-        _write(xw, mr, "Monthly Returns", index=True)
-        _write(xw, series, "Daily Series", index=True)
-        _write(xw, holdings, "Current Holdings")
+        bk = _Book(xw)
+        bk.write(notes, "Notes")
+        bk.write(_stats_frame(stats, bench_stats, label, blabel), "Statistics")
+        bk.write(periods["trailing"], "Trailing Periods")
+        bk.write(periods["calendar"], "Calendar Years")
+        bk.write(M.drawdown_table(res.equity, 25, ppy), "Drawdowns")
+        bk.write(M.monthly_returns(res.returns, ppy), "Monthly Returns", index=True)
+        bk.write(series, "Daily Series", index=True)
+        sections = list(sections or [])
+        bk.sections(sections, "Results")
+        bk.sections(sections, "Signals")
+        bk.module = "Positions"
+        bk.write(holdings, "Current Holdings")
+        bk.write(res.weights, "Holdings History", index=True)
+        bk.write(res.target_weights, "Target Weights", index=True)
+        bk.write(res.trades, "Trades")
+        if res.shares is not None:
+            bk.write(res.shares, "Share Counts", index=True)
+        bk.write(rebal, "Rebalance Dates")
+        bk.sections(sections, "Positions")
         if res.contributions is not None:
             from . import attribution as ATTR
-            _write(xw, ATTR.summary(res, None, ppy), "Contribution")
-            _write(xw, ATTR.by_period(res, "Year"), "Contribution by Year", index=True)
-            _write(xw, res.contributions, "Daily Contributions", index=True)
-        _write(xw, res.weights, "Holdings History", index=True)
-        _write(xw, res.target_weights, "Target Weights", index=True)
-        _write(xw, res.trades, "Trades")
-        if res.shares is not None:
-            _write(xw, res.shares, "Share Counts", index=True)
-        _write(xw, rebal, "Rebalance Dates")
+            bk.module = "Attribution"
+            bk.write(ATTR.summary(res, None, ppy), "Contribution")
+            bk.write(ATTR.by_period(res, "Year"), "Contribution by Year", index=True)
+            bk.write(res.contributions, "Daily Contributions", index=True)
+        bk.sections(sections, "Attribution")
+        for m in dict.fromkeys(s_[0] for s_ in sections if s_[0] != "Data"):
+            bk.sections(sections, m)
+        bk.module = "Configuration"
         if params is not None and not params.empty:
-            _write(xw, params, "Parameters")
+            bk.write(params, "Parameters")
+        bk.module = "Data"
         if prices is not None:
-            _write(xw, prices, "Prices", index=True)
+            bk.write(prices, "Prices", index=True)
         if exog is not None and not exog.empty:
-            _write(xw, exog, "Exogenous Series", index=True)
+            bk.write(exog, "Exogenous Series", index=True)
         if quality is not None:
-            _write(xw, quality, "Data Quality")
+            bk.write(quality, "Data Quality")
+        bk.sections(sections)
+        bk.omit(omitted)
+        bk.contents()
     return buf.getvalue()
 
 
@@ -175,7 +401,9 @@ def workbook_from_returns(returns: pd.Series, equity: pd.Series,
                           ppy: int, label: str,
                           bench_label: str = "Benchmark",
                           all_series: Optional[pd.DataFrame] = None,
-                          report_notes: Optional[Dict[str, Any]] = None) -> bytes:
+                          report_notes: Optional[Dict[str, Any]] = None,
+                          sections: Optional[List[Section]] = None,
+                          omitted: Optional[List[Omission]] = None) -> bytes:
     """The same workbook for an imported return stream.
 
     Sheets that need position data are absent, since none exists; every
@@ -205,13 +433,17 @@ def workbook_from_returns(returns: pd.Series, equity: pd.Series,
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
-        _write(xw, notes, "Notes")
-        _write(xw, _stats_frame(stats, bench_stats, label, bench_label), "Statistics")
-        _write(xw, periods["trailing"], "Trailing Periods")
-        _write(xw, periods["calendar"], "Calendar Years")
-        _write(xw, M.drawdown_table(equity, 25, ppy), "Drawdowns")
-        _write(xw, M.monthly_returns(returns, ppy), "Monthly Returns", index=True)
-        _write(xw, series, "Series", index=True)
+        bk = _Book(xw)
+        bk.write(notes, "Notes")
+        bk.write(_stats_frame(stats, bench_stats, label, bench_label), "Statistics")
+        bk.write(periods["trailing"], "Trailing Periods")
+        bk.write(periods["calendar"], "Calendar Years")
+        bk.write(M.drawdown_table(equity, 25, ppy), "Drawdowns")
+        bk.write(M.monthly_returns(returns, ppy), "Monthly Returns", index=True)
+        bk.write(series, "Series", index=True)
+        bk.sections(sections)
         if all_series is not None and not all_series.empty:
-            _write(xw, all_series, "All Imported Series", index=True)
+            bk.write(all_series, "All Imported Series", index=True, module="Data")
+        bk.omit(omitted)
+        bk.contents()
     return buf.getvalue()
