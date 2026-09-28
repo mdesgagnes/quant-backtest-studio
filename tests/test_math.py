@@ -218,6 +218,30 @@ def test_square_root_impact_matches_formula():
     assert abs(t["Effective Cost (bps)"] / 1e4 - ref) < 0.02 * ref
 
 
+def test_fee_is_paid_from_cash_before_any_sale():
+    px, _, _ = _market()
+    eng = EngineConfig(min_trade_weight=0.0, rebalance="Q")
+    cost = CostConfig(commission_bps=5, slippage_bps=10, management_fee_pa=0.02)
+    # 10% held in cash covers every monthly fee: nothing is sold for it.
+    res = run_backtest(px, pd.DataFrame(0.3, px.index, px.columns), eng, cost)
+    assert "Reason" not in res.trades or not (res.trades["Reason"] == "Fee liquidation").any()
+    assert res.fees.sum() > 0
+    # Fully invested apart from a sliver: the sale raises only what the
+    # cash cannot cover, so the account ends each fee date at zero cash
+    # rather than holding the proceeds of a full-fee sale.
+    res = run_backtest(px, pd.DataFrame(0.3333, px.index, px.columns), eng, cost)
+    sales = res.trades[res.trades.get("Reason", "") == "Fee liquidation"]
+    assert len(sales) > 0
+    used = 0.0
+    for d in sales["Date"].unique():
+        cash_before = res.cash_weight.shift(1)[d] * res.equity.shift(1)[d]
+        fee = res.fees[d] * res.equity.shift(1)[d]
+        assert -1e-6 <= cash_before < fee                 # cash first, then a sale
+        assert abs(res.cash_weight[d] * res.equity[d]) < 1e-6
+        used += cash_before
+    assert used > 0                                       # some months drew on cash
+
+
 if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore")
