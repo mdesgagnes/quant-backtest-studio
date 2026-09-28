@@ -1807,6 +1807,12 @@ if source == "Return stream":
         vals = pd.DataFrame({f"{n} value": RS.equity_from_returns(r, rs_capital)
                              for n, r in everyone.items()})
         out = out.join(vals)
+        rs_pick = st.multiselect(
+            "Modules in the Excel report", XL.RETURNS_MODULES,
+            default=XL.RETURNS_MODULES, key="rs_xl_modules",
+            help="Choose what the Full report (Excel) carries. Notes and the "
+                 "Contents index are always included; the Contents sheet "
+                 "lists whatever was left out.")
         e1, e2, e3 = st.columns(3)
         e1.download_button("Series (CSV)", out.to_csv().encode("utf-8"),
                            "return_streams.csv", "text/csv", key="rscsv")
@@ -1851,18 +1857,8 @@ if source == "Return stream":
             # Market regimes: every dimension, not only the one on screen
             _lab = g.get("labels")
             if _lab:
-                _rows = []
-                for k in [k for k in RG.DIMENSIONS if k in _lab]:
-                    dim = RG.DIMENSIONS[k]
-                    t = RG.regime_table(everyone, _lab[k], dim.order, ppy,
-                                        r_bench if bench_col else None)
-                    t = t[t["Periods"] > 0]
-                    if not t.empty:
-                        t.insert(0, "Dimension", dim.title)
-                        _rows.append(t)
-                if _rows:
-                    secs.append(("Market regimes", "Market Regimes",
-                                 pd.concat(_rows, ignore_index=True), False))
+                secs += XL.regime_sections(everyone, _lab, ppy,
+                                           r_bench if bench_col else None)
             else:
                 miss.append(("Market regimes", "Regime tables",
                              "The regime market data could not be downloaded."))
@@ -1875,7 +1871,7 @@ if source == "Return stream":
                 miss.append(("Robustness", "Monte Carlo",
                              "Not run for this series and date range "
                              "(Robustness tab, Run Monte Carlo simulation)."))
-            miss += [("Positions", "Holdings, trades, tax, attribution",
+            miss += [("Data", "Holdings, trades, tax, attribution",
                       "A return stream carries no positions to analyse.")]
             return secs, miss
 
@@ -1892,7 +1888,7 @@ if source == "Return stream":
                 report_notes={"Scale read": rrep.scale,
                               "Source": rs_source,
                               "Period": f"{rs_start.date()} to {rs_end.date()}"},
-                sections=_rs_secs, omitted=_rs_miss)
+                sections=_rs_secs, omitted=_rs_miss, include=rs_pick)
             e3.download_button("Full report (Excel)", rbook,
                                f"return_stream_{main_col}.xlsx",
                                "application/vnd.openxmlformats-officedocument."
@@ -4447,6 +4443,12 @@ with tabs[8]:
     st.code(y, language="yaml")
 
     eyebrow("Other downloads")
+    xl_pick = st.multiselect(
+        "Modules in the Excel report", XL.BACKTEST_MODULES,
+        default=XL.BACKTEST_MODULES, key="xl_modules",
+        help="Choose what the Full report (Excel) carries. Notes and the "
+             "Contents index are always included; the Contents sheet lists "
+             "whatever was left out.")
     c1, c2, c3 = st.columns(3)
     c1.download_button("Configuration (YAML)", y.encode("utf-8"),
                        f"config_{run['strategy_key']}.yaml", "text/yaml")
@@ -4461,7 +4463,7 @@ with tabs[8]:
     c2.download_button("Daily series (CSV)",
                        series.to_csv().encode("utf-8"), "series.csv", "text/csv")
 
-    def _workbook_modules():
+    def _workbook_modules(inc):
         """Every other tab's tables, as (module, sheet, frame, index).
 
         The tabs above have all run by the time this one renders, so their
@@ -4584,6 +4586,23 @@ with tabs[8]:
         # Stress tests, with the category and custom periods chosen above
         secs += XL.stress_sections(g.get("ev"))
 
+        # Market regimes, as on the Return stream tab: the strategy and its
+        # benchmark in every rate, volatility, equity and economic regime.
+        # Fetched only when asked for, since it needs market data.
+        if "Market regimes" in inc:
+            _mkt = fetch_regime_market()
+            if _mkt is None:
+                miss.append(("Market regimes", "Regime tables",
+                             "The regime market data (S&P 500, VIX, Treasury "
+                             "yields) could not be downloaded."))
+            else:
+                _rets = {res.label: res.returns}
+                if bench is not None:
+                    _rets[bench.label] = bench.returns
+                secs += XL.regime_sections(
+                    _rets, regime_labels(_mkt), ppy,
+                    bench.returns if bench is not None else None)
+
         # Data
         if quality is not None and quality.warnings:
             secs.append(("Data", "Data Flags",
@@ -4596,7 +4615,7 @@ with tabs[8]:
 
     try:
         try:
-            _xl_secs, _xl_miss = _workbook_modules()
+            _xl_secs, _xl_miss = _workbook_modules(set(xl_pick))
         except Exception as exc:
             _xl_secs, _xl_miss = [], [("All", "Additional modules",
                                        f"Could not be assembled: {exc}")]
@@ -4604,7 +4623,7 @@ with tabs[8]:
             res, bench, stats, bstats, rcfg,
             prices=universe, exog=exog_used,
             quality=quality.per_asset if quality is not None else None,
-            sections=_xl_secs, omitted=_xl_miss)
+            sections=_xl_secs, omitted=_xl_miss, include=xl_pick)
         c3.download_button("Full report (Excel)", book,
                            f"backtest_{run['strategy_key']}.xlsx",
                            "application/vnd.openxmlformats-officedocument."
@@ -4615,7 +4634,8 @@ with tabs[8]:
              "historical holdings, target weights, the trade log and share "
              "counts; signals; attribution by security, class and period; "
              "the full tax analysis; walk-forward, in/out-of-sample, cost "
-             "sensitivity and stress test periods; the parameter surface, "
+             "sensitivity and stress test periods; returns in every market "
+             "regime; the parameter surface, "
              "trading-day sweep and Monte Carlo when run; and prices, "
              "imported series and data diagnostics, plus a Notes sheet "
              "recording the settings these figures depend on.")

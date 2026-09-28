@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import io
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -39,6 +39,14 @@ def _safe(name: str) -> str:
     return (out[:31] or "Sheet")
 
 
+# The modules each workbook can carry, in the order they appear. The
+# Export tab offers these as a checklist; Notes and Contents always come.
+BACKTEST_MODULES = ["Results", "Signals", "Positions", "Attribution", "Tax",
+                    "Robustness", "Stress tests", "Market regimes",
+                    "Configuration", "Data"]
+RETURNS_MODULES = ["Results", "Stress tests", "Market regimes", "Robustness",
+                   "Data"]
+
 # (module, sheet name, frame, write the index)
 Section = Tuple[str, str, Optional[pd.DataFrame], bool]
 # (module, what is missing, why)
@@ -52,11 +60,17 @@ def _empty(df) -> bool:
 class _Book:
     """Writes sheets while recording each one for the Contents sheet."""
 
-    def __init__(self, xw):
+    def __init__(self, xw, include: Optional[Iterable[str]] = None,
+                 modules: Optional[List[str]] = None):
         self.xw = xw
+        self.modules = modules or []
         self.module = "Results"
+        self.include = set(include) if include is not None else None
         self.rows: List[Dict[str, Any]] = []
         self.used: set = set()
+
+    def wants(self, module: str) -> bool:
+        return self.include is None or module in self.include
 
     def _name(self, sheet: str) -> str:
         base = _safe(sheet)
@@ -69,8 +83,8 @@ class _Book:
         return name
 
     def write(self, df, sheet: str, index: bool = False,
-              module: Optional[str] = None) -> None:
-        if _empty(df):
+              module: Optional[str] = None, always: bool = False) -> None:
+        if _empty(df) or not (always or self.wants(module or self.module)):
             return
         if isinstance(df, pd.Series):
             df = df.to_frame()
@@ -94,11 +108,19 @@ class _Book:
 
     def omit(self, omitted: Optional[List[Omission]]) -> None:
         for module, what, why in omitted or []:
+            if not self.wants(module):
+                continue
             self.rows.append({"Module": module, "Sheet": f"(not included) {what}",
                               "Rows": None, "Note": why})
 
     def contents(self) -> None:
-        df = pd.DataFrame(self.rows, columns=["Module", "Sheet", "Rows", "Note"])
+        rows = list(self.rows)
+        if self.include is not None:
+            left_out = [m for m in self.modules if m not in self.include]
+            rows += [{"Module": m, "Sheet": "(excluded)", "Rows": None,
+                      "Note": "Left out of this export by choice."}
+                     for m in left_out]
+        df = pd.DataFrame(rows, columns=["Module", "Sheet", "Rows", "Note"])
         df.to_excel(self.xw, sheet_name="Contents", index=False)
         wb = self.xw.book
         wb.move_sheet("Contents", offset=-(len(wb.sheetnames) - 1))
@@ -192,6 +214,34 @@ def robustness_sections(walk_forward: Optional[pd.DataFrame] = None,
     return out + monte_carlo_sections(monte_carlo, module)
 
 
+def regime_sections(returns: Dict[str, pd.Series],
+                    labels: Dict[str, pd.Series], ppy: int,
+                    benchmark: Optional[pd.Series] = None,
+                    module: str = "Market regimes") -> List[Section]:
+    """Every regime dimension: an overview of annualized return by regime
+    for each series, then the full table (volatility, Sharpe, hit rate,
+    time spent, excess over the benchmark)."""
+    from . import regimes as RG
+    tables = []
+    for k, dim in RG.DIMENSIONS.items():
+        if k not in labels:
+            continue
+        t = RG.regime_table(returns, labels[k], dim.order, ppy, benchmark)
+        t = t[t["Periods"] > 0]
+        if not t.empty:
+            t.insert(0, "Dimension", dim.title)
+            tables.append(t)
+    if not tables:
+        return []
+    full = pd.concat(tables, ignore_index=True)
+    order = list(dict.fromkeys(full["Series"]))
+    overview = (full.pivot_table(index=["Dimension", "Regime"], columns="Series",
+                                 values="Ann. return", sort=False)
+                .reindex(columns=order).reset_index())
+    return [(module, "Regime Overview", overview, False),
+            (module, "Market Regimes", full, False)]
+
+
 def tax_sections(rep, bench_rep, label: str, bench_label: str,
                  equity: pd.Series, bench_equity: Optional[pd.Series] = None,
                  module: str = "Tax") -> List[Section]:
@@ -277,12 +327,14 @@ def workbook_from_backtest(res: BacktestResult,
                            exog: Optional[pd.DataFrame] = None,
                            quality: Optional[pd.DataFrame] = None,
                            sections: Optional[List[Section]] = None,
-                           omitted: Optional[List[Omission]] = None) -> bytes:
+                           omitted: Optional[List[Omission]] = None,
+                           include: Optional[Iterable[str]] = None) -> bytes:
     """Every table behind a simulated backtest, in one workbook.
 
     `sections` carries the other modules (signals, attribution, tax,
     robustness, stress tests, data diagnostics) in the order they should
     appear; `omitted` names the modules that could not be included.
+    `include` limits the workbook to the named modules (all when None).
     """
     ppy = cfg.engine.periods_per_year
     label = res.label
@@ -347,8 +399,8 @@ def workbook_from_backtest(res: BacktestResult,
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
-        bk = _Book(xw)
-        bk.write(notes, "Notes")
+        bk = _Book(xw, include, BACKTEST_MODULES)
+        bk.write(notes, "Notes", module="Notes", always=True)
         bk.write(_stats_frame(stats, bench_stats, label, blabel), "Statistics")
         bk.write(periods["trailing"], "Trailing Periods")
         bk.write(periods["calendar"], "Calendar Years")
@@ -403,7 +455,8 @@ def workbook_from_returns(returns: pd.Series, equity: pd.Series,
                           all_series: Optional[pd.DataFrame] = None,
                           report_notes: Optional[Dict[str, Any]] = None,
                           sections: Optional[List[Section]] = None,
-                          omitted: Optional[List[Omission]] = None) -> bytes:
+                          omitted: Optional[List[Omission]] = None,
+                          include: Optional[Iterable[str]] = None) -> bytes:
     """The same workbook for an imported return stream.
 
     Sheets that need position data are absent, since none exists; every
@@ -433,8 +486,8 @@ def workbook_from_returns(returns: pd.Series, equity: pd.Series,
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
-        bk = _Book(xw)
-        bk.write(notes, "Notes")
+        bk = _Book(xw, include, RETURNS_MODULES)
+        bk.write(notes, "Notes", module="Notes", always=True)
         bk.write(_stats_frame(stats, bench_stats, label, bench_label), "Statistics")
         bk.write(periods["trailing"], "Trailing Periods")
         bk.write(periods["calendar"], "Calendar Years")
