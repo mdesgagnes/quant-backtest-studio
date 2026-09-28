@@ -2516,37 +2516,53 @@ with st.sidebar.expander("Frictions", expanded=False):
                                 "commission is a fee schedule, not a "
                                 "liquidity cost.")
     slip = st.number_input(
-        "Slippage, flat component (bps)", 0.0, 500.0, float(c0.slippage_bps), 5.0,
-        help="Charged on every trade regardless of size. With the impact "
-             "model off, this is the whole slippage cost.")
+        "Slippage, half-spread (bps)", 0.0, 500.0, float(c0.slippage_bps), 5.0,
+        key="slip_bps",
+        help="Half the bid-ask spread, charged on every trade regardless of "
+             "size. For a liquid ETF this is typically 1-5 bps; use the "
+             "per-instrument multiplier below for thinner names. Market "
+             "impact, if selected, is added on top.")
 
+    _IMPACT_OPTS = ["None",
+                    "Square-root law, scaled by volatility (recommended)",
+                    "Square-root, fixed cost at 10% of volume"]
+    _imp0 = {"flat": 0, "sqrt_vol": 1, "sqrt": 2}.get(
+        getattr(c0, "impact_model", "flat"), 0)
     impact_label = st.selectbox(
-        "Market impact", ["Flat only", "Scale with trade size (volume-aware)"],
-        index=1 if getattr(c0, "impact_model", "flat") == "sqrt" else 0,
+        "Market impact", _IMPACT_OPTS, index=_imp0,
         help="Real slippage grows with how large an order is relative to "
-             "the instrument's own liquidity -- the same $10M order costs "
-             "far more in a thin ETF than in SPY. \u201cFlat only\u201d "
-             "charges the same rate no matter the size; volume-aware adds "
-             "a cost that grows with the square root of participation "
-             "(trade size \u00f7 trailing 20-day average volume), the "
-             "standard institutional approximation.")
-    impact_model = "sqrt" if impact_label.startswith("Scale") else "flat"
-    impact_bps10 = float(c0.impact_bps_at_10pct_adv) if impact_model == "sqrt" else 0.0
+             "the instrument's liquidity. The square-root law is the "
+             "best-established empirical result on this (Almgren et al. "
+             "2005; Toth et al. 2011; Bouchaud et al. 2018): impact = Y "
+             "\u00d7 daily volatility \u00d7 \u221a(order \u00f7 average "
+             "daily volume). Scaling by volatility makes the same order cost "
+             "more in a turbulent market than a calm one. The fixed variant "
+             "charges a set cost at 10% of volume regardless of volatility.")
+    impact_model = {0: "flat", 1: "sqrt_vol", 2: "sqrt"}[_IMPACT_OPTS.index(impact_label)]
+    impact_bps10 = float(getattr(c0, "impact_bps_at_10pct_adv", 25.0))
+    impact_coef = float(getattr(c0, "impact_coef", 1.0))
     if impact_model == "sqrt":
         impact_bps10 = st.number_input(
             "Impact at 10% of average daily volume (bps)", 0.0, 500.0,
-            float(getattr(c0, "impact_bps_at_10pct_adv", 25.0)), 5.0,
-            help="The extra cost, on top of the flat rate, for an order "
+            impact_bps10, 5.0,
+            help="The extra cost, on top of the spread, for an order "
                  "equal to a tenth of the instrument's trailing 20-day "
                  "average volume. Doubling the order size roughly multiplies "
-                 "this component by \u221a2, not by 2 -- impact grows with "
-                 "the square root of size, not linearly.")
-        if source != "Yahoo Finance":
-            st.markdown(
-                '<div class="flag">Volume-aware impact needs volume data, '
-                'only available from Yahoo Finance. With an uploaded price '
-                'file, every instrument falls back to the flat rate above.'
-                '</div>', unsafe_allow_html=True)
+                 "this component by \u221a2, not by 2.")
+    elif impact_model == "sqrt_vol":
+        impact_coef = st.number_input(
+            "Impact coefficient Y", 0.0, 5.0, impact_coef, 0.1,
+            help="The constant in the square-root law. Empirical estimates "
+                 "across equity markets sit between about 0.5 and 1; 1 is "
+                 "the conservative end. At Y = 1, an order of 10% of daily "
+                 "volume in a name moving 1% a day costs about 32 bps on top "
+                 "of the spread.")
+    if impact_model != "flat" and source != "Yahoo Finance":
+        st.markdown(
+            '<div class="flag">Market impact needs volume data, only '
+            'available from Yahoo Finance. With an uploaded price file, '
+            'every instrument pays the slippage above alone.</div>',
+            unsafe_allow_html=True)
 
     _override_text = st.text_area(
         "Per-instrument slippage multiplier (optional)",
@@ -2638,6 +2654,7 @@ cfg = RunConfig(
     costs=CostConfig(commission_bps=comm, slippage_bps=slip,
                      impact_model=impact_model,
                      impact_bps_at_10pct_adv=impact_bps10,
+                     impact_coef=impact_coef,
                      slippage_overrides=dict(slip_overrides),
                      cash_rate_pa=cash_rate, management_fee_pa=mgmt_fee,
                      apply_frictions_to_fee_liquidation=fee_pays_frictions),
@@ -2676,7 +2693,7 @@ def build_market() -> MarketData:
             and bench_mode.startswith("Price return + dividends"))
         # Volume is fetched automatically once the volume-aware impact
         # model is selected in Frictions -- no separate control to forget.
-        need_ohlc = (impact_model == "sqrt")
+        need_ohlc = (impact_model != "flat")
         return fetch_market(tuple(needed), str(start), str(end),
                             bool(adjusted), bool(exec_at_open) or need_ohlc,
                             need_div, need_ohlc)
@@ -2793,7 +2810,7 @@ if run_clicked and not blocking:
                 div_px = market.dividends.reindex(index=universe.index,
                                                   columns=cols).fillna(0.0)
             vol_px = None
-            if market.volume is not None and cfg.costs.impact_model == "sqrt":
+            if market.volume is not None and cfg.costs.impact_model != "flat":
                 vol_px = market.volume.reindex(index=universe.index, columns=cols)
 
             result = run_backtest(universe, weights, cfg.engine, cfg.costs,

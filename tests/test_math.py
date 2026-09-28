@@ -170,6 +170,54 @@ def test_tax_zero_rate_leaves_curve_unchanged_and_acb_includes_costs():
     assert np.isclose(gain, 650 * 0.999 - (1000 + 1200) * 1.001 / 20 * 5)
 
 
+# ----------------------------------------------------------------------
+def test_fee_liquidation_sells_whole_units_and_covers_the_fee():
+    px, _, _ = _market()
+    px = px * 4                       # prices around $200: a unit is lumpy
+    w = pd.DataFrame(1 / 3, px.index, px.columns)
+    eng = EngineConfig(whole_shares=True, min_trade_weight=0.0, rebalance="Q")
+    cost = CostConfig(commission_bps=5, slippage_bps=10, management_fee_pa=0.02)
+    res = run_backtest(px, w, eng, cost)
+    assert np.allclose(res.shares.to_numpy(), np.round(res.shares.to_numpy()))
+    fee_sales = res.trades[res.trades.get("Reason", "") == "Fee liquidation"]
+    assert len(fee_sales) > 0
+    assert np.allclose(fee_sales["Change"], np.round(fee_sales["Change"]))
+    # The fee was paid in full, from whole-unit proceeds: cash never goes
+    # negative after a month-end deduction.
+    cash = res.cash_weight * res.equity
+    assert cash.min() > -1e-6
+    assert res.fees.sum() > 0
+
+
+def test_fee_sales_are_logged_even_without_frictions():
+    px, _, _ = _market()
+    w = pd.DataFrame(1 / 3, px.index, px.columns)
+    cost = CostConfig(commission_bps=0, slippage_bps=0, management_fee_pa=0.02,
+                      apply_frictions_to_fee_liquidation=False)
+    res = run_backtest(px, w, EngineConfig(min_trade_weight=0.0, rebalance="Q"), cost)
+    held = res.shares.diff().fillna(res.shares)
+    logged = (res.trades.groupby(["Date", "Instrument"])["Change"].sum()
+              .unstack().reindex(index=held.index, columns=held.columns).fillna(0.0))
+    assert np.allclose(held.to_numpy(), logged.to_numpy(), atol=1e-8)
+
+
+def test_square_root_impact_matches_formula():
+    px, _, _ = _market()
+    vol = pd.DataFrame(20_000.0, px.index, px.columns)
+    w = pd.DataFrame(1 / 3, px.index, px.columns)
+    cost = CostConfig(commission_bps=5, slippage_bps=10,
+                      impact_model="sqrt_vol", impact_coef=0.8)
+    eng = EngineConfig(min_trade_weight=0.0, rebalance="Q", initial_capital=1e6)
+    res = run_backtest(px, w, eng, cost, volume=vol)
+    t = res.trades.iloc[-1]
+    i = px.index.get_loc(t["Date"])
+    sig = np.log(px[t["Instrument"]]).diff().iloc[i - 20:i].std()
+    adv = (vol[t["Instrument"]] * px[t["Instrument"]]).iloc[i - 20:i].mean()
+    ref = 5e-4 + 10e-4 + 0.8 * sig * np.sqrt(t["Notional"] / adv)
+    # The engine sizes the rate on the pre-cash-check order: allow for that.
+    assert abs(t["Effective Cost (bps)"] / 1e4 - ref) < 0.02 * ref
+
+
 if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore")

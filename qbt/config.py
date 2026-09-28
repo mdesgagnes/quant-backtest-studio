@@ -43,9 +43,13 @@ class DataConfig:
 class CostConfig:
     """Frictions. Defaults calibrated for Canadian ETFs (a conservative assumption)."""
     commission_bps: float = 5.0
-    slippage_bps: float = 25.0        # flat component, always charged
-    impact_model: str = "flat"        # "flat" | "sqrt" (volume-scaled)
+    slippage_bps: float = 25.0        # flat half-spread, always charged
+    # "flat": none. "sqrt": impact_bps_at_10pct_adv * sqrt(participation /
+    # 10%). "sqrt_vol": the square-root law, impact_coef * daily volatility
+    # * sqrt(participation).
+    impact_model: str = "flat"
     impact_bps_at_10pct_adv: float = 25.0
+    impact_coef: float = 1.0
     # Manual per-instrument multipliers on the flat slippage rate, for when
     # average daily volume isn't available or a name is known to be
     # thinner or deeper than its volume alone suggests. {} means every
@@ -144,8 +148,10 @@ class RunConfig:
             errs.append(f"Unknown strategy mode: {self.strategy.mode}")
         if self.exog.enabled and self.exog.publication_lag_days < 0:
             errs.append("Publication lag cannot be negative.")
-        if self.costs.impact_model not in ("flat", "sqrt"):
-            errs.append("impact_model must be 'flat' or 'sqrt'.")
+        if self.costs.impact_model not in ("flat", "sqrt", "sqrt_vol"):
+            errs.append("impact_model must be 'flat', 'sqrt' or 'sqrt_vol'.")
+        if self.costs.impact_coef < 0:
+            errs.append("impact_coef cannot be negative.")
         if self.costs.impact_bps_at_10pct_adv < 0:
             errs.append("impact_bps_at_10pct_adv cannot be negative.")
         for k, v in self.costs.slippage_overrides.items():

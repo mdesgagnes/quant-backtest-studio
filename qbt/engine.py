@@ -11,15 +11,19 @@ Simulation model, explicit and verifiable:
    daily rebalance is never assumed, the classic mistake that inflates
    backtested results.
 4. On rebalance dates, turnover is charged. Commission is a flat rate.
-   Slippage has a flat component plus, optionally, a market-impact term
-   that scales with trade size relative to the instrument's own trailing
-   average daily volume -- the same order costs more in a thinner name,
-   and more again the larger it is relative to that name's liquidity.
+   Slippage is a flat half-spread (with optional per-instrument
+   multipliers) plus, optionally, a market-impact term that scales with trade size relative
+   to the instrument's own trailing average daily volume: either a fixed
+   cost at 10% of volume, or the square-root law scaled by the
+   instrument's own recent volatility. The same order costs more in a
+   thinner name, more again the larger it is, and more in a turbulent
+   week than a calm one.
    Manual per-instrument multipliers on the flat rate are also supported,
    for instruments with no volume data or known liquidity quirks. The
    monthly management fee, when it must be raised by selling holdings
    rather than from idle cash, pays these same costs by default -- an
-   involuntary liquidation is not free just because it was involuntary.
+   involuntary liquidation is not free just because it was involuntary --
+   and sells whole units only when the book trades whole units.
 5. The uninvested portion earns the cash rate, or tracks the return of a
    cash proxy asset (e.g. PSA.TO) if supplied.
 6. Optionally, trades execute at the **open** and the portfolio is marked to
@@ -119,6 +123,37 @@ def _cash_returns(index: pd.DatetimeIndex, cash_prices: Optional[pd.Series],
 
 
 # ----------------------------------------------------------------------
+def _whole_unit_sale(frac_sold: np.ndarray, shares: np.ndarray,
+                     mark: np.ndarray, rate: np.ndarray,
+                     need: float) -> np.ndarray:
+    """Whole units to sell so the proceeds, net of costs, cover `need`.
+
+    Starts from the pro-rata fractional sale rounded down, then adds one
+    unit at a time: the cheapest unit that closes the remaining gap on its
+    own, or, while no single unit does, a unit of whichever position is
+    still largest, so the book stays close to its proportions. The small
+    excess this raises stays in cash. Long positions only; a book too small
+    to cover the fee sells what it has.
+    """
+    unit_net = np.where(mark > 0, mark * (1.0 - np.clip(rate, 0.0, 1.0)), 0.0)
+    long_ = (shares >= 1.0) & (unit_net > 0)
+    sold = np.where(long_, np.clip(np.floor(frac_sold + 1e-9), 0.0, np.floor(shares)), 0.0)
+    got = float((sold * unit_net).sum())
+    while got < need - 1e-9:
+        room = long_ & (shares - sold >= 1.0)
+        if not room.any():
+            break
+        gap = need - got
+        closes = room & (unit_net >= gap)
+        if closes.any():
+            j = int(np.where(closes, unit_net, np.inf).argmin())
+        else:
+            j = int(np.where(room, (shares - sold) * mark, -np.inf).argmax())
+        sold[j] += 1.0
+        got += float(unit_net[j])
+    return sold
+
+
 def run_backtest(prices: pd.DataFrame,
                  target_weights: pd.DataFrame,
                  engine: EngineConfig,
@@ -227,10 +262,15 @@ def run_backtest(prices: pd.DataFrame,
     base_slip_rate = (float(costs.slippage_bps) / 10_000.0) * slip_mult
 
     impact_model = getattr(costs, "impact_model", "flat")
+    impact_coef = float(getattr(costs, "impact_coef", 1.0))
     ADV_WINDOW = 20
     adv_dollars = None
+    sigma = None
     no_volume_assets: List[str] = []
-    if impact_model == "sqrt":
+    if impact_model == "sqrt_vol":
+        from .costs import daily_volatility
+        sigma = daily_volatility(prices, ADV_WINDOW).to_numpy(dtype=float)
+    if impact_model in ("sqrt", "sqrt_vol"):
         if volume is not None:
             vol = volume.reindex(index=idx, columns=assets)
             # Shifted by one session: the impact of today's trade is priced
@@ -250,12 +290,20 @@ def run_backtest(prices: pd.DataFrame,
         instrument -- the participation rate is trade size over trailing
         ADV, so the same order costs more in a thinner name."""
         rate = base_slip_rate.copy()
-        if impact_model == "sqrt" and adv_dollars is not None and impact_bps_10 > 0:
-            adv_i = adv_dollars[i]
-            usable = np.isfinite(adv_i) & (adv_i > 0)
-            participation = np.where(usable, notional / np.where(usable, adv_i, 1.0), 0.0)
-            impact = (impact_bps_10 / 10_000.0) * np.sqrt(np.clip(participation, 0.0, None) / 0.10)
+        if adv_dollars is None:
+            return rate
+        adv_i = adv_dollars[i]
+        usable = np.isfinite(adv_i) & (adv_i > 0)
+        participation = np.clip(
+            np.where(usable, notional / np.where(usable, adv_i, 1.0), 0.0), 0.0, None)
+        if impact_model == "sqrt" and impact_bps_10 > 0:
+            impact = (impact_bps_10 / 10_000.0) * np.sqrt(participation / 0.10)
             rate = np.where(usable, rate + impact, rate)
+        elif impact_model == "sqrt_vol" and sigma is not None:
+            sig = sigma[i]
+            ok = usable & np.isfinite(sig)
+            impact = impact_coef * np.where(ok, sig, 0.0) * np.sqrt(participation)
+            rate = np.where(ok, rate + impact, rate)
         return rate
 
     n, m = len(idx), len(assets)
@@ -477,24 +525,31 @@ def run_backtest(prices: pd.DataFrame,
                             keep = (0.0 if blended >= 1.0 else
                                    max(0.0, 1.0 - (shortfall / (1.0 - blended)) / holdings_val))
                         else:
+                            rate0 = np.zeros(m)
                             keep = naive_keep
                         sold_shares = shares * (1.0 - keep)
+                        if whole:
+                            sold_shares = _whole_unit_sale(
+                                sold_shares, shares, mark, rate0, shortfall)
                         proceeds_gross = float((sold_shares * mark).sum())
+                        rate_final = np.zeros(m)
                         if apply_fee_frictions and proceeds_gross > 0:
                             rate_final = commission_rate + _rate_vector(i, np.abs(sold_shares * mark))
                             liq_cost = float((np.abs(sold_shares * mark) * rate_final).sum())
-                            for j, a in enumerate(assets):
-                                if sold_shares[j] != 0.0:
-                                    trades.append({
-                                        "Date": date, "Instrument": a,
-                                        "Shares Before": shares[j],
-                                        "Shares After": shares[j] - sold_shares[j],
-                                        "Change": -sold_shares[j],
-                                        "Price": float(mark[j]),
-                                        "Notional": float(abs(sold_shares[j]) * mark[j]),
-                                        "Effective Cost (bps)": float(rate_final[j]) * 10_000.0,
-                                        "Reason": "Fee liquidation",
-                                    })
+                        # Every sale is logged, whether or not it pays
+                        # frictions: units leaving the book are a trade.
+                        for j, a in enumerate(assets):
+                            if sold_shares[j] != 0.0:
+                                trades.append({
+                                    "Date": date, "Instrument": a,
+                                    "Shares Before": shares[j],
+                                    "Shares After": shares[j] - sold_shares[j],
+                                    "Change": -sold_shares[j],
+                                    "Price": float(mark[j]),
+                                    "Notional": float(abs(sold_shares[j]) * mark[j]),
+                                    "Effective Cost (bps)": float(rate_final[j]) * 10_000.0,
+                                    "Reason": "Fee liquidation",
+                                })
                         shares = shares - sold_shares
                         cash += proceeds_gross - liq_cost
                 cash -= fee_i
