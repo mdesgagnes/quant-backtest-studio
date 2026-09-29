@@ -629,6 +629,28 @@ def regime_labels(mkt: pd.DataFrame) -> Dict[str, pd.Series]:
     return RG.build_labels(mkt)
 
 
+def _section(secs, sheet):
+    """The frame of a named workbook section, if it was assembled."""
+    return next((sec[2] for sec in secs if sec[1] == sheet), None)
+
+
+def _deferred_book(build):
+    """A download callable: the workbook is only built when the button is
+    clicked, on Streamlit's download thread, instead of on every rerun of
+    the page. Everything it needs is bound into `build` beforehand -- the
+    callable must not touch Streamlit or the page's variables, which a
+    concurrent rerun may be replacing."""
+    def _make():
+        try:
+            return build()
+        except Exception as exc:                       # never a broken download
+            buf = io.BytesIO()
+            pd.DataFrame({"The workbook could not be built": [str(exc)]}).to_excel(
+                buf, index=False)
+            return buf.getvalue()
+    return _make
+
+
 @st.cache_data(show_spinner=False)
 def parse_price_files(files: tuple) -> "PI.ImportResult":
     return PI.read_files(list(files))
@@ -1813,6 +1835,12 @@ if source == "Return stream":
             help="Choose what the Full report (Excel) carries. Notes and the "
                  "Contents index are always included; the Contents sheet "
                  "lists whatever was left out.")
+        rs_comments = ""
+        if "Executive summary" in rs_pick:
+            rs_comments = st.text_area(
+                "Comments for the CIO (optional)", key="rs_cio_comments", height=90,
+                placeholder="Your read of the track record, the recommendation, "
+                            "open questions... One paragraph per line.")
         e1, e2, e3 = st.columns(3)
         e1.download_button("Series (CSV)", out.to_csv().encode("utf-8"),
                            "return_streams.csv", "text/csv", key="rscsv")
@@ -1881,24 +1909,66 @@ if source == "Return stream":
             except Exception as exc:
                 _rs_secs, _rs_miss = [], [("All", "Additional modules",
                                            f"Could not be assembled: {exc}")]
-            rbook = XL.workbook_from_returns(
-                r_main, eq_main, stats, r_bench, eq_bench, bstats or None,
-                ppy, str(main_col), str(bench_col or "Benchmark"),
-                all_series=pd.DataFrame(everyone),
-                report_notes={"Scale read": rrep.scale,
-                              "Source": rs_source,
-                              "Period": f"{rs_start.date()} to {rs_end.date()}"},
-                sections=_rs_secs, omitted=_rs_miss, include=rs_pick)
+            _rs_summary = None
+            if "Executive summary" in rs_pick:
+                _lbl, _bl = str(main_col), (str(bench_col) if bench_col else None)
+                _per = M.period_table(eq_main, r_main, eq_bench, r_bench, ppy,
+                                      _lbl, _bl or "Benchmark")
+                _curve = pd.DataFrame({_lbl: eq_main / eq_main.iloc[0] * rs_capital})
+                if _bl:
+                    _b = eq_bench.reindex(eq_main.index).ffill()
+                    _curve[_bl] = _b / _b.dropna().iloc[0] * rs_capital
+                _curve = _curve.resample("ME").last()
+                _mc = st.session_state.get(globals().get("_mc_key"))
+                _rs_summary = {
+                    "title": _lbl,
+                    "subtitle": " · ".join(x for x in [
+                        f"{rs_start.date()} to {rs_end.date()}",
+                        f"vs {_bl}" if _bl else "", f"{M.freq_words(ppy)[0].lower()} returns",
+                        f"generated {datetime.now():%Y-%m-%d}"] if x),
+                    "label": _lbl, "bench_label": _bl, "stats": stats,
+                    "bench_stats": bstats or {}, "trailing": _per["trailing"],
+                    "calendar": _per["calendar"],
+                    "drawdowns": M.drawdown_table(eq_main, 5, ppy), "curve": _curve,
+                    "capital_label": f"${rs_capital:,.0f}",
+                    "stress": (globals().get("_ev") or {}).get(focus),
+                    "regimes": _section(_rs_secs, "Market Regimes"),
+                    "walk_forward": globals().get("wf"),
+                    "monte_carlo": dict(_mc, n="many") if isinstance(_mc, dict) else None,
+                    "years": len(r_main) / ppy, "comments": rs_comments,
+                    "assumptions": {
+                        "Source": str(rs_source), "Frequency": M.freq_words(ppy)[0],
+                        "Values read as": str(rrep.scale),
+                        "Period": f"{rs_start.date()} to {rs_end.date()}",
+                        "Starting value": f"${rs_capital:,.0f}",
+                        "Benchmark": _bl or "none",
+                        "Returns": "as supplied: net of whatever costs and fees "
+                                   "the source already deducted",
+                        "Risk-free rate": "0% in Sharpe and Sortino",
+                    },
+                    "footer": f"{_lbl} · {datetime.now():%Y-%m-%d}",
+                }
+            _rpos = (r_main, eq_main, stats, r_bench, eq_bench, bstats or None,
+                     ppy, str(main_col), str(bench_col or "Benchmark"))
+            _rkw = dict(all_series=pd.DataFrame(everyone),
+                        report_notes={"Scale read": rrep.scale,
+                                      "Source": rs_source,
+                                      "Period": f"{rs_start.date()} to {rs_end.date()}"},
+                        sections=_rs_secs, omitted=_rs_miss, include=list(rs_pick),
+                        summary=_rs_summary)
+            rbook = _deferred_book(lambda _p=_rpos, _k=_rkw: XL.workbook_from_returns(*_p, **_k))
             e3.download_button("Full report (Excel)", rbook,
                                f"return_stream_{main_col}.xlsx",
                                "application/vnd.openxmlformats-officedocument."
-                               "spreadsheetml.sheet", key="rsxl")
+                               "spreadsheetml.sheet", key="rsxl", on_click="ignore")
         except Exception as exc:
             st.markdown(f'<div class="flag">Excel export unavailable: {exc}</div>',
                         unsafe_allow_html=True)
-        note("The workbook carries every module in one file, indexed on a "
-             "Contents sheet: statistics, trailing periods, calendar years, "
-             "drawdown episodes, monthly returns and the full series; the "
+        note("The workbook is built when you click. It opens on a one-page "
+             "executive summary for the CIO, then carries every module, "
+             "indexed on a Contents sheet: statistics, trailing periods, "
+             "calendar years, drawdown episodes, monthly returns and the full "
+             "series; the "
              "same tables across every series analysed, with their "
              "correlation; stress test periods; returns in every market "
              "regime; sub-period stability and Monte Carlo when run; plus a "
@@ -4588,6 +4658,14 @@ with tabs[8]:
         help="Choose what the Full report (Excel) carries. Notes and the "
              "Contents index are always included; the Contents sheet lists "
              "whatever was left out.")
+    cio_comments = ""
+    if "Executive summary" in xl_pick:
+        cio_comments = st.text_area(
+            "Comments for the CIO (optional)", key="cio_comments", height=90,
+            placeholder="Your read of the result, the recommendation, open "
+                        "questions... One paragraph per line.",
+            help="Printed on the executive summary, under the observations "
+                 "the report generates from the figures.")
     _d0, _d1 = res.equity.index[0].date(), res.equity.index[-1].date()
     # A new run can have a different date range: forget the old window
     # rather than hold dates the new one may not contain.
@@ -4801,7 +4879,7 @@ with tabs[8]:
         # Market regimes, as on the Return stream tab: the strategy and its
         # benchmark in every rate, volatility, equity and economic regime.
         # Fetched only when asked for, since it needs market data.
-        if "Market regimes" in inc:
+        if inc & {"Market regimes", "Executive summary"}:
             _mkt = fetch_regime_market()
             if _mkt is None:
                 miss.append(("Market regimes", "Regime tables",
@@ -4825,6 +4903,88 @@ with tabs[8]:
         secs.append(("Data", "Return Correlation",
                      universe.loc[w0:w1].pct_change().corr(), True))
         return secs, miss
+
+    def _cio_summary(res, bench, stats, bstats, secs, windowed, comments):
+        """Inputs of the one-page executive summary, from tables already
+        assembled for the workbook."""
+        ppy_ = rcfg.engine.periods_per_year
+        bl = bench.label if bench is not None else None
+        yrs = max(len(res.equity) / ppy_, 1e-9)
+        per = M.period_table(res.equity, res.returns,
+                             bench.equity if bench is not None else None,
+                             bench.returns if bench is not None else None,
+                             ppy_, res.label, bl or "Benchmark")
+        cap = float(rcfg.engine.initial_capital)
+        curve = pd.DataFrame({res.label: res.equity / res.equity.iloc[0] * cap})
+        if bench is not None:
+            b_ = bench.equity.reindex(res.equity.index).ffill()
+            curve[bl] = b_ / b_.dropna().iloc[0] * cap
+        curve = curve.resample("ME").last()
+        curve.iloc[0] = cap
+        ts = _section(secs, "Tax Summary")
+        tax = None
+        if ts is not None and len(ts.columns) > 1:
+            tv = ts.set_index("Measure")
+            tax = {"tcr": tv.iloc[:, 0].get("Tax Cost Ratio (per year)"),
+                   "label": str(tv.iloc[:, 0].get("Tax efficiency", "")),
+                   "bench_tcr": (tv.iloc[:, 1].get("Tax Cost Ratio (per year)")
+                                 if tv.shape[1] > 1 else None)}
+        mc = st.session_state.get("mc")
+        mc = dict(mc, n="many") if isinstance(mc, dict) else None
+        e, c = rcfg.engine, rcfg.costs
+        _sweep = {"none": "only at rebalances", "W": "weekly", "M": "monthly",
+                  "Q": "quarterly"}.get(getattr(e, "cash_sweep", "none"), "only at rebalances")
+        _imp = {"flat": "none", "sqrt": f"square-root, {c.impact_bps_at_10pct_adv:g} bps at 10% ADV",
+                "sqrt_vol": f"square-root law, Y = {getattr(c, 'impact_coef', 1.0):g} x volatility"}
+        strat = (REGISTRY[rcfg.strategy.name].label
+                 if rcfg.strategy.mode == "builtin" and rcfg.strategy.name in REGISTRY
+                 else "Imported target weights")
+        assumptions = {
+            "Strategy": strat,
+            "Data": ("Yahoo Finance" if rcfg.data.source == "yfinance" else "Imported files")
+                    + (", total return" if rcfg.data.adjusted else ", price return + cash dividends"),
+            "Period": f"{res.equity.index[0].date()} to {res.equity.index[-1].date()}"
+                      + (" (window)" if windowed else ""),
+            "Initial capital": f"${cap:,.0f}",
+            "Rebalance": REBALANCE_RULES.get(e.rebalance, e.rebalance),
+            "Execution": f"{'open' if e.execute_at_open else 'close'}, "
+                         f"{e.execution_lag}-session lag",
+            "Commission": f"{c.commission_bps:g} bps per trade",
+            "Slippage": f"{c.slippage_bps:g} bps per trade"
+                        + (" (per-instrument multipliers)" if c.slippage_overrides else ""),
+            "Market impact": _imp.get(c.impact_model, c.impact_model),
+            "Management fee": (f"{c.management_fee_pa * 100:.2f}% a year, accrued daily, "
+                               f"paid monthly" if c.management_fee_pa else "none"),
+            "Cash": (f"earns {rcfg.data.cash_proxy}" if rcfg.data.cash_proxy
+                     else f"earns {c.cash_rate_pa * 100:.2f}% a year"),
+            "Cash reinvestment": _sweep + (f", {e.cash_buffer * 100:.1f}% buffer"
+                                           if getattr(e, "cash_sweep", "none") != "none"
+                                           or getattr(e, "cash_sweep_threshold", 0) else ""),
+            "Units": "whole units only" if e.whole_shares else "fractional",
+            "Minimum trade": f"{e.min_trade_weight * 100:.2f}% of value",
+            "Benchmark": (f"{bl}, {run.get('bench_mode', '').lower()}" if bl else "none"),
+            "Warm-up": "trimmed to first investment" if e.trim_warmup else "included",
+        }
+        return {
+            "title": rcfg.label or res.label,
+            "subtitle": " \u00b7 ".join(x for x in [
+                f"{res.equity.index[0].date()} to {res.equity.index[-1].date()}",
+                f"vs {bl}" if bl else "", f"{REBALANCE_RULES.get(e.rebalance, e.rebalance).lower()} rebalance",
+                f"generated {datetime.now():%Y-%m-%d}"] if x),
+            "label": res.label, "bench_label": bl, "stats": stats, "bench_stats": bstats or {},
+            "trailing": per["trailing"], "calendar": per["calendar"],
+            "drawdowns": M.drawdown_table(res.equity, 5, ppy_), "curve": curve,
+            "capital_label": f"${cap:,.0f}",
+            "stress": _section(secs, "Stress Periods"),
+            "regimes": _section(secs, "Market Regimes"),
+            "walk_forward": _section(secs, "Walk-Forward"),
+            "in_out": _section(secs, "In-Out of Sample"),
+            "cost": _section(secs, "Cost Sensitivity"), "monte_carlo": mc,
+            "years": yrs, "cost_pa": float(res.costs.sum()) / yrs,
+            "fee_pa": float(res.fees.sum()) / yrs if res.fees is not None else None,
+            "tax": tax, "assumptions": assumptions, "comments": comments,
+            "footer": f"{rcfg.label or res.label} \u00b7 {datetime.now():%Y-%m-%d}",
+        }
 
     try:
         if xl_windowed:
@@ -4851,20 +5011,30 @@ with tabs[8]:
         except Exception as exc:
             _xl_secs, _xl_miss = [], [("All", "Additional modules",
                                        f"Could not be assembled: {exc}")]
-        book = XL.workbook_from_backtest(
-            xres, xbench, xstats, xbstats or None, rcfg,
-            prices=universe.loc[_xw0:_xw1],
-            exog=exog_used.loc[_xw0:_xw1] if exog_used is not None else None,
-            quality=quality.per_asset if quality is not None else None,
-            sections=_xl_secs, omitted=_xl_miss, include=xl_pick,
-            extra_notes=_xnotes)
+        _summary = None
+        if "Executive summary" in xl_pick:
+            try:
+                _summary = _cio_summary(xres, xbench, xstats, xbstats, _xl_secs,
+                                        xl_windowed, cio_comments)
+            except Exception as exc:
+                _xl_miss.append(("Executive summary", "Summary page",
+                                 f"Could not be assembled: {exc}"))
+        _args = dict(prices=universe.loc[_xw0:_xw1],
+                     exog=exog_used.loc[_xw0:_xw1] if exog_used is not None else None,
+                     quality=quality.per_asset if quality is not None else None,
+                     sections=_xl_secs, omitted=_xl_miss, include=list(xl_pick),
+                     extra_notes=_xnotes, summary=_summary)
+        _pos = (xres, xbench, xstats, xbstats or None, rcfg)
+        book = _deferred_book(lambda _p=_pos, _k=_args: XL.workbook_from_backtest(*_p, **_k))
         c3.download_button("Full report (Excel)", book,
                            f"backtest_{run['strategy_key']}"
                            + (f"_{_xw0.date()}_{_xw1.date()}" if xl_windowed else "")
                            + ".xlsx",
                            "application/vnd.openxmlformats-officedocument."
-                           "spreadsheetml.sheet", key="dlxl")
-        note("The workbook carries every module in one file, indexed on a "
+                           "spreadsheetml.sheet", key="dlxl", on_click="ignore")
+        note("The workbook is built when you click, so the page stays quick. "
+             "It opens on a one-page executive summary for the CIO, printable "
+             "as is, then carries every module, indexed on a "
              "Contents sheet: statistics, trailing periods, calendar years, "
              "drawdowns, monthly returns and the daily series; current and "
              "historical holdings, target weights, the trade log and share "

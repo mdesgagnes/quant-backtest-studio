@@ -365,10 +365,29 @@ under the **Export** tab, plus a few convenience buttons in "Positions".
 | Holdings history | CSV | Full weight time series (same shape used internally for drift) |
 | Trade log | CSV | Every trade, with weight before/after and the change |
 | Daily series | CSV | Equity, return, exposure, cash, turnover, cost, benchmark |
-| Full workbook | XLSX | Everything below, in one file |
+| Full workbook | XLSX | An executive summary (CIO one-pager) first, then every module -- see below |
 | Trailing periods | on screen + tearsheet | 1M, 3M, 6M, YTD, 1Y, 2Y, 3Y, 5Y, 10Y, 15Y, 20Y, since inception, against the benchmark |
 | Calendar years | on screen + tearsheet | Year-by-year return and excess, partial years flagged |
 | Configuration | YAML | Exact reproduction of the run (imported files are not included; their name, settings, and lag are) |
+
+### The executive summary (Excel)
+
+The full workbook opens on a one-page CIO report, fitted to a printed
+portrait page: headline figures against the benchmark, trailing and
+calendar returns, a growth chart, the risk profile, the worst stress
+episodes, returns by market regime, robustness, key observations, your own
+comments (typed in the Export tab), and every assumption the figures rest
+on -- data, execution, commission, slippage, market impact, management
+fee, cash, reinvestment, benchmark.
+
+The observations are generated from the numbers by fixed rules: they state
+what the figures show and add no opinion. Judgment goes in the comments.
+The summary is a module like any other and can be left out; every data
+sheet behind it is formatted (header row, frozen panes, widths, number
+formats on sheets small enough for it to be quick).
+
+The workbook is built when the download is clicked, not every time the
+page refreshes, so the formatting costs nothing while working in the app.
 
 ### The detailed report
 

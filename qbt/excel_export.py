@@ -41,10 +41,10 @@ def _safe(name: str) -> str:
 
 # The modules each workbook can carry, in the order they appear. The
 # Export tab offers these as a checklist; Notes and Contents always come.
-BACKTEST_MODULES = ["Results", "Signals", "Positions", "Attribution", "Tax",
+BACKTEST_MODULES = ["Executive summary", "Results", "Signals", "Positions", "Attribution", "Tax",
                     "Robustness", "Stress tests", "Market regimes",
                     "Configuration", "Data"]
-RETURNS_MODULES = ["Results", "Stress tests", "Market regimes", "Robustness",
+RETURNS_MODULES = ["Executive summary", "Results", "Stress tests", "Market regimes", "Robustness",
                    "Data"]
 
 # (module, sheet name, frame, write the index[, note for the Contents sheet])
@@ -68,6 +68,7 @@ class _Book:
         self.include = set(include) if include is not None else None
         self.rows: List[Dict[str, Any]] = []
         self.used: set = set()
+        self.summary = False
 
     def wants(self, module: str) -> bool:
         return self.include is None or module in self.include
@@ -117,6 +118,10 @@ class _Book:
 
     def contents(self) -> None:
         rows = list(self.rows)
+        if self.summary:
+            rows.insert(0, {"Module": "Executive summary", "Sheet": "Executive Summary",
+                            "Rows": None, "Note": "One-page CIO report, fitted to "
+                                                  "a printed page."})
         if self.include is not None:
             left_out = [m for m in self.modules if m not in self.include]
             rows += [{"Module": m, "Sheet": "(excluded)", "Rows": None,
@@ -127,6 +132,16 @@ class _Book:
         wb = self.xw.book
         wb.move_sheet("Contents", offset=-(len(wb.sheetnames) - 1))
         wb.active = 0
+
+    def finish(self, summary: Optional[Dict[str, Any]], style: bool) -> None:
+        """Contents, then formatting, then the summary in front of both."""
+        from . import exec_summary as ES
+        self.summary = bool(summary) and self.wants("Executive summary")
+        self.contents()
+        if style:
+            ES.style_workbook(self.xw.book)
+        if self.summary:
+            ES.write_summary(self.xw.book, summary)
 
 
 def _write(xw, df: Optional[pd.DataFrame], sheet: str, index: bool = False) -> None:
@@ -368,7 +383,9 @@ def workbook_from_backtest(res: BacktestResult,
                            sections: Optional[List[Section]] = None,
                            omitted: Optional[List[Omission]] = None,
                            include: Optional[Iterable[str]] = None,
-                           extra_notes: Optional[Dict[str, Any]] = None) -> bytes:
+                           extra_notes: Optional[Dict[str, Any]] = None,
+                           summary: Optional[Dict[str, Any]] = None,
+                           style: bool = True) -> bytes:
     """Every table behind a simulated backtest, in one workbook.
 
     `sections` carries the other modules (signals, attribution, tax,
@@ -481,7 +498,7 @@ def workbook_from_backtest(res: BacktestResult,
             bk.write(quality, "Data Quality")
         bk.sections(sections)
         bk.omit(omitted)
-        bk.contents()
+        bk.finish(summary, style)
     return buf.getvalue()
 
 
@@ -497,7 +514,9 @@ def workbook_from_returns(returns: pd.Series, equity: pd.Series,
                           report_notes: Optional[Dict[str, Any]] = None,
                           sections: Optional[List[Section]] = None,
                           omitted: Optional[List[Omission]] = None,
-                          include: Optional[Iterable[str]] = None) -> bytes:
+                          include: Optional[Iterable[str]] = None,
+                          summary: Optional[Dict[str, Any]] = None,
+                          style: bool = True) -> bytes:
     """The same workbook for an imported return stream.
 
     Sheets that need position data are absent, since none exists; every
@@ -539,5 +558,5 @@ def workbook_from_returns(returns: pd.Series, equity: pd.Series,
         if all_series is not None and not all_series.empty:
             bk.write(all_series, "All Imported Series", index=True, module="Data")
         bk.omit(omitted)
-        bk.contents()
+        bk.finish(summary, style)
     return buf.getvalue()
