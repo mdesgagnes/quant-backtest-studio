@@ -201,7 +201,7 @@ class _Book:
         if self.summary:
             rows.insert(0, {"Module": "Executive summary", "Table": "Executive summary",
                             "Sheet": "Executive Summary", "Cell": "A1", "Rows": None,
-                            "Note": "One-page CIO report, fitted to a printed page."})
+                            "Note": "Two-page CIO report: performance, then risk and robustness."})
         rows += self.missing
         if self.include is not None:
             rows += [{"Module": m, "Table": "(excluded)", "Sheet": "", "Cell": "",

@@ -1785,7 +1785,8 @@ if source == "Return stream":
                         min(21, max(3, len(r_main) // 20)), 1, key="rsblk")
         _mc_key = f"rsmc_res_{focus}_{rs_start.date()}_{rs_end.date()}"
         if st.button("Run Monte Carlo simulation", key="rsmcbtn"):
-            st.session_state[_mc_key] = R.monte_carlo(r_main, nsim, blk, ppy)
+            st.session_state[_mc_key] = dict(R.monte_carlo(r_main, nsim, blk, ppy),
+                                             n=nsim, block=blk)
         if _mc_key in st.session_state:
             mc = st.session_state[_mc_key]
             if not mc["paths"].empty:
@@ -1934,7 +1935,7 @@ if source == "Return stream":
                     "stress": (globals().get("_ev") or {}).get(focus),
                     "regimes": _section(_rs_secs, "Market Regimes"),
                     "walk_forward": globals().get("wf"),
-                    "monte_carlo": dict(_mc, n="many") if isinstance(_mc, dict) else None,
+                    "monte_carlo": _mc if isinstance(_mc, dict) else None,
                     "years": len(r_main) / ppy, "comments": rs_comments,
                     "assumptions": {
                         "Source": str(rs_source), "Frequency": M.freq_words(ppy)[0],
@@ -1964,7 +1965,7 @@ if source == "Return stream":
         except Exception as exc:
             st.markdown(f'<div class="flag">Excel export unavailable: {exc}</div>',
                         unsafe_allow_html=True)
-        note("The workbook is built when you click. It opens on a one-page "
+        note("The workbook is built when you click. It opens on a two-page "
              "executive summary for the CIO, then an About sheet indexing "
              "every table, then a few sheets grouped by module -- small tables "
              "stacked, daily series side by side: statistics, trailing periods, "
@@ -4258,7 +4259,8 @@ with tabs[5]:
     blk = c2.slider("Block size (days)", 5, 63, 21, 1)
     if st.button("Run Monte Carlo simulation", key="mcbtn"):
         with st.spinner("Resampling..."):
-            st.session_state["mc"] = R.monte_carlo(res.returns, n_sims, blk, ppy)
+            st.session_state["mc"] = dict(R.monte_carlo(res.returns, n_sims, blk, ppy),
+                                          n=n_sims, block=blk)
     if "mc" in st.session_state:
         mc = st.session_state["mc"]
         if not mc["paths"].empty:
@@ -4906,7 +4908,7 @@ with tabs[8]:
         return secs, miss
 
     def _cio_summary(res, bench, stats, bstats, secs, windowed, comments):
-        """Inputs of the one-page executive summary, from tables already
+        """Inputs of the executive summary, from tables already
         assembled for the workbook."""
         ppy_ = rcfg.engine.periods_per_year
         bl = bench.label if bench is not None else None
@@ -4931,7 +4933,20 @@ with tabs[8]:
                    "bench_tcr": (tv.iloc[:, 1].get("Tax Cost Ratio (per year)")
                                  if tv.shape[1] > 1 else None)}
         mc = st.session_state.get("mc")
-        mc = dict(mc, n="many") if isinstance(mc, dict) else None
+        mc = mc if isinstance(mc, dict) else None
+        # Current weights against the last rebalance's targets, with cash.
+        _last = res.weights.index[-1]
+        _w = res.weights.iloc[-1]
+        _t = res.target_weights.reindex(columns=_w.index).iloc[-1]
+        _v = float(res.equity.iloc[-1])
+        weights = pd.DataFrame({"Instrument": list(_w.index), "Weight": _w.values,
+                                "Target": _t.values, "Value": _w.values * _v})
+        weights = weights[(weights["Weight"].abs() > 1e-9) | (weights["Target"].abs() > 1e-9)]
+        weights = weights.sort_values("Weight", ascending=False)
+        _cw = float(res.cash_weight.iloc[-1])
+        weights.loc[len(weights) + 1] = ["Cash", _cw, max(0.0, 1.0 - float(_t.sum())), _cw * _v]
+        contributions = (ATTR.summary(res, None, ppy_)
+                         if res.contributions is not None else None)
         e, c = rcfg.engine, rcfg.costs
         _sweep = {"none": "only at rebalances", "W": "weekly", "M": "monthly",
                   "Q": "quarterly"}.get(getattr(e, "cash_sweep", "none"), "only at rebalances")
@@ -4981,6 +4996,8 @@ with tabs[8]:
             "walk_forward": _section(secs, "Walk-Forward"),
             "in_out": _section(secs, "In-Out of Sample"),
             "cost": _section(secs, "Cost Sensitivity"), "monte_carlo": mc,
+            "weights": weights, "as_of": str(_last.date()),
+            "contributions": contributions,
             "years": yrs, "cost_pa": float(res.costs.sum()) / yrs,
             "fee_pa": float(res.fees.sum()) / yrs if res.fees is not None else None,
             "tax": tax, "assumptions": assumptions, "comments": comments,
@@ -5034,7 +5051,7 @@ with tabs[8]:
                            "application/vnd.openxmlformats-officedocument."
                            "spreadsheetml.sheet", key="dlxl", on_click="ignore")
         note("The workbook is built when you click, so the page stays quick. "
-             "It opens on a one-page executive summary for the CIO, printable "
+             "It opens on a two-page executive summary for the CIO, printable "
              "as is, then an About sheet indexing every table, then about a "
              "dozen sheets grouped by module -- small tables stacked under a "
              "title, daily series side by side on their dates: statistics, "

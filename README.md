@@ -365,7 +365,7 @@ under the **Export** tab, plus a few convenience buttons in "Positions".
 | Holdings history | CSV | Full weight time series (same shape used internally for drift) |
 | Trade log | CSV | Every trade, with weight before/after and the change |
 | Daily series | CSV | Equity, return, exposure, cash, turnover, cost, benchmark |
-| Full workbook | XLSX | An executive summary (CIO one-pager), an About sheet indexing every table, then about a dozen sheets grouped by module -- see below |
+| Full workbook | XLSX | A two-page executive summary for the CIO, an About sheet indexing every table, then about a dozen sheets grouped by module -- see below |
 | Trailing periods | on screen + tearsheet | 1M, 3M, 6M, YTD, 1Y, 2Y, 3Y, 5Y, 10Y, 15Y, 20Y, since inception, against the benchmark |
 | Calendar years | on screen + tearsheet | Year-by-year return and excess, partial years flagged |
 | Configuration | YAML | Exact reproduction of the run (imported files are not included; their name, settings, and lag are) |
@@ -384,13 +384,18 @@ settings and lists every table with a link to where it sits.
 
 ### The executive summary (Excel)
 
-The full workbook opens on a one-page CIO report, fitted to a printed
-portrait page: headline figures against the benchmark, trailing and
-calendar returns, a growth chart, the risk profile, the worst stress
-episodes, returns by market regime, robustness, key observations, your own
-comments (typed in the Export tab), and every assumption the figures rest
-on -- data, execution, commission, slippage, market impact, management
-fee, cash, reinvestment, benchmark.
+The full workbook opens on a two-page CIO report, printed portrait.
+Page 1, performance: headline figures against the benchmark, trailing
+returns, the risk profile, a growth chart, current weights against their
+targets, each component's contribution to return and share of risk, and
+every calendar year. Page 2, risk and robustness: every stress episode
+inside the period, returns in every market regime (economy, short and long
+rates, yield curve, equity drawdown, VIX), the Monte Carlo distribution
+(percentiles of CAGR, drawdown and Sharpe, probability of loss), the other
+robustness checks and the largest drawdowns; then key observations, your
+own comments (typed in the Export tab) and every assumption the figures
+rest on -- data, execution, commission, slippage, market impact,
+management fee, cash, reinvestment, benchmark.
 
 The observations are generated from the numbers by fixed rules: they state
 what the figures show and add no opinion. Judgment goes in the comments.
