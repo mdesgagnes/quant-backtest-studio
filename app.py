@@ -1832,9 +1832,9 @@ if source == "Return stream":
         rs_pick = st.multiselect(
             "Modules in the Excel report", XL.RETURNS_MODULES,
             default=XL.RETURNS_MODULES, key="rs_xl_modules",
-            help="Choose what the Full report (Excel) carries. Notes and the "
-                 "Contents index are always included; the Contents sheet "
-                 "lists whatever was left out.")
+            help="Choose what the Full report (Excel) carries. The About sheet "
+                 "(settings and an index of every table) always comes, and lists "
+                 "whatever was left out.")
         rs_comments = ""
         if "Executive summary" in rs_pick:
             rs_comments = st.text_area(
@@ -1965,8 +1965,9 @@ if source == "Return stream":
             st.markdown(f'<div class="flag">Excel export unavailable: {exc}</div>',
                         unsafe_allow_html=True)
         note("The workbook is built when you click. It opens on a one-page "
-             "executive summary for the CIO, then carries every module, "
-             "indexed on a Contents sheet: statistics, trailing periods, "
+             "executive summary for the CIO, then an About sheet indexing "
+             "every table, then a few sheets grouped by module -- small tables "
+             "stacked, daily series side by side: statistics, trailing periods, "
              "calendar years, drawdown episodes, monthly returns and the full "
              "series; the "
              "same tables across every series analysed, with their "
@@ -4655,8 +4656,8 @@ with tabs[8]:
     xl_pick = st.multiselect(
         "Modules in the Excel report", XL.BACKTEST_MODULES,
         default=XL.BACKTEST_MODULES, key="xl_modules",
-        help="Choose what the Full report (Excel) carries. Notes and the "
-             "Contents index are always included; the Contents sheet lists "
+        help="Choose what the Full report (Excel) carries. The About sheet "
+             "(settings and an index of every table) always comes, and lists "
              "whatever was left out.")
     cio_comments = ""
     if "Executive summary" in xl_pick:
@@ -4709,7 +4710,7 @@ with tabs[8]:
         (stress category, custom periods, tax rates, fold count) -- rather
         than recomputed with defaults. The parameter surface, trading-day
         sweep and Monte Carlo are included when they have been run for this
-        backtest; the Contents sheet says so when they have not.
+        backtest; the About sheet says so when they have not.
 
         `res`, `bench` and `stats` are the window being exported. When that
         is only part of the run, anything measured on returns is measured
@@ -5034,8 +5035,10 @@ with tabs[8]:
                            "spreadsheetml.sheet", key="dlxl", on_click="ignore")
         note("The workbook is built when you click, so the page stays quick. "
              "It opens on a one-page executive summary for the CIO, printable "
-             "as is, then carries every module, indexed on a "
-             "Contents sheet: statistics, trailing periods, calendar years, "
+             "as is, then an About sheet indexing every table, then about a "
+             "dozen sheets grouped by module -- small tables stacked under a "
+             "title, daily series side by side on their dates: statistics, "
+             "trailing periods, calendar years, "
              "drawdowns, monthly returns and the daily series; current and "
              "historical holdings, target weights, the trade log and share "
              "counts; signals; attribution by security, class and period; "
@@ -5043,8 +5046,8 @@ with tabs[8]:
              "sensitivity and stress test periods; returns in every market "
              "regime; the parameter surface, "
              "trading-day sweep and Monte Carlo when run; and prices, "
-             "imported series and data diagnostics, plus a Notes sheet "
-             "recording the settings these figures depend on.")
+             "imported series and data diagnostics, plus the settings these "
+             "figures depend on.")
     except Exception as exc:
         st.markdown(f'<div class="flag">Excel export unavailable: {exc}</div>',
                     unsafe_allow_html=True)

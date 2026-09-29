@@ -365,10 +365,22 @@ under the **Export** tab, plus a few convenience buttons in "Positions".
 | Holdings history | CSV | Full weight time series (same shape used internally for drift) |
 | Trade log | CSV | Every trade, with weight before/after and the change |
 | Daily series | CSV | Equity, return, exposure, cash, turnover, cost, benchmark |
-| Full workbook | XLSX | An executive summary (CIO one-pager) first, then every module -- see below |
+| Full workbook | XLSX | An executive summary (CIO one-pager), an About sheet indexing every table, then about a dozen sheets grouped by module -- see below |
 | Trailing periods | on screen + tearsheet | 1M, 3M, 6M, YTD, 1Y, 2Y, 3Y, 5Y, 10Y, 15Y, 20Y, since inception, against the benchmark |
 | Calendar years | on screen + tearsheet | Year-by-year return and excess, partial years flagged |
 | Configuration | YAML | Exact reproduction of the run (imported files are not included; their name, settings, and lag are) |
+
+### Layout of the workbook
+
+Tables are grouped, not given a sheet each. Small tables are stacked under
+a title on one sheet per module -- *Performance* (statistics, trailing
+periods, calendar years, drawdowns, monthly returns), *Positions*, *Trades
+& Cash Flows*, *Attribution*, *Tax*, *Robustness*, *Stress & Regimes*,
+*Data*. Daily series are joined side by side on their dates -- *Daily
+Series* (value, returns, drawdown, benchmark, after-tax value, Monte Carlo
+bands), *Daily Positions* (weight, target, units and contribution per
+instrument), *Daily Signals*, *Market Data*. The *About* sheet records the
+settings and lists every table with a link to where it sits.
 
 ### The executive summary (Excel)
 

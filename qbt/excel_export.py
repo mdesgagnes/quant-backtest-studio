@@ -15,9 +15,11 @@ depend on.
 Beyond the core results, the caller passes every other module it has on
 hand -- signals, attribution, tax, robustness, stress tests, regimes, data
 diagnostics -- as `sections`, and names whatever it could not include in
-`omitted`. A Contents sheet at the front lists every sheet by module and
-says which modules are absent and why, so a missing tab is never mistaken
-for a missing result.
+`omitted`. Tables are grouped rather than given a sheet each: small tables
+are stacked on one sheet per module, daily series are joined side by side
+on their dates. An About sheet at the front records the settings and
+indexes every table, with a link to it, and says which modules are absent
+and why, so a missing table is never mistaken for a missing result.
 """
 from __future__ import annotations
 
@@ -27,16 +29,12 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from . import metrics as M
 from .config import RunConfig, REBALANCE_RULES
 from .engine import BacktestResult
-
-
-def _safe(name: str) -> str:
-    """Excel sheet names: 31 chars, no []:*?/\\ ."""
-    out = "".join(c for c in str(name) if c not in "[]:*?/\\")
-    return (out[:31] or "Sheet")
 
 
 # The modules each workbook can carry, in the order they appear. The
@@ -58,7 +56,15 @@ def _empty(df) -> bool:
 
 
 class _Book:
-    """Writes sheets while recording each one for the Contents sheet."""
+    """Collects every table, then lays them out on a handful of sheets.
+
+    Small tables are stacked, one under another with a title, on their
+    module's sheet (all performance tables on "Performance", everything
+    about the book on "Positions"...). Daily time series are joined side by
+    side on their dates instead: one row per session, one column per
+    instrument and field, as in "Daily Positions". An "About" sheet lists
+    the run's settings and every table with a link to where it sits.
+    """
 
     def __init__(self, xw, include: Optional[Iterable[str]] = None,
                  modules: Optional[List[str]] = None):
@@ -66,39 +72,32 @@ class _Book:
         self.modules = modules or []
         self.module = "Results"
         self.include = set(include) if include is not None else None
-        self.rows: List[Dict[str, Any]] = []
-        self.used: set = set()
+        self.blocks: List[Dict[str, Any]] = []
+        self.missing: List[Dict[str, Any]] = []
+        self.notes: Optional[pd.DataFrame] = None
         self.summary = False
 
     def wants(self, module: str) -> bool:
         return self.include is None or module in self.include
 
-    def _name(self, sheet: str) -> str:
-        base = _safe(sheet)
-        name, i = base, 2
-        while name.lower() in self.used or name.lower() == "contents":
-            tail = f" ({i})"
-            name = base[:31 - len(tail)] + tail
-            i += 1
-        self.used.add(name.lower())
-        return name
-
     def write(self, df, sheet: str, index: bool = False,
               module: Optional[str] = None, always: bool = False,
               note: str = "") -> None:
-        if _empty(df) or not (always or self.wants(module or self.module)):
+        """Records one table; `sheet` is its title."""
+        mod = module or self.module
+        if _empty(df) or not (always or self.wants(mod)):
             return
         if isinstance(df, pd.Series):
             df = df.to_frame()
-        name = self._name(sheet)
-        df.to_excel(self.xw, sheet_name=name, index=index)
-        self.rows.append({"Module": module or self.module, "Sheet": name,
-                          "Rows": int(len(df)), "Note": note})
+        if sheet == "Notes":
+            self.notes = df
+            return
+        self.blocks.append({"title": sheet, "df": df, "index": index,
+                            "module": mod, "note": note})
 
     def sections(self, sections: Optional[List[Section]],
                  module: Optional[str] = None) -> None:
-        """Writes the pending sections of one module, or all that remain,
-        so each module's extra sheets sit beside its core ones."""
+        """Records the pending sections of one module, or all that remain."""
         keep = []
         for sec in sections or []:
             if module is None or sec[0] == module:
@@ -111,43 +110,219 @@ class _Book:
 
     def omit(self, omitted: Optional[List[Omission]]) -> None:
         for module, what, why in omitted or []:
-            if not self.wants(module):
-                continue
-            self.rows.append({"Module": module, "Sheet": f"(not included) {what}",
-                              "Rows": None, "Note": why})
+            if self.wants(module):
+                self.missing.append({"Module": module, "Table": f"(not included) {what}",
+                                     "Sheet": "", "Rows": None, "Note": why})
 
-    def contents(self) -> None:
-        rows = list(self.rows)
-        if self.summary:
-            rows.insert(0, {"Module": "Executive summary", "Sheet": "Executive Summary",
-                            "Rows": None, "Note": "One-page CIO report, fitted to "
-                                                  "a printed page."})
-        if self.include is not None:
-            left_out = [m for m in self.modules if m not in self.include]
-            rows += [{"Module": m, "Sheet": "(excluded)", "Rows": None,
-                      "Note": "Left out of this export by choice."}
-                     for m in left_out]
-        df = pd.DataFrame(rows, columns=["Module", "Sheet", "Rows", "Note"])
-        df.to_excel(self.xw, sheet_name="Contents", index=False)
-        wb = self.xw.book
-        wb.move_sheet("Contents", offset=-(len(wb.sheetnames) - 1))
-        wb.active = 0
+    # ------------------------------------------------------------------
+    def _place(self, title: str, module: str) -> Tuple[str, Optional[str]]:
+        """(sheet, None) for a stacked table, (sheet, prefix) for a joined one."""
+        if title in _JOINED:
+            return _JOINED[title]
+        if title in _OWN_SHEET:
+            return _OWN_SHEET[title], None
+        return _MODULE_SHEET.get(module, module[:31]), None
 
     def finish(self, summary: Optional[Dict[str, Any]], style: bool) -> None:
-        """Contents, then formatting, then the summary in front of both."""
         from . import exec_summary as ES
         self.summary = bool(summary) and self.wants("Executive summary")
-        self.contents()
-        if style:
-            ES.style_workbook(self.xw.book)
+        wb = self.xw.book
+        stacked: Dict[str, List[Dict[str, Any]]] = {}
+        joined: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
+        for b in self.blocks:
+            sheet, prefix = self._place(b["title"], b["module"])
+            if prefix is None:
+                stacked.setdefault(sheet, []).append(b)
+            else:
+                joined.setdefault(sheet, []).append((prefix, b))
+
+        index_rows: List[Dict[str, Any]] = []
+        titles: Dict[str, set] = {}
+        for sheet in [s for s in SHEET_ORDER if s in stacked] + \
+                     [s for s in stacked if s not in SHEET_ORDER]:
+            r = 0
+            for b in stacked[sheet]:
+                df = b["df"]
+                df.to_excel(self.xw, sheet_name=sheet, startrow=r + 1, index=b["index"])
+                ws = self.xw.sheets[sheet]
+                ws.cell(row=r + 1, column=1, value=b["title"]).font = _TITLE_FONT
+                titles.setdefault(sheet, set()).add(r + 1)
+                ncols = df.shape[1] + (df.index.nlevels if b["index"] else 0)
+                if style:
+                    _style_block(ws, r + 2, len(df), ncols, df, b["index"], b["title"])
+                index_rows.append({"Module": b["module"], "Table": b["title"],
+                                   "Sheet": sheet, "Cell": f"A{r + 1}",
+                                   "Rows": int(len(df)), "Note": b["note"]})
+                r += len(df) + 4
+            if style:
+                _widths(self.xw.sheets[sheet], titles.get(sheet, set()))
+        for sheet in [s for s in SHEET_ORDER if s in joined] + \
+                     [s for s in joined if s not in SHEET_ORDER]:
+            parts = []
+            for prefix, b in joined[sheet]:
+                df = b["df"].copy()
+                if prefix:
+                    df.columns = [f"{prefix} {c}" for c in df.columns]
+                parts.append(df)
+                index_rows.append({"Module": b["module"], "Table": b["title"],
+                                   "Sheet": sheet, "Cell": "",
+                                   "Rows": int(len(df)),
+                                   "Note": (f"Columns headed “{prefix} ...”"
+                                            if prefix else "") + (
+                                       ("; " if prefix and b["note"] else "") + b["note"])})
+            wide = pd.concat(parts, axis=1).sort_index()
+            wide.index.name = "Date"
+            wide.to_excel(self.xw, sheet_name=sheet, index=True)
+            ws = self.xw.sheets[sheet]
+            if style:
+                _style_block(ws, 1, len(wide), wide.shape[1] + 1, wide, True, sheet)
+                _widths(ws, set())
+            ws.freeze_panes = "B2"
+
+        self._about(index_rows)
+        order = ["About"] + [s for s in SHEET_ORDER if s in wb.sheetnames and s != "About"]
+        order += [s for s in wb.sheetnames if s not in order]
+        wb._sheets = [wb[s] for s in order]
         if self.summary:
-            ES.write_summary(self.xw.book, summary)
+            ES.write_summary(wb, summary)
+        wb.active = 0
+
+    def _about(self, index_rows: List[Dict[str, Any]]) -> None:
+        """Settings, then an index of every table with a link to it."""
+        r = 0
+        if self.notes is not None:
+            self.notes.to_excel(self.xw, sheet_name="About", startrow=1, index=False)
+            ws = self.xw.sheets["About"]
+            ws.cell(row=1, column=1, value="Settings").font = _TITLE_FONT
+            _style_block(ws, 2, len(self.notes), 2, self.notes, False, "Settings")
+            r = len(self.notes) + 4
+        skip = {1, r + 1}
+        rows = list(index_rows)
+        if self.summary:
+            rows.insert(0, {"Module": "Executive summary", "Table": "Executive summary",
+                            "Sheet": "Executive Summary", "Cell": "A1", "Rows": None,
+                            "Note": "One-page CIO report, fitted to a printed page."})
+        rows += self.missing
+        if self.include is not None:
+            rows += [{"Module": m, "Table": "(excluded)", "Sheet": "", "Cell": "",
+                      "Rows": None, "Note": "Left out of this export by choice."}
+                     for m in self.modules if m not in self.include]
+        idx = pd.DataFrame(rows, columns=["Module", "Table", "Sheet", "Cell", "Rows", "Note"])
+        idx.to_excel(self.xw, sheet_name="About", startrow=r + 1, index=False)
+        ws = self.xw.sheets["About"]
+        ws.cell(row=r + 1, column=1, value="Contents").font = _TITLE_FONT
+        if self.notes is None:
+            skip = {r + 1}
+        _style_block(ws, r + 2, len(idx), idx.shape[1], idx, False, "Contents")
+        for k, row in enumerate(rows):
+            if row.get("Sheet") and row["Sheet"] != "":
+                cell = ws.cell(row=r + 3 + k, column=2)
+                target = f"'{row['Sheet']}'!{row['Cell'] or 'A1'}"
+                cell.hyperlink = f"#{target}"
+                cell.font = Font(name="Calibri", size=9, color="B01419", underline="single")
+        _widths(ws, skip)
 
 
-def _write(xw, df: Optional[pd.DataFrame], sheet: str, index: bool = False) -> None:
-    if _empty(df):
+# Where each table goes. Tables not named here are stacked on their
+# module's sheet.
+SHEET_ORDER = ["About", "Performance", "Positions", "Trades & Cash Flows",
+               "Attribution", "Tax", "Robustness", "Stress & Regimes", "Data",
+               "Daily Series", "Daily Positions", "Daily Signals", "Market Data"]
+_MODULE_SHEET = {"Results": "Performance", "Signals": "Positions",
+                 "Positions": "Positions", "Attribution": "Attribution",
+                 "Tax": "Tax", "Robustness": "Robustness",
+                 "Stress tests": "Stress & Regimes", "Market regimes": "Stress & Regimes",
+                 "Configuration": "Data", "Data": "Data"}
+_OWN_SHEET = {"Trades": "Trades & Cash Flows", "Cash Flows": "Trades & Cash Flows",
+              "Rebalance Dates": "Trades & Cash Flows"}
+# title -> (sheet, column prefix): daily series joined on their dates.
+_JOINED = {
+    "Daily Series": ("Daily Series", ""), "Series": ("Daily Series", ""),
+    "After-Tax Equity": ("Daily Series", ""),
+    "Monte Carlo Bands": ("Daily Series", "Monte Carlo"),
+    "All Imported Series": ("Daily Series", "Return"),
+    "Holdings History": ("Daily Positions", "Weight"),
+    "Target Weights": ("Daily Positions", "Target"),
+    "Share Counts": ("Daily Positions", "Units"),
+    "Weight by Sleeve": ("Daily Positions", "Sleeve"),
+    "Daily Contributions": ("Daily Positions", "Contribution"),
+    "Signal Scores": ("Daily Signals", "Score"),
+    "Signal Ranks": ("Daily Signals", "Rank"),
+    "Prices": ("Market Data", "Price"),
+    "Exogenous Series": ("Market Data", ""),
+}
+
+
+# ----------------------------------------------------------------------
+# Formatting: header rows, number formats and widths. Values never change.
+_TITLE_FONT = Font(name="Calibri", size=11, bold=True, color="B01419")
+_HEAD_FONT = Font(name="Calibri", size=9, bold=True, color="FFFFFF")
+_HEAD_FILL = PatternFill("solid", fgColor="1A1A1A")
+_PCT2 = '0.00%;-0.00%;0.00%'
+_MONEY2 = '#,##0.00'
+_PCT_COL_WORDS = ("return", "cagr", "volatility", "drawdown", "weight", "excess",
+                  "exposure", "turnover", "contribution", "share of", "% of",
+                  "hit rate", "annual rate", "alpha", "tracking error", "worst",
+                  "best", "yield", "target", "sleeve", "monte carlo")
+_NOT_PCT_WORDS = ("sessions", "days", "periods", "rows", "count", "fold", "rank",
+                  "score", "deductions", "bps", "units", "price")
+_MONEY_WORDS = ("value", "notional", "amount", "tax", "gain", "proceeds", "acb",
+                "paid", "raised", "cash before", "cash after", "costs")
+# Tables whose every numeric column after the first is a fraction.
+_PCT_TABLES = ("Monthly Returns", "Calendar", "Trailing", "Regime Overview",
+               "Contribution by", "Class Contribution", "Income and Costs",
+               "Stress Returns")
+
+
+def _col_format(name: str) -> Optional[str]:
+    n = str(name).lower()
+    if any(w in n for w in _MONEY_WORDS) and not any(w in n for w in ("rate", "ratio", "bps")):
+        return _MONEY2
+    if any(w in n for w in _PCT_COL_WORDS) and not any(w in n for w in _NOT_PCT_WORDS):
+        return _PCT2
+    return None
+
+
+def _style_block(ws, head_row: int, nrows: int, ncols: int, df: pd.DataFrame,
+                 index: bool, title: str, max_cells: int = 250_000) -> None:
+    for c in range(1, ncols + 1):
+        cell = ws.cell(row=head_row, column=c)
+        cell.font, cell.fill = _HEAD_FONT, _HEAD_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    if nrows * ncols > max_cells:
         return
-    df.to_excel(xw, sheet_name=_safe(sheet), index=index)
+    heads = [ws.cell(row=head_row, column=c).value for c in range(1, ncols + 1)]
+    whole = title.startswith(_PCT_TABLES)
+    fmts = {}
+    for c in range(1, ncols + 1):
+        f = _col_format(heads[c - 1] or "")
+        if f is None and whole and c > 1:
+            f = _PCT2
+        if f:
+            fmts[c] = f
+    if not fmts:
+        return
+    for row in ws.iter_rows(min_row=head_row + 1, max_row=head_row + nrows,
+                            max_col=ncols):
+        for cell in row:
+            f = fmts.get(cell.column)
+            if f and isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
+                cell.number_format = f
+
+
+def _widths(ws, title_rows: set, sample: int = 400) -> None:
+    """Column widths from the headers and a sample of the values; the
+    tables' title rows do not count."""
+    widths: Dict[int, int] = {}
+    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, sample)):
+        for c in row:
+            if c.value is None or c.row in title_rows:
+                continue
+            v = c.value
+            n = len(f"{v:,.4f}") if isinstance(v, float) else len(str(v))
+            widths[c.column] = max(widths.get(c.column, 0), n)
+    for col, n in widths.items():
+        ws.column_dimensions[get_column_letter(col)].width = max(9, min(40, n * 0.95 + 2))
 
 
 def _kv(pairs: Dict[str, Any], key: str = "Measure", value: str = "Value") -> pd.DataFrame:
@@ -456,7 +631,8 @@ def workbook_from_backtest(res: BacktestResult,
     })
 
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+    with pd.ExcelWriter(buf, engine="openpyxl", datetime_format="yyyy-mm-dd",
+                        date_format="yyyy-mm-dd") as xw:
         bk = _Book(xw, include, BACKTEST_MODULES)
         bk.write(notes, "Notes", module="Notes", always=True)
         bk.write(_stats_frame(stats, bench_stats, label, blabel), "Statistics")
@@ -545,7 +721,8 @@ def workbook_from_returns(returns: pd.Series, equity: pd.Series,
     })
 
     buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+    with pd.ExcelWriter(buf, engine="openpyxl", datetime_format="yyyy-mm-dd",
+                        date_format="yyyy-mm-dd") as xw:
         bk = _Book(xw, include, RETURNS_MODULES)
         bk.write(notes, "Notes", module="Notes", always=True)
         bk.write(_stats_frame(stats, bench_stats, label, bench_label), "Statistics")
