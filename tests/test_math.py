@@ -304,6 +304,68 @@ def test_total_return_import_scales_ohlc_and_drops_dividends():
     assert m.adj_close is not None and m.dividends["X"].sum() == 1.0
 
 
+# ----------------------------------------------------------------------
+def test_fee_ledger_dollars_match_an_independent_accrual():
+    px, _, div = _market()
+    cost = CostConfig(commission_bps=5, slippage_bps=10, management_fee_pa=0.015)
+    res = run_backtest(px, pd.DataFrame(0.3333, px.index, px.columns),
+                       EngineConfig(min_trade_weight=0.0, rebalance="Q"), cost,
+                       dividends=div)
+    cf = res.cash_flows
+    fees = cf[cf["Type"] == "Management fee"].set_index("Date")
+    assert len(fees) > 0
+    # Value on which each day accrues: the close, before that day's fee and
+    # the costs of any sale made to pay it.
+    pre = res.equity.copy()
+    pre[fees.index] += -fees["Amount"] + fees["Trading costs"]
+    last = res.equity.index[0]
+    for d, row in fees.iterrows():
+        span = pre.loc[last:d].iloc[1:] if last != res.equity.index[0] else pre.loc[:d].iloc[1:]
+        expected = 0.015 / 252 * span.sum()
+        assert abs(-row["Amount"] - expected) < 1e-6 * max(1.0, expected), d
+        assert row["Sessions accrued"] == len(span)
+        assert abs(row["Paid from cash"] + row["Raised by selling"] - (-row["Amount"])) < 1e-6             or row["Raised by selling"] == 0
+        last = d
+    # The ledger and the daily fee series agree to the cent.
+    prev = res.equity.shift(1).fillna(1e5)
+    assert abs(fees["Amount"].sum() + (res.fees * prev).sum()) < 1e-6
+    divs = cf[cf["Type"] == "Dividend"]
+    assert abs(divs["Amount"].sum() - (res.dividend_income * prev).sum()) < 1e-6
+
+
+def test_cash_reinvestment_between_rebalances():
+    px, _, div = _market(n=1200)
+    w = pd.DataFrame(0.3333, px.index, px.columns)
+    base = EngineConfig(min_trade_weight=0.0, rebalance="A")
+    off = run_backtest(px, w, base, ZERO, dividends=div)
+    eng = EngineConfig(min_trade_weight=0.0, rebalance="A", cash_sweep="M",
+                       cash_buffer=0.01)
+    on = run_backtest(px, w, eng, ZERO, dividends=div)
+    sw = on.trades[on.trades["Reason"] == "Cash reinvestment"]
+    assert len(sw) > 0 and (sw["Change"] > 0).all()           # buys only
+    assert on.cash_weight.mean() < off.cash_weight.mean()
+    for d in sw["Date"].unique():
+        assert on.cash_weight[d] >= 0.01 - 1e-9                # buffer kept
+        bought = sw.loc[sw["Date"] == d, "Instrument"]
+        assert (on.weights.loc[d, bought] <= 0.3333 + 1e-9).all()  # never above target
+        assert d not in set(on.rebalance_dates)
+    # Still reconciles: contributions add up to the return every day.
+    assert np.allclose(on.contributions.sum(axis=1), on.returns, atol=1e-12)
+    # Threshold only: fires only after a close with cash above it.
+    thr = EngineConfig(min_trade_weight=0.0, rebalance="A",
+                       cash_sweep_threshold=0.015, cash_buffer=0.005)
+    t = run_backtest(px, w, thr, ZERO, dividends=div)
+    tdays = t.trades.loc[t.trades["Reason"] == "Cash reinvestment", "Date"].unique()
+    assert len(tdays) > 0
+    prev_cash = t.cash_weight.shift(1)
+    assert (prev_cash[tdays] > 0.015).all()
+    # Whole units stay whole.
+    wu = run_backtest(px * 4, w, EngineConfig(min_trade_weight=0.0, rebalance="A",
+                                              cash_sweep="M", whole_shares=True),
+                      ZERO, dividends=div * 4)
+    assert np.allclose(wu.shares.to_numpy(), np.round(wu.shares.to_numpy()))
+
+
 if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore")

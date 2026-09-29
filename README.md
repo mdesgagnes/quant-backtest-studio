@@ -326,6 +326,32 @@ vary. The other three tests work normally.
 
 ---
 
+## 3 quinquies. Cash: dividends, fees and reinvestment
+
+Dividends (with price-return prices) are credited as cash on their ex-date.
+By default that cash waits for the next rebalance. **Reinvest cash between
+rebalances** (Engine settings) puts it to work weekly, monthly or quarterly,
+and/or on the session after cash closes above a threshold:
+
+- buys only, toward the weights the last rebalance targeted -- no new
+  signal is read between rebalances;
+- the positions furthest below target are filled first, and none is lifted
+  above its target, so a strategy that deliberately holds cash keeps it;
+- a **cash buffer** stays uninvested, e.g. to pay the management fee
+  without selling;
+- orders smaller than the minimum trade size are skipped, like any trade.
+
+The management fee accrues daily (annual rate / sessions per year x the
+day's value) and is deducted at each month-end, from cash first; only a
+shortfall is raised by selling, tagged *Fee liquidation* in the trade log.
+
+Every fee deduction, dividend and reinvestment is recorded in dollars in
+the **cash-flow ledger** (Positions tab, and the *Cash Flows* and *Fees by
+Year* sheets of the Excel report): for each fee, the sessions it accrued
+over, the average value it accrued on, the rate, and how it was paid.
+
+---
+
 ## 4. Exporting results
 
 Every export reproduces the backtest currently on screen. Everything lives

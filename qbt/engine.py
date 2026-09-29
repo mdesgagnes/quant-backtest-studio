@@ -32,7 +32,9 @@ Simulation model, explicit and verifiable:
    intraday move from open to close on the new ones.
 7. Optionally, **cash dividends** are credited on their ex-date and held in
    the cash bucket until the next rebalance, rather than being assumed
-   instantly reinvested. This requires price-return (non dividend-adjusted)
+   instantly reinvested -- or, with cash reinvestment on, until the next
+   scheduled or threshold-triggered reinvestment, which buys toward the
+   last rebalance's target weights and keeps a cash buffer. This requires price-return (non dividend-adjusted)
    prices, otherwise the dividend would be counted twice.
 """
 from __future__ import annotations
@@ -53,6 +55,10 @@ _RESAMPLE = {"D": None, "W": "W-FRI", "M": "ME", "Q": "QE", "A": "YE"}
 CASH_LINE = "Cash & financing"
 COST_LINE = "Trading costs"
 FEE_LINE = "Management fee"
+CASH_FLOW_COLUMNS = ["Date", "Type", "Instrument", "Amount", "Units", "Per unit",
+                     "Sessions accrued", "Average value", "Annual rate",
+                     "Paid from cash", "Raised by selling", "Trading costs",
+                     "Cash before", "Cash after"]
 
 
 @dataclass
@@ -78,6 +84,10 @@ class BacktestResult:
     # then cash and financing, trading costs and the management fee. Each
     # row sums to that day's net return exactly.
     contributions: Optional[pd.DataFrame] = None
+    # Every movement of cash that is not a trade, in currency: each
+    # management-fee deduction (with what it was accrued on and how it was
+    # paid), each dividend, and each cash reinvestment.
+    cash_flows: Optional[pd.DataFrame] = None
 
     @property
     def nav(self) -> pd.Series:
@@ -318,6 +328,15 @@ def run_backtest(prices: pd.DataFrame,
         month_end = {np.datetime64(d, "ns")
                      for d in ser.resample("ME").last().dropna()}
 
+    # Cash reinvestment between rebalances.
+    sweep_rule = str(getattr(engine, "cash_sweep", "none") or "none")
+    sweep_thr = float(getattr(engine, "cash_sweep_threshold", 0.0) or 0.0)
+    buffer_w = float(getattr(engine, "cash_buffer", 0.01) or 0.0)
+    sweep_set = (set(rebalance_calendar(idx, sweep_rule))
+                 if sweep_rule in ("W", "M", "Q") else set())
+    sweep_on = bool(sweep_set) or sweep_thr > 0
+    last_target: Optional[np.ndarray] = None
+
     nav = np.zeros(n); gross_r = np.zeros(n); net_r = np.zeros(n)
     turn = np.zeros(n); cost_arr = np.zeros(n); div_arr = np.zeros(n)
     fee_arr = np.zeros(n)
@@ -330,7 +349,9 @@ def run_backtest(prices: pd.DataFrame,
     shares = np.zeros(m)              # units held, the actual state
     cash = float(engine.initial_capital)
     fee_accrued = 0.0
+    fee_sessions = 0
     trades = []
+    flows = []
 
     def _valid(row):
         return np.isfinite(row) & (row > 0)
@@ -419,6 +440,55 @@ def run_backtest(prices: pd.DataFrame,
         cash -= net_spend + cost
         return cost, float(notional.sum()) / portfolio_value
 
+    def _reinvest(i, date, price_row, portfolio_value):
+        """Puts cash above the buffer back to work. Returns cost, turnover.
+
+        Buys only, toward the weights the last rebalance targeted -- no new
+        signal is read between rebalances -- filling the positions that
+        are furthest below target first, and never lifting one above its
+        target: a strategy that meant to hold cash keeps it.
+        """
+        nonlocal shares, cash
+        ok = _valid(price_row) & (last_target > 0)
+        if portfolio_value <= 0 or not ok.any():
+            return 0.0, 0.0
+        excess = cash - buffer_w * portfolio_value
+        if excess <= max(min_trade * portfolio_value, 1e-9):
+            return 0.0, 0.0
+        px_ = np.where(ok, price_row, 1.0)
+        gaps = np.where(ok, np.clip(last_target * portfolio_value - shares * px_, 0.0, None), 0.0)
+        total_gap = float(gaps.sum())
+        if total_gap <= 0:
+            return 0.0, 0.0
+        spend = min(excess, total_gap)
+        alloc = gaps * (spend / total_gap)              # dollars, costs included
+        rate = commission_rate + _rate_vector(i, alloc)
+        buy = np.where(ok, alloc / (1.0 + rate) / px_, 0.0)
+        if whole:
+            buy = np.floor(buy)
+        notional = buy * px_
+        if float(notional.sum()) <= 0:
+            return 0.0, 0.0
+        cost = float((notional * rate).sum())
+        cash_before = cash
+        for j, a in enumerate(assets):
+            if buy[j] > 0:
+                trades.append({
+                    "Date": date, "Instrument": a,
+                    "Shares Before": shares[j], "Shares After": shares[j] + buy[j],
+                    "Change": buy[j], "Price": float(price_row[j]),
+                    "Notional": float(notional[j]),
+                    "Effective Cost (bps)": float(rate[j]) * 10_000.0,
+                    "Reason": "Cash reinvestment",
+                })
+        shares = shares + buy
+        cash -= float(notional.sum()) + cost
+        flows.append({"Date": date, "Type": "Cash reinvestment",
+                      "Amount": -(float(notional.sum()) + cost),
+                      "Trading costs": cost, "Cash before": cash_before,
+                      "Cash after": cash})
+        return cost, float(notional.sum()) / portfolio_value
+
     # ------------------------------------------------------------------
     # One day at a time. Nothing below reads a future row.
     # ------------------------------------------------------------------
@@ -445,14 +515,30 @@ def run_backtest(prices: pd.DataFrame,
                 div_vec = shares * div_ps[i]
                 div_i = float(div_vec.sum())
                 cash += div_i
+                for j in np.flatnonzero(div_vec):
+                    flows.append({"Date": date, "Type": "Dividend",
+                                  "Instrument": assets[j],
+                                  "Amount": float(div_vec[j]),
+                                  "Units": float(shares[j]),
+                                  "Per unit": float(div_ps[i][j])})
 
         # 3) Trade. At the open the book is valued at open prices first, so
         #    the order is sized on what it is worth when it is placed.
         can_trade = (date in rebal_set) and (i >= int(engine.execution_lag))
-        if can_trade and trade_at_open:
+        if can_trade:
+            last_target = T[i].copy()
+        can_sweep = (sweep_on and not can_trade and i > 0
+                     and last_target is not None
+                     and ((date in sweep_set)
+                          or (sweep_thr > 0 and cash_w[i - 1] > sweep_thr)))
+        trades_at_open = trade_at_open and (can_trade or can_sweep)
+        if trades_at_open:
             mark_open = np.where(_valid(exec_px[i]), exec_px[i], 0.0)
             value_at_open = float((shares * mark_open).sum()) + cash
-            cost_i, tr = _execute(i, date, exec_px[i], value_at_open)
+            if can_trade:
+                cost_i, tr = _execute(i, date, exec_px[i], value_at_open)
+            else:
+                cost_i, tr = _reinvest(i, date, exec_px[i], value_at_open)
             turn[i] = tr
 
         # 4) Mark to the close.
@@ -466,7 +552,7 @@ def run_backtest(prices: pd.DataFrame,
         # units at the fill price, so only its cost touches the P&L.
         if i > 0:
             mark_prev = np.where(_valid(close_px[i - 1]), close_px[i - 1], 0.0)
-            if can_trade and trade_at_open:
+            if trades_at_open:
                 mark_open = np.where(_valid(exec_px[i]), exec_px[i], 0.0)
                 price_pnl = (shares_open * (mark_open - mark_prev)
                              + shares * (mark - mark_open))
@@ -475,8 +561,11 @@ def run_backtest(prices: pd.DataFrame,
             PNL[i, :m] = price_pnl + div_vec
             PNL[i, m] = cash_pnl
 
-        if can_trade and not trade_at_open:
-            cost_i, tr = _execute(i, date, close_px[i], value)
+        if (can_trade or can_sweep) and not trade_at_open:
+            if can_trade:
+                cost_i, tr = _execute(i, date, close_px[i], value)
+            else:
+                cost_i, tr = _reinvest(i, date, close_px[i], value)
             turn[i] = tr
             value = float((shares * mark).sum()) + cash
 
@@ -490,8 +579,11 @@ def run_backtest(prices: pd.DataFrame,
         liq_cost = 0.0
         if fee_daily > 0 and i > 0:
             fee_accrued += value * fee_daily
+            fee_sessions += 1
             if (np.datetime64(date, "ns") in month_end) or i == n - 1:
                 fee_i = min(fee_accrued, max(0.0, value))
+                cash_before_fee = cash
+                raised = 0.0
                 shortfall = fee_i - cash
                 if shortfall > 0:
                     holdings_val = float((shares * mark).sum())
@@ -552,8 +644,19 @@ def run_backtest(prices: pd.DataFrame,
                                 })
                         shares = shares - sold_shares
                         cash += proceeds_gross - liq_cost
+                        raised = proceeds_gross - liq_cost
                 cash -= fee_i
+                flows.append({
+                    "Date": date, "Type": "Management fee", "Amount": -fee_i,
+                    "Sessions accrued": fee_sessions,
+                    "Average value": (fee_accrued / (fee_daily * fee_sessions)
+                                      if fee_sessions else np.nan),
+                    "Annual rate": fee_daily * ppy,
+                    "Paid from cash": min(fee_i, max(0.0, cash_before_fee)),
+                    "Raised by selling": raised, "Trading costs": liq_cost,
+                    "Cash before": cash_before_fee, "Cash after": cash})
                 fee_accrued -= fee_i
+                fee_sessions = 0
                 value = float((shares * mark).sum()) + cash
 
         nav[i] = value
@@ -608,6 +711,7 @@ def run_backtest(prices: pd.DataFrame,
         shares=pd.DataFrame(SH, index=idx, columns=assets),
         fees=pd.Series(fee_arr, index=idx),
         contributions=contributions,
+        cash_flows=pd.DataFrame(flows, columns=CASH_FLOW_COLUMNS),
     )
 
 
@@ -676,6 +780,7 @@ def trim_warmup(res: BacktestResult, start: Optional[pd.Timestamp] = None,
         shares=(res.shares.loc[keep] if res.shares is not None else None),
         fees=(res.fees.loc[keep] if res.fees is not None else None),
         contributions=_trim_contrib(res.contributions, keep),
+        cash_flows=_cut_flows(res.cash_flows, start, None),
     )
 
 
@@ -716,7 +821,20 @@ def window(res: BacktestResult, start: Optional[pd.Timestamp] = None,
             [d for d in out.rebalance_dates if d <= keep[-1]]),
         trades=trades, dividend_income=cut(out.dividend_income),
         shares=cut(out.shares), fees=cut(out.fees),
-        contributions=cut(out.contributions))
+        contributions=cut(out.contributions),
+        cash_flows=_cut_flows(out.cash_flows, None, keep[-1]))
+
+
+def _cut_flows(f: Optional[pd.DataFrame], start, end) -> Optional[pd.DataFrame]:
+    if f is None or f.empty:
+        return f
+    d = pd.to_datetime(f["Date"])
+    keep = pd.Series(True, index=f.index)
+    if start is not None:
+        keep &= d >= pd.Timestamp(start)
+    if end is not None:
+        keep &= d <= pd.Timestamp(end)
+    return f[keep].reset_index(drop=True)
 
 
 def _trim_contrib(c: Optional[pd.DataFrame],

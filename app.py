@@ -2546,6 +2546,31 @@ with st.sidebar.expander("Execution", expanded=False):
              "book cannot sit exactly on its targets. Leave off to allow "
              "fractional units, which most brokers now support.")
 
+    _SWEEP = {"none": "Only at rebalances", "W": "Weekly", "M": "Monthly",
+              "Q": "Quarterly"}
+    cash_sweep = st.selectbox(
+        "Reinvest cash between rebalances", list(_SWEEP),
+        index=list(_SWEEP).index(getattr(e0, "cash_sweep", "none") or "none"),
+        format_func=lambda k: _SWEEP[k],
+        help="Dividends and other cash wait for the next rebalance by "
+             "default. With a schedule, cash above the buffer is put back to "
+             "work at each period end in between: buys only, toward the "
+             "weights the last rebalance targeted, filling the positions "
+             "furthest below target first and never lifting one above it. "
+             "No new signal is read between rebalances.")
+    sw1, sw2 = st.columns(2)
+    cash_buffer = sw1.number_input(
+        "Cash buffer (%)", 0.0, 50.0,
+        float(getattr(e0, "cash_buffer", 0.01)) * 100, 0.25,
+        help="Cash left uninvested after each reinvestment, e.g. to meet "
+             "the management fee without selling.") / 100.0
+    cash_sweep_thr = sw2.number_input(
+        "Or when cash exceeds (%)", 0.0, 100.0,
+        float(getattr(e0, "cash_sweep_threshold", 0.0)) * 100, 0.5,
+        help="Also reinvest, on the next session, whenever cash closes above "
+             "this share of the portfolio. 0 turns the trigger off. Must be "
+             "above the buffer.") / 100.0
+
 with st.sidebar.expander("Frictions", expanded=False):
     comm = st.number_input("Commission (bps)", 0.0, 200.0, float(c0.commission_bps), 1.0,
                            help="A flat broker fee. Never scaled by trade "
@@ -2688,6 +2713,9 @@ cfg = RunConfig(
                                 price_import is not None and price_import.has("open")))),
                         trim_warmup=bool(trim_warm),
                         whole_shares=bool(whole_shares),
+                        cash_sweep=cash_sweep,
+                        cash_sweep_threshold=float(cash_sweep_thr),
+                        cash_buffer=float(cash_buffer),
                         day_rule=day_rule, day_of_month=int(day_of_month),
                         weekday=int(weekday), nth=int(nth),
                         anchor_month=int(anchor_month)),
@@ -3336,6 +3364,29 @@ with tabs[2]:
              "each deduction is measured against the value on the day it is "
              "taken, which is not the average value it accrued on, and a "
              "partial first or last year is annualized.")
+        _cf = res.cash_flows
+        if _cf is not None and not _cf.empty:
+            _fl = _cf[_cf["Type"] == "Management fee"]
+            if not _fl.empty:
+                with st.expander(f"Every fee deduction ({len(_fl)}), in dollars",
+                                 expanded=False):
+                    _fd = _fl[["Date", "Amount", "Sessions accrued", "Average value",
+                               "Annual rate", "Paid from cash", "Raised by selling",
+                               "Trading costs", "Cash after"]].copy()
+                    _fd["Date"] = pd.to_datetime(_fd["Date"]).dt.date
+                    _fd["Amount"] = -_fd["Amount"]
+                    _fd = _fd.rename(columns={"Amount": "Fee"})
+                    for c in ("Fee", "Average value", "Paid from cash",
+                              "Raised by selling", "Trading costs", "Cash after"):
+                        _fd[c] = _fd[c].map(lambda v: f"${v:,.2f}")
+                    _fd["Annual rate"] = _fd["Annual rate"].map(lambda v: f"{v*100:.2f}%")
+                    st.dataframe(_fd, use_container_width=True, hide_index=True)
+                    note("Each fee is the annual rate \u00f7 " f"{ppy}" " \u00d7 the "
+                         "portfolio's value on every session since the previous "
+                         "deduction: that is, rate \u00d7 average value \u00d7 "
+                         "sessions \u00f7 " f"{ppy}" ". It is paid from cash first; "
+                         "only a shortfall is raised by selling, and those sales "
+                         "appear in the trade log as \u201cFee liquidation\u201d.")
 
     if res.dividend_income is not None and float(res.dividend_income.sum()) > 0:
         eyebrow("Dividends")
@@ -3379,6 +3430,30 @@ with tabs[2]:
     st.download_button("Download current holdings (CSV)",
                        cur.to_csv(index=False).encode("utf-8"),
                        "current_holdings.csv", "text/csv", key="dlholdings")
+
+    _cf = res.cash_flows
+    if _cf is not None and not _cf.empty:
+        _dv = _cf[_cf["Type"] == "Dividend"]
+        _rv = _cf[_cf["Type"] == "Cash reinvestment"]
+        if not _rv.empty:
+            eyebrow("Cash reinvestment")
+            r1, r2, r3 = st.columns(3)
+            with r1:
+                dial("Reinvestments", f"{len(_rv):,}", "between rebalances")
+            with r2:
+                dial("Amount reinvested", f"${-_rv['Amount'].sum():,.0f}")
+            with r3:
+                dial("Average cash held", f"{res.cash_weight.mean()*100:.2f}%",
+                     f"buffer {rcfg.engine.cash_buffer*100:.2f}%")
+        with st.expander("Cash-flow ledger: every fee, dividend and "
+                         "reinvestment, in dollars", expanded=False):
+            _led = _cf.copy()
+            _led["Date"] = pd.to_datetime(_led["Date"]).dt.date
+            _led = _led.dropna(axis=1, how="all")
+            st.dataframe(_led, use_container_width=True, hide_index=True, height=360)
+            st.download_button("Download cash-flow ledger (CSV)",
+                               _cf.to_csv(index=False).encode("utf-8"),
+                               "cash_flows.csv", "text/csv", key="dlcashflows")
 
     eyebrow("Trade log")
     if res.trades.empty:
@@ -4635,6 +4710,19 @@ with tabs[8]:
         _yr = pd.DataFrame(_inc).groupby(lambda d: d.year).sum()
         _yr.index.name = "Year"
         secs.append(("Positions", "Income and Costs by Year", _yr, True))
+        _cf = res.cash_flows
+        if _cf is not None and not _cf.empty:
+            secs.append(("Positions", "Cash Flows", _cf.dropna(axis=1, how="all"), False))
+            _fees = _cf[_cf["Type"] == "Management fee"]
+            if not _fees.empty:
+                _fy = (_fees.assign(Year=pd.to_datetime(_fees["Date"]).dt.year)
+                       .groupby("Year")
+                       .agg(**{"Fees paid": ("Amount", lambda x: -x.sum()),
+                               "Deductions": ("Amount", "size"),
+                               "Paid from cash": ("Paid from cash", "sum"),
+                               "Raised by selling": ("Raised by selling", "sum"),
+                               "Sale costs": ("Trading costs", "sum")}))
+                secs.append(("Positions", "Fees by Year", _fy, True))
 
         # Attribution: by quarter and month, and by asset class
         if res.contributions is not None:

@@ -78,6 +78,13 @@ class EngineConfig:
     weekday: int = 4                       # 0=Monday .. 4=Friday
     nth: int = 1
     anchor_month: int = 12                 # A: month; Q: month + every third
+    # Cash reinvestment between rebalances. Dividends and other cash that
+    # builds up are put back to work on a schedule ("W", "M", "Q") and/or
+    # whenever cash exceeds a share of the portfolio, keeping a buffer.
+    # Buys only, toward the last rebalance's targets and never above them.
+    cash_sweep: str = "none"               # none | W | M | Q
+    cash_sweep_threshold: float = 0.0      # cash weight that triggers it; 0 = off
+    cash_buffer: float = 0.01              # cash weight left after reinvesting
 
 
 @dataclass
@@ -140,6 +147,15 @@ class RunConfig:
             errs.append("WARNING: execution_lag=0 introduces look-ahead bias.")
         if self.engine.initial_capital <= 0:
             errs.append("Initial capital must be positive.")
+        if self.engine.cash_sweep not in ("none", "W", "M", "Q"):
+            errs.append("cash_sweep must be 'none', 'W', 'M' or 'Q'.")
+        if not 0.0 <= self.engine.cash_buffer < 1.0:
+            errs.append("cash_buffer must be between 0 and 100%.")
+        if self.engine.cash_sweep_threshold < 0:
+            errs.append("cash_sweep_threshold cannot be negative.")
+        if (self.engine.cash_sweep_threshold > 0
+                and self.engine.cash_sweep_threshold <= self.engine.cash_buffer):
+            errs.append("The cash reinvestment threshold must be above the buffer.")
         if self.engine.max_leverage < 0.1:
             errs.append("max_leverage is too low.")
         if self.data.source == "yfinance" and not self.data.tickers:
