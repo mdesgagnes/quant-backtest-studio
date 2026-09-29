@@ -174,22 +174,53 @@ git add -A && git commit -m "Updates" && git push
 
 ## 3. Format of imported files
 
-**Wide format** (most common) -- one date column, then one price column per
-instrument:
+Imported prices run through the engine exactly as a Yahoo Finance download
+does: the importer builds the same data object (close, and optionally open,
+high, low, volume, dividends, adjusted close), so opening-price execution,
+cash dividends, the volume-aware impact model and a total-return benchmark
+all work from a file.
+
+**Recommended: one file, long format** -- one row per date and instrument:
 
 ```csv
-Date,XIC.TO,ZEB.TO,XEI.TO
-2020-01-02,30.15,35.02,22.41
-2020-01-03,30.08,34.95,22.38
+Date,Ticker,Open,High,Low,Close,Volume,Dividends
+2024-03-28,XIC.TO,36.20,36.41,36.15,36.37,951200,0.2263
+2024-03-28,ZAG.TO,13.74,13.79,13.72,13.75,987600,0.0420
 ```
 
-**Long format** -- auto-detected if the columns `date`, `ticker` (or
-`symbol`, `instrument`), and `close` (or `price`, `nav`) are present.
+Only `Date` and `Close` are required; `Adj Close` is also read. The sidebar
+has a **Template (CSV)** button.
 
-Prices must be **adjusted** for dividends and splits. Yahoo data is adjusted
-automatically (`auto_adjust=True`).
+Also accepted, detected from the content, and freely combined across several
+files:
 
-`example_prices.csv` is a template.
+- **Wide**: one date column, one column per instrument. Named after a field
+  (`open.csv`, a sheet called `Dividends`) it holds that field; otherwise it
+  is read as closing prices (`example_prices.csv`).
+- **One instrument per file or sheet**: `Date, Open, High, Low, Close...`,
+  named after the instrument (`SPY.csv`, a sheet called `SPY`).
+- **Yahoo Finance's own CSV** export, with its two header rows.
+
+Every sheet of a workbook is read; sheets without dates are skipped and
+listed under **What was read**. Where two files give the same instrument
+and field, the first wins and any disagreement is reported.
+
+**Price convention** -- the one setting that matters:
+
+- *Total return*: the close already includes dividends; dividends in the
+  file are ignored, and an adjusted close, if supplied, becomes the price
+  with open/high/low scaled to match (as Yahoo's auto-adjust does).
+- *Price return*: the close excludes dividends, which are credited as cash
+  on their ex-date. An adjusted close is kept for a total-return benchmark.
+- *Detect* (default): price return when the file has dividends, total
+  return otherwise.
+
+**One file or several?** One long file is the least error-prone: every
+field of every instrument sits on the same dates under one convention. Use
+several files when the data comes from different places -- prices from one
+vendor, dividends from another -- and the importer merges them by field.
+Excel caps a sheet at about a million rows (roughly 150 instruments over 25
+years in long format); use CSV beyond that.
 
 ---
 

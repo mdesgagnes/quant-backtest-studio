@@ -49,6 +49,7 @@ from qbt import rules as RULES
 from qbt import monitor as MON
 from qbt import tvchart as TV
 from qbt import names as N
+from qbt import price_import as PI
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -629,10 +630,8 @@ def regime_labels(mkt: pd.DataFrame) -> Dict[str, pd.Series]:
 
 
 @st.cache_data(show_spinner=False)
-def parse_upload(content: bytes, name: str, sheet: Optional[str]) -> pd.DataFrame:
-    buf = io.BytesIO(content)
-    buf.name = name
-    return load_file(buf, sheet)
+def parse_price_files(files: tuple) -> "PI.ImportResult":
+    return PI.read_files(list(files))
 
 
 @st.cache_data(show_spinner=False)
@@ -1908,7 +1907,7 @@ if source == "Return stream":
     st.stop()
 
 
-prices_raw: Optional[pd.DataFrame] = None
+price_import: Optional["PI.ImportResult"] = None
 upload_error = None
 
 if source == "Yahoo Finance":
@@ -1943,27 +1942,44 @@ if source == "Yahoo Finance":
     end = col2.date_input("End", value=date.today(),
                           min_value=date(1971, 1, 1), max_value=date.today())
 else:
-    up = st.sidebar.file_uploader("Price file", type=["csv", "xlsx", "xls", "txt"])
-    sheet = None
+    ups = st.sidebar.file_uploader(
+        "Price files", type=["csv", "xlsx", "xls", "xlsm", "txt"],
+        accept_multiple_files=True, key="price_files",
+        help="Close is required; open, high, low, volume, dividends and an "
+             "adjusted close are used when present, exactly as if they came "
+             "from Yahoo Finance. One file in long format (Date, Ticker, "
+             "Open, High, Low, Close, Volume, Dividends) is simplest. Also "
+             "read: one file or sheet per instrument (named after it), one "
+             "file or sheet per field (open.csv, a sheet called Dividends), "
+             "and Yahoo's own CSV export. Every sheet of a workbook is read.")
     tickers = []
     start, end = None, None
-    if up is not None:
-        content = up.getvalue()
-        if up.name.lower().endswith((".xlsx", ".xls")):
-            names = excel_sheet_names(io.BytesIO(content))
-            if len(names) > 1:
-                sheet = st.sidebar.selectbox("Sheet", names)
-        try:
-            prices_raw = parse_upload(content, up.name, sheet)
-            tickers = [str(c) for c in prices_raw.columns]
-        except Exception as exc:
-            upload_error = str(exc)
+    if ups:
+        price_import = parse_price_files(tuple((f.name, f.getvalue()) for f in ups))
+        tickers = price_import.instruments
+        if not tickers:
+            upload_error = "no prices were found. " + " ".join(price_import.warnings[:3])
+        else:
+            _found = [PI.FIELD_LABELS[f] for f in PI.FIELDS if price_import.has(f)]
+            st.sidebar.markdown(
+                f'<div class="note">{len(tickers)} instrument(s) from '
+                f'{len(price_import.sources)} source(s): '
+                f'{", ".join(_found)}.</div>', unsafe_allow_html=True)
+            with st.sidebar.expander("What was read", expanded=False):
+                st.dataframe(price_import.summary(), hide_index=True,
+                             use_container_width=True)
+                for _w in price_import.warnings[:10]:
+                    st.markdown(f'<div class="flag">{_w}</div>',
+                                unsafe_allow_html=True)
     else:
         st.sidebar.markdown(
-            '<div class="note">Expected columns: a date column, then one '
-            'price column per instrument. Long format (date, symbol, '
-            'price) is also recognized.</div>',
-            unsafe_allow_html=True)
+            '<div class="note">A date column, then prices. Long format '
+            '(Date, Ticker, Open, High, Low, Close, Volume, Dividends) is '
+            'recommended; wide files with one column per instrument work '
+            'too.</div>', unsafe_allow_html=True)
+        st.sidebar.download_button(
+            "Template (CSV)", PI.template_csv().encode("utf-8"),
+            "price_template.csv", "text/csv", key="price_tpl")
 
 univ_options = tickers or []
 sel_universe = st.sidebar.multiselect(
@@ -2043,8 +2059,27 @@ if source == "Yahoo Finance":
              "rebalance. Same cash in, different timing.")
     adjusted = price_mode.startswith("Total")
     use_divs = not adjusted
+    file_convention = None
 else:
-    adjusted, use_divs = True, False
+    _conv_keys = list(PI.CONVENTIONS)
+    _conv = st.sidebar.selectbox(
+        "Prices in the file are", _conv_keys,
+        format_func=lambda k: PI.CONVENTIONS[k], key="file_convention",
+        help="Total return: the close already includes dividends, so any "
+             "dividends in the file are ignored (and an adjusted close, if "
+             "supplied, becomes the price). Price return: the close excludes "
+             "them and the engine credits each dividend as cash on its "
+             "ex-date. Detect: price return when the file has dividends, "
+             "total return otherwise. Getting this wrong counts dividends "
+             "twice or not at all.")
+    file_convention = (PI.resolve_convention(price_import, _conv)
+                       if price_import is not None else "total")
+    adjusted = file_convention == "total"
+    use_divs = not adjusted
+    if price_import is not None:
+        st.sidebar.markdown(
+            f'<div class="note">Read as {PI.CONVENTIONS[file_convention].lower()}.'
+            f'</div>', unsafe_allow_html=True)
 
 # The cash proxy need not be part of the investable universe -- it usually
 # should not be, or the strategy could buy it as a position. Preset cash
@@ -2486,12 +2521,14 @@ with st.sidebar.expander("Execution", expanded=False):
         help="Trading at the open splits the day in two: the overnight move is "
              "earned on the old weights, the intraday move on the new ones. It is "
              "the more realistic assumption for an order placed after a "
-             "prior-close signal. Only available with Yahoo Finance data.")
+             "prior-close signal. Needs opening prices: Yahoo Finance, or "
+             "an Open column in an imported file.")
     exec_at_open = exec_price.startswith("Open")
-    if exec_at_open and source != "Yahoo Finance":
-        st.markdown('<div class="flag">Opening prices come from Yahoo '
-                    'Finance only. Uploaded files fall back to close '
-                    'execution.</div>', unsafe_allow_html=True)
+    if exec_at_open and source != "Yahoo Finance" and not (
+            price_import is not None and price_import.has("open")):
+        st.markdown('<div class="flag">The imported file has no opening '
+                    'prices: execution falls back to the close.</div>',
+                    unsafe_allow_html=True)
     trim_warm = st.checkbox(
         "Trim the warm-up period", value=bool(e0.trim_warmup),
         help="Indicators are blind until they have enough history. Those early "
@@ -2557,10 +2594,11 @@ with st.sidebar.expander("Frictions", expanded=False):
                  "the conservative end. At Y = 1, an order of 10% of daily "
                  "volume in a name moving 1% a day costs about 32 bps on top "
                  "of the spread.")
-    if impact_model != "flat" and source != "Yahoo Finance":
+    if impact_model != "flat" and source != "Yahoo Finance" and not (
+            price_import is not None and price_import.has("volume")):
         st.markdown(
-            '<div class="flag">Market impact needs volume data, only '
-            'available from Yahoo Finance. With an uploaded price file, '
+            '<div class="flag">Market impact needs volume data: Yahoo '
+            'Finance, or a Volume column in an imported file. Without it, '
             'every instrument pays the slippage above alone.</div>',
             unsafe_allow_html=True)
 
@@ -2645,7 +2683,9 @@ cfg = RunConfig(
                             weights_source=w_source),
     engine=EngineConfig(initial_capital=float(capital), rebalance=rebalance,
                         execution_lag=int(lag), max_leverage=float(max_lev),
-                        execute_at_open=bool(exec_at_open and source == "Yahoo Finance"),
+                        execute_at_open=bool(exec_at_open and (
+                            source == "Yahoo Finance" or (
+                                price_import is not None and price_import.has("open")))),
                         trim_warmup=bool(trim_warm),
                         whole_shares=bool(whole_shares),
                         day_rule=day_rule, day_of_month=int(day_of_month),
@@ -2697,9 +2737,9 @@ def build_market() -> MarketData:
         return fetch_market(tuple(needed), str(start), str(end),
                             bool(adjusted), bool(exec_at_open) or need_ohlc,
                             need_div, need_ohlc)
-    if prices_raw is None:
+    if price_import is None or not price_import.instruments:
         raise RuntimeError("No file loaded.")
-    return MarketData(close=prices_raw, adjusted=True)
+    return PI.to_market(price_import, file_convention or "auto")
 
 
 if run_clicked and not blocking:
@@ -2856,6 +2896,12 @@ if run_clicked and not blocking:
                     if market.adj_close is not None and \
                             benchmark in market.adj_close.columns:
                         bseries = market.adj_close[benchmark].reindex(prices.index)
+                    elif not market.adjusted:
+                        quality.warnings.append(
+                            f"No adjusted close for {benchmark}: the benchmark "
+                            f"is measured on price return, which understates "
+                            f"it. Supply an Adj Close column, or choose "
+                            f"\u201cPrice return + dividends\u201d.")
                 elif bench_mode.startswith("Price return + dividends"):
                     if market.dividends is not None and \
                             benchmark in market.dividends.columns:

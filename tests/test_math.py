@@ -242,6 +242,68 @@ def test_fee_is_paid_from_cash_before_any_sale():
     assert used > 0                                       # some months drew on cash
 
 
+# ----------------------------------------------------------------------
+def _layouts(px, op, div, vol):
+    """The same market data written in every layout the importer reads."""
+    import io
+    long_ = pd.concat([pd.DataFrame({"Date": px.index.strftime("%Y-%m-%d"), "Ticker": c,
+                                     "Open": op[c].values, "Close": px[c].values,
+                                     "Volume": vol[c].values, "Dividends": div[c].values})
+                       for c in px.columns])
+    out = {"long": [("prices.csv", long_.to_csv(index=False).encode())]}
+    out["per field"] = [(f"{n}.csv", fr.rename_axis("Date").to_csv().encode())
+                        for n, fr in (("close", px), ("open", op),
+                                      ("dividends", div), ("volume", vol))]
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf) as xw:
+        pd.DataFrame({"Notes": ["exported for a test"]}).to_excel(xw, sheet_name="Read me")
+        for c in px.columns:
+            pd.DataFrame({"Open": op[c], "Close": px[c], "Volume": vol[c],
+                          "Dividends": div[c]}).rename_axis("Date").to_excel(xw, sheet_name=c)
+    out["sheet per ticker"] = [("book.xlsx", buf.getvalue())]
+    hdr = ["Price"] + ["Close"] * 3 + ["Open"] * 3 + ["Dividends"] * 3
+    tick = ["Ticker"] + list(px.columns) * 3
+    rows = [hdr, tick, ["Date"] + [""] * 9]
+    for d in px.index:
+        rows.append([d.strftime("%Y-%m-%d")] + list(px.loc[d]) + list(op.loc[d]) + list(div.loc[d]))
+    out["yahoo csv"] = [("yf.csv", "\n".join(",".join(map(str, r)) for r in rows).encode())]
+    return out
+
+
+def test_imported_files_run_exactly_like_the_source_data():
+    from qbt import price_import as PI
+    px, op, div = _market(n=400)
+    vol = pd.DataFrame(1e5, px.index, px.columns)
+    w = _weights(px)
+    eng = EngineConfig(execute_at_open=True)
+    ref = run_backtest(px, w, eng, CostConfig(), open_prices=op, dividends=div)
+    for name, files in _layouts(px, op, div, vol).items():
+        imp = PI.read_files(files)
+        mkt = PI.to_market(imp, "auto")
+        assert not mkt.adjusted, name                   # dividends -> price return
+        cols = list(px.columns)
+        got = run_backtest(mkt.close[cols], w, eng, CostConfig(),
+                           open_prices=mkt.open[cols],
+                           dividends=mkt.dividends.reindex(columns=cols).fillna(0.0))
+        assert np.allclose(got.equity.values, ref.equity.values, rtol=1e-10), name
+        assert set(imp.instruments) == set(cols), name
+
+
+def test_total_return_import_scales_ohlc_and_drops_dividends():
+    from qbt import price_import as PI
+    idx = pd.bdate_range("2024-01-01", periods=5)
+    df = pd.DataFrame({"Date": idx, "Ticker": "X", "Open": 99.0, "Close": 100.0,
+                       "Adj Close": 95.0, "Dividends": [0, 0, 1.0, 0, 0]})
+    imp = PI.read_files([("x.csv", df.to_csv(index=False).encode())])
+    m = PI.to_market(imp, "total")
+    assert m.adjusted and m.dividends is None
+    assert np.allclose(m.close["X"], 95.0) and np.allclose(m.open["X"], 99.0 * 0.95)
+    assert any("ignored" in n for n in m.notes)
+    m = PI.to_market(imp, "price")                     # adj close kept for a benchmark
+    assert not m.adjusted and np.allclose(m.close["X"], 100.0)
+    assert m.adj_close is not None and m.dividends["X"].sum() == 1.0
+
+
 if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore")
