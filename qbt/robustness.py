@@ -338,7 +338,7 @@ def rebalance_day_sweep(prices: pd.DataFrame, strategy, params: Dict[str, Any],
 
     base = spec_from_engine(engine)
     specs = list(day_variants(base))
-    if include_months and base.frequency in ("Q", "A"):
+    if include_months and base.frequency in ("Q", "S", "A"):
         specs += [s for s in month_variants(base) if s.label() != base.label()]
 
     seen, rows = set(), []

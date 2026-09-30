@@ -366,6 +366,33 @@ def test_cash_reinvestment_between_rebalances():
     assert np.allclose(wu.shares.to_numpy(), np.round(wu.shares.to_numpy()))
 
 
+# ----------------------------------------------------------------------
+def test_semi_annual_rebalance():
+    from qbt.schedule import RebalanceSpec, build_calendar, month_variants
+    idx = pd.bdate_range("2015-01-01", "2019-10-15")
+    cal = build_calendar(idx, RebalanceSpec(frequency="S"))
+    ends = cal[:-1]                                   # the last half is incomplete
+    assert set(ends.month) == {6, 12} and len(ends) == 9
+    for d in ends:                                    # last session of its month
+        same = idx[(idx.year == d.year) & (idx.month == d.month)]
+        assert d == same[-1]
+    assert cal[-1] == idx[-1]                          # like the other frequencies
+    assert list(rebalance_calendar(idx, "S")) == list(cal)
+    jj = build_calendar(idx, RebalanceSpec(frequency="S", anchor_month=1, day_rule="first"))
+    assert set(jj.month) == {1, 7} and len(jj) == 10
+    assert all(d == idx[(idx.year == d.year) & (idx.month == d.month)][0] for d in jj)
+    assert len({v.label() for v in month_variants(RebalanceSpec(frequency="S"))}) == 6
+    # The engine trades twice a year, one session after each signal date.
+    px, _, _ = _market(n=1300)
+    res = run_backtest(px, _weights(px), EngineConfig(rebalance="S"), ZERO)
+    reb = res.rebalance_dates
+    assert len(reb) >= 9
+    years = pd.Series(1, index=reb[:-1]).groupby(reb[:-1].year).size()
+    assert years.max() <= 2
+    traded = set(pd.to_datetime(res.trades["Date"]))
+    assert traded <= set(reb)
+
+
 if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore")

@@ -15,6 +15,7 @@ REBALANCE_RULES = {
     "W": "Weekly (Friday)",
     "M": "Monthly (month-end)",
     "Q": "Quarterly (quarter-end)",
+    "S": "Semi-annual (twice a year)",
     "A": "Annual",
 }
 
@@ -77,7 +78,7 @@ class EngineConfig:
     day_of_month: int = 15
     weekday: int = 4                       # 0=Monday .. 4=Friday
     nth: int = 1
-    anchor_month: int = 12                 # A: month; Q: month + every third
+    anchor_month: int = 12                 # A: month; S: month + six later; Q: + every third
     # Cash reinvestment between rebalances. Dividends and other cash that
     # builds up are put back to work on a schedule ("W", "M", "Q") and/or
     # whenever cash exceeds a share of the portfolio, keeping a buffer.

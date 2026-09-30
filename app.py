@@ -2579,6 +2579,16 @@ with st.sidebar.expander("Execution", expanded=False):
                 format_func=lambda k: _q[k],
                 help="Calendar quarters, or the same cadence started a month "
                      "or two later.")
+        elif rebalance == "S":
+            _s = {12: "Jun / Dec", 1: "Jan / Jul", 2: "Feb / Aug", 3: "Mar / Sep",
+                  4: "Apr / Oct", 5: "May / Nov"}
+            _sk = list(_s)
+            _a = anchor_month if anchor_month in _sk else (
+                anchor_month - 6 if anchor_month - 6 in _sk else 12)
+            anchor_month = st.selectbox(
+                "Months", _sk, index=_sk.index(_a), format_func=lambda k: _s[k],
+                help="Rebalance twice a year, six months apart: June and "
+                     "December by default.")
         _preview = SCHED.RebalanceSpec(
             frequency=rebalance, day_rule=day_rule, day_of_month=day_of_month,
             weekday=weekday, nth=nth, anchor_month=anchor_month)

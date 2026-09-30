@@ -102,6 +102,8 @@ def rebalance_calendar(index: pd.DatetimeIndex, rule: str) -> pd.DatetimeIndex:
     goes through `spec_from_engine`, which also honours the trading-day
     rule.
     """
+    if rule == "S":
+        return build_calendar(index, RebalanceSpec(frequency="S"))
     if rule == "D" or _RESAMPLE.get(rule) is None:
         return pd.DatetimeIndex(index)
     s = pd.Series(index, index=index)

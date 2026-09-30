@@ -9,6 +9,7 @@ This module makes the trading day explicit, so it can be varied:
 
 - monthly on the last business day, the first, the 15th, the third Friday;
 - quarterly anchored to January, February or March;
+- semi-annually in June and December, or any other pair six months apart;
 - annually every July rather than every December.
 
 The default reproduces the old behaviour exactly, so existing
@@ -43,17 +44,18 @@ DAY_RULES = {
 @dataclass
 class RebalanceSpec:
     """How a rebalance calendar is built."""
-    frequency: str = "M"            # D | W | M | Q | A
+    frequency: str = "M"            # D | W | M | Q | S | A
     day_rule: str = "last"          # see DAY_RULES
     day_of_month: int = 15          # for day_rule="day"
     weekday: int = 4                # 0=Monday .. 4=Friday
     nth: int = 1                    # 1..4, for nth_weekday
-    anchor_month: int = 12          # A: which month; Q: 1-3 within the quarter
+    anchor_month: int = 12          # A: which month; S: one of the two; Q: 1-3 within the quarter
     snap: str = "next"              # next | previous, when the target is closed
 
     def label(self) -> str:
         f = {"D": "Daily", "W": "Weekly", "M": "Monthly",
-             "Q": "Quarterly", "A": "Annual"}.get(self.frequency, self.frequency)
+             "Q": "Quarterly", "S": "Semi-annual",
+             "A": "Annual"}.get(self.frequency, self.frequency)
         if self.frequency == "D":
             return "Daily"
         if self.day_rule == "last":
@@ -71,6 +73,10 @@ class RebalanceSpec:
             return f"Weekly, {WEEKDAYS[self.weekday]}"
         if self.frequency == "A":
             return f"Annual, {MONTHS[self.anchor_month-1]}, {day}"
+        if self.frequency == "S":
+            months = _semi_months(self.anchor_month)
+            return (f"Semi-annual, {'/'.join(MONTHS[m-1][:3] for m in months)}, "
+                    f"{day}")
         if self.frequency == "Q":
             months = _quarter_months(self.anchor_month)
             return (f"Quarterly, {'/'.join(MONTHS[m-1][:3] for m in months)}, "
@@ -93,6 +99,14 @@ def _quarter_months(anchor: int) -> List[int]:
     return sorted({((m - 1 + k * 3) % 12) + 1 for k in range(4)})
 
 
+def _semi_months(anchor: int) -> List[int]:
+    """The two months a semi-annual rebalance lands in: the anchor and the
+    month six later. December (the default) gives June and December; January
+    gives January and July."""
+    m = ((int(anchor) - 1) % 12) + 1
+    return sorted({m, ((m + 5) % 12) + 1})
+
+
 def _snap(index: pd.DatetimeIndex, targets: pd.DatetimeIndex,
           how: str = "next") -> pd.DatetimeIndex:
     """Maps target dates onto real trading days."""
@@ -111,6 +125,9 @@ def _period_key(index: pd.DatetimeIndex, spec: RebalanceSpec) -> Optional[pd.Ser
     if spec.frequency == "Q":
         months = _quarter_months(spec.anchor_month)
         keep = pd.Series(index.month, index=index).isin(months)
+        return pd.Series(index.to_period("M"), index=index).where(keep)
+    if spec.frequency == "S":
+        keep = pd.Series(index.month, index=index).isin(_semi_months(spec.anchor_month))
         return pd.Series(index.to_period("M"), index=index).where(keep)
     if spec.frequency == "A":
         keep = pd.Series(index.month, index=index) == int(spec.anchor_month)
@@ -131,6 +148,14 @@ def _canonical(index: pd.DatetimeIndex, frequency: str) -> pd.DatetimeIndex:
     keeps one detail the general rules would lose: the final, incomplete
     period contributes its last available session.
     """
+    if frequency == "S":
+        # Half-years ending in June and December. pandas has no anchored
+        # half-year offset, so the halves are labelled directly; like the
+        # other frequencies, the final incomplete half contributes its
+        # last session.
+        half = pd.Series(index.year * 2 + (index.month > 6), index=index)
+        last = pd.Series(index, index=index).groupby(half).last()
+        return pd.DatetimeIndex(sorted(set(last.values))).intersection(index)
     if frequency == "D" or _RESAMPLE.get(frequency) is None:
         return pd.DatetimeIndex(index)
     ser = pd.Series(index, index=index)
@@ -146,6 +171,8 @@ def is_default(spec: "RebalanceSpec") -> bool:
         return True
     if spec.frequency == "Q":
         return _quarter_months(spec.anchor_month) == [3, 6, 9, 12]
+    if spec.frequency == "S":
+        return _semi_months(spec.anchor_month) == [6, 12]
     if spec.frequency == "A":
         return int(spec.anchor_month) == 12
     return False
@@ -284,9 +311,13 @@ def day_variants(spec: RebalanceSpec, max_variants: int = 24) -> List[RebalanceS
 
 def month_variants(spec: RebalanceSpec) -> List[RebalanceSpec]:
     """A family differing only in the anchor month (annual) or anchor
-    offset (quarterly)."""
+    offset (quarterly, semi-annual)."""
     out: List[RebalanceSpec] = []
-    if spec.frequency == "A":
+    if spec.frequency == "S":
+        for m in range(7, 13):               # Jan/Jul ... Jun/Dec
+            s = RebalanceSpec(**{**spec.__dict__}); s.anchor_month = m
+            out.append(s)
+    elif spec.frequency == "A":
         for m in range(1, 13):
             s = RebalanceSpec(**{**spec.__dict__}); s.anchor_month = m
             out.append(s)

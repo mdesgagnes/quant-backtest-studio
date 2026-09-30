@@ -740,8 +740,9 @@ They are explicit because they determine how credible the result is.
 2. **The trading day is a choice.** Under Execution, a monthly rebalance
    can land on the last trading day, the first, the 15th, the third Friday
    or the last Monday. Quarterly can run Mar/Jun/Sep/Dec, Jan/Apr/Jul/Oct
-   or Feb/May/Aug/Nov; annual can run in any month, so "every July" is one
-   selection. Defaults reproduce the period-end calendar exactly, and
+   or Feb/May/Aug/Nov; semi-annual runs Jun/Dec by default, or any pair six
+   months apart (Jan/Jul ... May/Nov); annual can run in any month, so
+   "every July" is one selection. Defaults reproduce the period-end calendar exactly, and
    stored configurations keep their dates to the day.
 
    This exists to be varied. The Robustness tab runs the same strategy
@@ -755,7 +756,8 @@ They are explicit because they determine how credible the result is.
    lands `execution_lag` sessions later: with the default of one, a
    quarter-end signal trades on the first session of the next quarter. The
    trade log shows execution dates, so a quarterly strategy shows trades on
-   the 1st, not the 31st.
+   the 1st, not the 31st -- and a semi-annual Jun/Dec strategy trades in
+   early January and July.
 4. **Execution price.** By default trades settle at the close. Switching to
    "Open (marked at the close)" splits the day in two: the overnight move
    from the prior close to the open is earned on the old weights, the
