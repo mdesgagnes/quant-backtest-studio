@@ -1392,6 +1392,13 @@ the 3D surface and the original heatmap on the same underlying sweep --
 tilt and rotate the surface to read the shape, drop back to the heatmap for
 exact cell values.
 
+**Rebalance frequency** can be one of the two axes, alongside the model's
+own parameters: the same model run weekly, monthly, quarterly, semi-annually
+and annually (daily is left out). The model's signals are computed once per
+parameter value and reused across frequencies, so the axis costs five
+engine runs. A frequency is not a number, so a sweep that includes it is
+shown as a heatmap (or a line, on its own) rather than a surface.
+
 ### Stress test periods
 
 The other robustness tests ask statistical questions -- resample the

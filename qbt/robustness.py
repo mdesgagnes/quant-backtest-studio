@@ -7,7 +7,8 @@ frictions, and sampling uncertainty.
 from __future__ import annotations
 
 import itertools
-from typing import Any, Callable, Dict, List, Optional
+from dataclasses import replace as _replace
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -87,6 +88,13 @@ def _stats(res: BacktestResult, ppy: int) -> Dict[str, float]:
 
 
 # ----------------------------------------------------------------------
+# The rebalance frequency as a sweep axis, next to the model's own
+# parameters. Daily is left out: rarely a realistic choice, and the slowest.
+REBALANCE_KEY = "Rebalance frequency"
+SWEEP_FREQUENCIES = {"W": "Weekly", "M": "Monthly", "Q": "Quarterly",
+                     "S": "Semi-annual", "A": "Annual"}
+
+
 def parameter_sweep(prices: pd.DataFrame, strategy, base_params: Dict[str, Any],
                     grid: Dict[str, List[Any]], engine: EngineConfig,
                     costs: CostConfig, cash_prices: Optional[pd.Series] = None,
@@ -97,25 +105,46 @@ def parameter_sweep(prices: pd.DataFrame, strategy, base_params: Dict[str, Any],
                     open_prices: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """Sweeps a parameter grid. A flat surface is worth more than a sharp peak.
     Each combination is measured from its own first invested day, since a
-    longer lookback has a longer warm-up."""
+    longer lookback has a longer warm-up.
+
+    `REBALANCE_KEY` may be one of the axes, with frequency codes ("M",
+    "Q"...) as its values: that axis changes the engine's calendar rather
+    than the model. The model's weights depend only on its parameters, so
+    they are generated once per parameter set and reused across
+    frequencies. A frequency other than the run's own uses its default
+    months; the run's trading-day rule is kept.
+    """
     keys = list(grid.keys())
     combos = list(itertools.product(*[grid[k] for k in keys]))[:max_runs]
     rows = []
+    weights_cache: Dict[Tuple, Any] = {}
     for combo in combos:
+        values = dict(zip(keys, combo))
+        freq = values.pop(REBALANCE_KEY, None)
         p = dict(base_params)
-        p.update(dict(zip(keys, combo)))
+        p.update(values)
+        row = dict(zip(keys, combo))
+        if freq is not None:
+            row[REBALANCE_KEY] = SWEEP_FREQUENCIES.get(freq, freq)
         try:
-            w = strategy.generate(prices, p, exog, cash_prices)
-            res = _run(prices, w, engine, costs, cash_prices, volume=volume,
-                       dividends=dividends, open_prices=open_prices)
-            row = dict(zip(keys, combo))
+            key = tuple(sorted(values.items()))
+            if key not in weights_cache:
+                weights_cache[key] = strategy.generate(prices, p, exog, cash_prices)
+            eng = engine
+            if freq is not None and freq != engine.rebalance:
+                eng = _replace(engine, rebalance=freq, anchor_month=12)
+            res = _run(prices, weights_cache[key], eng, costs, cash_prices,
+                       volume=volume, dividends=dividends, open_prices=open_prices)
             row.update(_stats(res, engine.periods_per_year))
-            rows.append(row)
         except Exception as exc:  # an invalid combination must not halt the sweep
-            row = dict(zip(keys, combo))
             row["error"] = str(exc)[:120]
-            rows.append(row)
-    return pd.DataFrame(rows)
+        rows.append(row)
+    df = pd.DataFrame(rows)
+    if REBALANCE_KEY in df:
+        order = [v for v in SWEEP_FREQUENCIES.values() if v in set(df[REBALANCE_KEY])]
+        df[REBALANCE_KEY] = pd.Categorical(df[REBALANCE_KEY], categories=order,
+                                           ordered=True)
+    return df
 
 
 # ----------------------------------------------------------------------

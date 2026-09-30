@@ -3996,18 +3996,30 @@ with tabs[5]:
              "imported weights. The file is taken as-is: the question of "
              "overfitting plays out upstream, where the weights were "
              "produced.")
-    if len(numeric) >= 1:
+    if not is_external:
+        # The rebalance frequency is an axis like any parameter: the model
+        # is unchanged, only the calendar it trades on moves.
+        _FREQ = R.REBALANCE_KEY
+
+        def _plabel(k):
+            return k if k in ("None", _FREQ) else next(p.label for p in numeric if p.key == k)
+
         cols = st.columns(2)
-        px_ = cols[0].selectbox("First parameter", [p.key for p in numeric],
-                                format_func=lambda k: next(p.label for p in numeric if p.key == k))
-        others = [p.key for p in numeric if p.key != px_]
+        px_ = cols[0].selectbox("First parameter", [p.key for p in numeric] + [_FREQ],
+                                format_func=_plabel,
+                                help="Rebalance frequency runs the same model "
+                                     "weekly, monthly, quarterly, semi-annually "
+                                     "and annually.")
+        others = [p.key for p in numeric if p.key != px_] + (
+            [_FREQ] if px_ != _FREQ else [])
         py_ = cols[1].selectbox("Second parameter", ["None"] + others,
-                                format_func=lambda k: k if k == "None"
-                                else next(p.label for p in numeric if p.key == k))
+                                format_func=_plabel)
         metric_choice = st.selectbox("Metric", ["Sharpe", "CAGR", "Calmar",
                                                 "Max Drawdown", "Annual Turnover"])
 
         def _grid(pk: str) -> List[Any]:
+            if pk == _FREQ:
+                return list(R.SWEEP_FREQUENCIES)
             spec = next(p for p in numeric if p.key == pk)
             lo, hi = float(spec.min), float(spec.max)
             base = float(params_run.get(pk, spec.default))
@@ -4031,8 +4043,10 @@ with tabs[5]:
         if "sweep" in st.session_state:
             sw, sx, sy, sz = st.session_state["sweep"]
             if sz in sw.columns:
+                _cat = R.REBALANCE_KEY in (sx, sy)
                 if sy != "None" and sy in sw.columns:
-                    view = st.radio("View", ["3D surface", "Heatmap"],
+                    # A frequency is not a number: no surface across it.
+                    view = "Heatmap" if _cat else st.radio("View", ["3D surface", "Heatmap"],
                                     horizontal=True, key="sweepview",
                                     help="Two parameters plus a metric is "
                                          "exactly three variables -- the "

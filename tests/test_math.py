@@ -393,6 +393,33 @@ def test_semi_annual_rebalance():
     assert traded <= set(reb)
 
 
+def test_rebalance_frequency_as_a_sweep_axis():
+    from qbt.strategies import REGISTRY
+    px, _, _ = _market(n=1300)
+    strat = REGISTRY["risk_parity"]
+    params = {q.key: q.default for q in strat.params}
+    calls = []
+    orig = strat.generate
+    strat.generate = lambda *a, **k: calls.append(1) or orig(*a, **k)
+    try:
+        sw = R.parameter_sweep(px, strat, params, {R.REBALANCE_KEY: list(R.SWEEP_FREQUENCIES)},
+                               EngineConfig(), ZERO)
+        assert len(calls) == 1                          # signals built once
+        assert list(sw[R.REBALANCE_KEY].cat.categories) == list(R.SWEEP_FREQUENCIES.values())
+        w = orig(px, params, None, None)
+        for code, label in R.SWEEP_FREQUENCIES.items():
+            direct = R._stats(R._run(px, w, EngineConfig(rebalance=code), ZERO), 252)
+            row = sw[sw[R.REBALANCE_KEY] == label].iloc[0]
+            assert np.isclose(row["CAGR"], direct["CAGR"]) and np.isclose(row["Sharpe"], direct["Sharpe"])
+        num = next(q.key for q in strat.params if q.kind in ("int", "float"))
+        calls.clear()
+        sw2 = R.parameter_sweep(px, strat, params,
+                                {num: [20, 40], R.REBALANCE_KEY: ["M", "S"]}, EngineConfig(), ZERO)
+        assert len(sw2) == 4 and len(calls) == 2 and "error" not in sw2
+    finally:
+        strat.generate = orig
+
+
 if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore")

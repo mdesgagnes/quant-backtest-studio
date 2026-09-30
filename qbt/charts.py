@@ -233,7 +233,7 @@ def monte_carlo_fan(bands: pd.DataFrame, actual: pd.Series,
 def sweep_heatmap(df: pd.DataFrame, x: str, y: str, z: str,
                   title: str = "", theme: str = "dark") -> go.Figure:
     pal, _ = _colors(theme)
-    piv = df.pivot_table(index=y, columns=x, values=z, aggfunc="mean")
+    piv = df.pivot_table(index=y, columns=x, values=z, aggfunc="mean", observed=True)
     fig = go.Figure(go.Heatmap(
         z=piv.values, x=[str(c) for c in piv.columns], y=[str(i) for i in piv.index],
         colorscale=[[0, pal["rust"]], [0.5, pal["panel"]], [1, pal["brass"]]],
@@ -295,8 +295,9 @@ def sweep_surface(df: pd.DataFrame, x: str, y: str, z: str,
 def sweep_line(df: pd.DataFrame, x: str, z: str, title: str = "",
               theme: str = "dark") -> go.Figure:
     pal, _ = _colors(theme)
-    d = df.groupby(x)[z].mean().sort_index()
-    fig = go.Figure(go.Scatter(x=d.index, y=d.values, mode="lines+markers",
+    d = df.groupby(x, observed=True)[z].mean().sort_index()
+    xs = [str(v) for v in d.index] if isinstance(d.index, pd.CategoricalIndex) else d.index
+    fig = go.Figure(go.Scatter(x=xs, y=d.values, mode="lines+markers",
                                line=dict(color=pal["brass"], width=2),
                                marker=dict(size=6, color=pal["brass"])))
     _base(fig, 280, title or f"{z} by {x}", theme)
