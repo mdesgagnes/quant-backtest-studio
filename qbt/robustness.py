@@ -49,7 +49,8 @@ def _weights_for(strategy, prices, params, exog, weights, cash=None):
     return strategy.generate(prices, params, exog, cash)
 
 
-def fold_stats(returns: pd.Series, n_folds: int, ppy: int) -> pd.DataFrame:
+def fold_stats(returns: pd.Series, n_folds: int, ppy: int,
+               rf: M.RiskFree = 0.0) -> pd.DataFrame:
     """Splits a return series into folds and summarizes each one."""
     idx = returns.index
     rows = []
@@ -65,7 +66,7 @@ def fold_stats(returns: pd.Series, n_folds: int, ppy: int) -> pd.DataFrame:
             "CAGR": M.cagr(eq, ppy), "Volatility": vol,
             # A riskless fold (portfolio in cash) has no meaningful ratio:
             # NaN instead of a misleading number.
-            "Sharpe": M.sharpe(r, ppy=ppy) if vol > 0.002 else np.nan,
+            "Sharpe": M.sharpe(r, rf, ppy) if vol > 0.002 else np.nan,
             "Max Drawdown": M.max_drawdown(eq),
         })
     df = pd.DataFrame(rows)
@@ -75,12 +76,13 @@ def fold_stats(returns: pd.Series, n_folds: int, ppy: int) -> pd.DataFrame:
     return df
 
 
-def _stats(res: BacktestResult, ppy: int) -> Dict[str, float]:
+def _stats(res: BacktestResult, ppy: int,
+           rf: M.RiskFree = 0.0) -> Dict[str, float]:
     return {
         "CAGR": M.cagr(res.equity, ppy),
         "Volatility": M.annual_vol(res.returns, ppy),
-        "Sharpe": M.sharpe(res.returns, ppy=ppy),
-        "Sortino": M.sortino(res.returns, ppy=ppy),
+        "Sharpe": M.sharpe(res.returns, rf, ppy),
+        "Sortino": M.sortino(res.returns, rf, ppy),
         "Calmar": M.calmar(res.equity, ppy),
         "Max Drawdown": M.max_drawdown(res.equity),
         "Annual Turnover": float(res.turnover.sum() / max(len(res.returns) / ppy, 1e-9)),
@@ -102,7 +104,8 @@ def parameter_sweep(prices: pd.DataFrame, strategy, base_params: Dict[str, Any],
                     exog: Optional[pd.DataFrame] = None,
                     volume: Optional[pd.DataFrame] = None,
                     dividends: Optional[pd.DataFrame] = None,
-                    open_prices: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+                    open_prices: Optional[pd.DataFrame] = None,
+                    rf: M.RiskFree = 0.0) -> pd.DataFrame:
     """Sweeps a parameter grid. A flat surface is worth more than a sharp peak.
     Each combination is measured from its own first invested day, since a
     longer lookback has a longer warm-up.
@@ -135,7 +138,7 @@ def parameter_sweep(prices: pd.DataFrame, strategy, base_params: Dict[str, Any],
                 eng = _replace(engine, rebalance=freq, anchor_month=12)
             res = _run(prices, weights_cache[key], eng, costs, cash_prices,
                        volume=volume, dividends=dividends, open_prices=open_prices)
-            row.update(_stats(res, engine.periods_per_year))
+            row.update(_stats(res, engine.periods_per_year, rf))
         except Exception as exc:  # an invalid combination must not halt the sweep
             row["error"] = str(exc)[:120]
         rows.append(row)
@@ -158,7 +161,8 @@ def walk_forward(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                  volume: Optional[pd.DataFrame] = None,
                  dividends: Optional[pd.DataFrame] = None,
                  open_prices: Optional[pd.DataFrame] = None,
-                 start: Optional[pd.Timestamp] = None) -> pd.DataFrame:
+                 start: Optional[pd.Timestamp] = None,
+                 rf: M.RiskFree = 0.0) -> pd.DataFrame:
     """Splits the history into successive folds and measures stability.
 
     Signals are generated over the full history, then evaluated fold by
@@ -171,7 +175,7 @@ def walk_forward(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                dividends, open_prices, start)
     # The first retained day is the origin (a zero return by construction),
     # not an observation.
-    return fold_stats(res.returns.iloc[1:], n_folds, engine.periods_per_year)
+    return fold_stats(res.returns.iloc[1:], n_folds, engine.periods_per_year, rf)
 
 
 def in_out_sample(prices: pd.DataFrame, strategy, params: Dict[str, Any],
@@ -183,7 +187,8 @@ def in_out_sample(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                   volume: Optional[pd.DataFrame] = None,
                   dividends: Optional[pd.DataFrame] = None,
                   open_prices: Optional[pd.DataFrame] = None,
-                  start: Optional[pd.Timestamp] = None) -> pd.DataFrame:
+                  start: Optional[pd.Timestamp] = None,
+                  rf: M.RiskFree = 0.0) -> pd.DataFrame:
     """Compares the first portion of the history to the last."""
     w = _weights_for(strategy, prices, params, exog, weights, cash_prices)
     res = _run(prices, w, engine, costs, cash_prices, rebalance_dates, volume,
@@ -200,7 +205,7 @@ def in_out_sample(prices: pd.DataFrame, strategy, params: Dict[str, Any],
         rows.append({
             "Period": name, "Start": r.index[0].date(), "End": r.index[-1].date(),
             "CAGR": M.cagr(eq, engine.periods_per_year),
-            "Sharpe": M.sharpe(r, ppy=engine.periods_per_year),
+            "Sharpe": M.sharpe(r, rf, engine.periods_per_year),
             "Max Drawdown": M.max_drawdown(eq),
         })
     return pd.DataFrame(rows)
@@ -219,7 +224,8 @@ def cost_sensitivity(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                      rebalance_dates=None,
                      dividends: Optional[pd.DataFrame] = None,
                      open_prices: Optional[pd.DataFrame] = None,
-                     start: Optional[pd.Timestamp] = None) -> pd.DataFrame:
+                     start: Optional[pd.Timestamp] = None,
+                     rf: M.RiskFree = 0.0) -> pd.DataFrame:
     """At what level of frictions does the strategy stop paying off?
 
     The level is a flat cost in bps of each trade's value, charged on
@@ -242,7 +248,7 @@ def cost_sensitivity(prices: pd.DataFrame, strategy, params: Dict[str, Any],
         rows.append({
             COST_AXIS: lv,
             "CAGR": M.cagr(res.equity, engine.periods_per_year),
-            "Sharpe": M.sharpe(res.returns, ppy=engine.periods_per_year),
+            "Sharpe": M.sharpe(res.returns, rf, engine.periods_per_year),
             "Max Drawdown": M.max_drawdown(res.equity),
         })
     return pd.DataFrame(rows)
@@ -250,7 +256,8 @@ def cost_sensitivity(prices: pd.DataFrame, strategy, params: Dict[str, Any],
 
 # ----------------------------------------------------------------------
 def monte_carlo(returns: pd.Series, n_sims: int = 500, block: int = 21,
-                ppy: int = 252, seed: int = 42) -> Dict[str, Any]:
+                ppy: int = 252, seed: int = 42,
+                rf: M.RiskFree = 0.0) -> Dict[str, Any]:
     """Block resampling: preserves short-term autocorrelation.
 
     Answers the question: how much of this result depends on the exact
@@ -277,7 +284,10 @@ def monte_carlo(returns: pd.Series, n_sims: int = 500, block: int = 21,
     cagrs = finals ** (1 / years) - 1
     peaks = np.maximum.accumulate(equity, axis=1)
     mdds = (equity / peaks - 1).min(axis=1)
-    sharpes = paths.mean(axis=1) / paths.std(axis=1, ddof=1) * np.sqrt(ppy)
+    # Resampling shuffles the returns but not the risk-free rate, so each
+    # path is measured against the sample's average per-period rate.
+    rf_mean = float(M.rf_per_period(returns.dropna().index, rf, ppy).mean())
+    sharpes = (paths.mean(axis=1) - rf_mean) / paths.std(axis=1, ddof=1) * np.sqrt(ppy)
 
     pct = [5, 25, 50, 75, 95]
     stats = pd.DataFrame({
@@ -347,7 +357,8 @@ def rebalance_day_sweep(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                         include_months: bool = True,
                         volume: Optional[pd.DataFrame] = None,
                         dividends: Optional[pd.DataFrame] = None,
-                        open_prices: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+                        open_prices: Optional[pd.DataFrame] = None,
+                        rf: M.RiskFree = 0.0) -> pd.DataFrame:
     """Runs the same strategy on every plausible trading day.
 
     The day a strategy rebalances is a parameter like any other, and one
@@ -384,7 +395,7 @@ def rebalance_day_sweep(prices: pd.DataFrame, strategy, params: Dict[str, Any],
             res = _run(prices, w, eng, costs, cash_prices, volume=volume,
                        dividends=dividends, open_prices=open_prices)
             row = {"Trading day": spec.label()}
-            row.update(_stats(res, engine.periods_per_year))
+            row.update(_stats(res, engine.periods_per_year, rf))
             rows.append(row)
         except Exception as exc:
             rows.append({"Trading day": spec.label(), "error": str(exc)[:100]})

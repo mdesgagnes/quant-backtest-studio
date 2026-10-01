@@ -24,6 +24,7 @@ from qbt.data import (load_yfinance, load_market_data, load_file, clean_prices,
 from qbt.exog import load_exog, prepare_exog, exog_report, split_roles
 from qbt.external import (load_target_weights, prepare_target_weights,
                           weights_template)
+from qbt.engine import _cash_returns
 from qbt.engine import (run_backtest, benchmark_result, blended_benchmark,
                         align_results, align_start, first_active_date,
                         window as result_window)
@@ -1258,6 +1259,42 @@ if source == "Return stream":
     cols = list(rets.columns)
     ppy = rrep.periods_per_year
 
+    # Risk-free rate for Sharpe, Sortino and alpha. Zero credits a portfolio
+    # with the cash yield as though it were skill: over a long history that
+    # puts most of a T-bill's return into a low-beta portfolio's alpha.
+    _RF_OPTS = (["US 3-month T-bill (historical)", "Fixed annual rate", "None (0%)"]
+                + [f"Column: {c}" for c in cols])
+    rf_choice = st.sidebar.selectbox(
+        "Risk-free rate", _RF_OPTS, key="rs_rf",
+        help="What Sharpe, Sortino and alpha are measured in excess of. The "
+             "T-bill option uses the historical US 3-month Treasury bill "
+             "yield (Yahoo Finance ^IRX), each period earning the yield known "
+             "at its start. A column of your file (a Canadian T-bill series, "
+             "say) is read as per-period returns, like the other columns.")
+    rs_rf: M.RiskFree = 0.0
+    rf_label = "0% (none)"
+    if rf_choice.startswith("US 3-month"):
+        _mkt_rf = fetch_regime_market()
+        if _mkt_rf is not None and "^IRX" in _mkt_rf and _mkt_rf["^IRX"].notna().any():
+            rs_rf = M.rf_from_yield(_mkt_rf["^IRX"], rets.index)
+            rf_label = "US 3-month T-bill (^IRX), historical"
+            _irx0 = _mkt_rf["^IRX"].dropna().index[0]
+            if rets.index[0] < _irx0 - pd.Timedelta(days=40):
+                st.sidebar.markdown(
+                    f'<div class="flag">T-bill history starts {_irx0.date()}: '
+                    f'earlier periods use 0%.</div>', unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown('<div class="flag">T-bill yields could not be '
+                                'downloaded: 0% is used.</div>',
+                                unsafe_allow_html=True)
+    elif rf_choice == "Fixed annual rate":
+        _rate = st.sidebar.number_input("Annual risk-free rate (%)", -5.0, 25.0,
+                                        2.0, 0.25, key="rs_rf_rate") / 100.0
+        rs_rf, rf_label = _rate, f"{_rate * 100:.2f}% a year"
+    elif rf_choice.startswith("Column: "):
+        _rc = rf_choice[len("Column: "):]
+        rs_rf, rf_label = rets[_rc], f"column \u201c{_rc}\u201d of the file"
+
     # ------------------------------------------------------------------
     # What to analyse, and over which dates.
     # ------------------------------------------------------------------
@@ -1307,9 +1344,9 @@ if source == "Return stream":
         bench_col = None
     eqs = {n: RS.equity_from_returns(r, rs_capital) for n, r in series.items()}
     eq_bench = RS.equity_from_returns(r_bench, rs_capital) if bench_col else None
-    stats_all = {n: M.summary(r, eqs[n], r_bench, None, None, 0.0, ppy)
+    stats_all = {n: M.summary(r, eqs[n], r_bench, None, None, rs_rf, ppy)
                  for n, r in series.items()}
-    bstats = (M.summary(r_bench, eq_bench, None, None, None, 0.0, ppy)
+    bstats = (M.summary(r_bench, eq_bench, None, None, None, rs_rf, ppy)
               if bench_col else {})
     rs_start, rs_end = rs_win["start"], rs_win["end"]
     rs_n = max(len(r) for r in series.values())
@@ -1681,7 +1718,7 @@ if source == "Return stream":
                 rows = []
                 for k in _dims:
                     dim = RG.DIMENSIONS[k]
-                    t = RG.regime_table(everyone, labels[k], dim.order, ppy)
+                    t = RG.regime_table(everyone, labels[k], dim.order, ppy, rf=rs_rf)
                     t = t[t["Periods"] > 0]
                     for _, r_ in t.iterrows():
                         rows.append({"Dimension": dim.title, "Regime": r_["Regime"],
@@ -1718,7 +1755,7 @@ if source == "Return stream":
                                           f"S&P 500 through each regime"),
                         use_container_width=True, config={"displaylogo": False})
                     rt = RG.regime_table(everyone, labels[k], dim.order, ppy,
-                                         r_bench if bench_col else None)
+                                         r_bench if bench_col else None, rs_rf)
                     rt = rt[rt["Periods"] > 0]
                     if rt.empty:
                         note("No returns fall inside these regimes.")
@@ -1750,7 +1787,7 @@ if source == "Return stream":
                         note("% of time is the share of each series' own "
                              "periods spent in that regime. Hit rate is the "
                              "share of periods with a positive return. Sharpe "
-                             "assumes a zero risk-free rate."
+                             f"is in excess of the risk-free rate ({rf_label})."
                              + (" Excess compares against the benchmark over "
                                 "the same periods." if bench_col else ""))
             note("Regime inputs: S&P 500, VIX, 3-month T-bill and 10-year "
@@ -1767,7 +1804,7 @@ if source == "Return stream":
              f"to re-run, only the realized stream.")
         eyebrow("Stability over sub-periods")
         nf = st.slider("Number of folds", 3, 10, 5, key="rsfold")
-        wf = R.fold_stats(r_main, nf, ppy)
+        wf = R.fold_stats(r_main, nf, ppy, rs_rf)
         if not wf.empty:
             disp = wf.copy()
             for cc in ("CAGR", "Volatility", "Max Drawdown"):
@@ -1783,9 +1820,10 @@ if source == "Return stream":
         nsim = s1.slider("Simulations", 100, 2000, 500, 100, key="rsmc")
         blk = s2.slider("Block size (periods)", 2, max(3, min(63, len(r_main) // 8)),
                         min(21, max(3, len(r_main) // 20)), 1, key="rsblk")
-        _mc_key = f"rsmc_res_{focus}_{rs_start.date()}_{rs_end.date()}"
+        _mc_key = f"rsmc_res_{focus}_{rs_start.date()}_{rs_end.date()}_{rf_label}"
         if st.button("Run Monte Carlo simulation", key="rsmcbtn"):
-            st.session_state[_mc_key] = dict(R.monte_carlo(r_main, nsim, blk, ppy),
+            st.session_state[_mc_key] = dict(R.monte_carlo(r_main, nsim, blk, ppy,
+                                                           rf=rs_rf),
                                              n=nsim, block=blk)
         if _mc_key in st.session_state:
             mc = st.session_state[_mc_key]
@@ -1887,7 +1925,7 @@ if source == "Return stream":
             _lab = g.get("labels")
             if _lab:
                 secs += XL.regime_sections(everyone, _lab, ppy,
-                                           r_bench if bench_col else None)
+                                           r_bench if bench_col else None, rf=rs_rf)
             else:
                 miss.append(("Market regimes", "Regime tables",
                              "The regime market data could not be downloaded."))
@@ -1945,7 +1983,7 @@ if source == "Return stream":
                         "Benchmark": _bl or "none",
                         "Returns": "as supplied: net of whatever costs and fees "
                                    "the source already deducted",
-                        "Risk-free rate": "0% in Sharpe and Sortino",
+                        "Risk-free rate": rf_label + " (Sharpe, Sortino, alpha)",
                     },
                     "footer": f"{_lbl} · {datetime.now():%Y-%m-%d}",
                 }
@@ -1953,6 +1991,7 @@ if source == "Return stream":
                      ppy, str(main_col), str(bench_col or "Benchmark"))
             _rkw = dict(all_series=pd.DataFrame(everyone),
                         report_notes={"Scale read": rrep.scale,
+                                      "Risk-free rate": rf_label,
                                       "Source": rs_source,
                                       "Period": f"{rs_start.date()} to {rs_end.date()}"},
                         sections=_rs_secs, omitted=_rs_miss, include=list(rs_pick),
@@ -3120,10 +3159,17 @@ sleeve_report = run.get("sleeves")
 run_rebal = run.get("rebalance_dates")
 
 bench_r = bench.returns if bench is not None else None
+# The risk-free rate is what the portfolio's own cash earned: the cash proxy
+# when one is set, otherwise the cash rate -- the same series the engine
+# credits, so Sharpe, Sortino and alpha are in excess of the real
+# alternative to being invested.
+rf_bt = _cash_returns(res.equity.index, run.get("cash"), rcfg.costs.cash_rate_pa, ppy)
+rf_bt_label = (f"cash proxy {rcfg.data.cash_proxy}" if rcfg.data.cash_proxy
+               else f"{rcfg.costs.cash_rate_pa * 100:.2f}% a year (cash rate)")
 stats = M.summary(res.returns, res.equity, bench_r, res.turnover,
-                  res.exposure, rcfg.costs.cash_rate_pa, ppy)
+                  res.exposure, rf_bt, ppy)
 bstats = M.summary(bench.returns, bench.equity, None, None, None,
-                   rcfg.costs.cash_rate_pa, ppy) if bench is not None else {}
+                   rf_bt, ppy) if bench is not None else {}
 
 # Context strip: which run is on screen, visible from every tab.
 _bits = [f'<span class="lead">{rcfg.label}</span>']
@@ -3952,7 +3998,8 @@ with tabs[5]:
     # Every re-run sees the same dividends and execution price as the
     # headline result, and starts on the same date, so the tests describe
     # the backtest on screen rather than a variant of it.
-    _same = dict(dividends=run.get("dividends"), open_prices=run.get("open"))
+    _same = dict(dividends=run.get("dividends"), open_prices=run.get("open"),
+                 rf=rf_bt)
     kw = dict(cash_prices=run.get("cash_series") if run.get("cash_series")
               is not None else run["cash"],
               exog=exog_used, weights=fixed_w, rebalance_dates=run_rebal,
@@ -4283,7 +4330,8 @@ with tabs[5]:
     blk = c2.slider("Block size (days)", 5, 63, 21, 1)
     if st.button("Run Monte Carlo simulation", key="mcbtn"):
         with st.spinner("Resampling..."):
-            st.session_state["mc"] = dict(R.monte_carlo(res.returns, n_sims, blk, ppy),
+            st.session_state["mc"] = dict(R.monte_carlo(res.returns, n_sims, blk, ppy,
+                                                        rf=rf_bt),
                                           n=n_sims, block=blk)
     if "mc" in st.session_state:
         mc = st.session_state["mc"]
@@ -4918,7 +4966,7 @@ with tabs[8]:
                     _rets[bench.label] = bench.returns
                 secs += XL.regime_sections(
                     _rets, regime_labels(_mkt), ppy,
-                    bench.returns if bench is not None else None)
+                    bench.returns if bench is not None else None, rf=rf_bt)
 
         # Data
         if quality is not None and quality.warnings:
@@ -4997,6 +5045,7 @@ with tabs[8]:
                                f"paid monthly" if c.management_fee_pa else "none"),
             "Cash": (f"earns {rcfg.data.cash_proxy}" if rcfg.data.cash_proxy
                      else f"earns {c.cash_rate_pa * 100:.2f}% a year"),
+            "Risk-free rate": rf_bt_label + " (Sharpe, Sortino, alpha)",
             "Cash reinvestment": _sweep + (f", {e.cash_buffer * 100:.1f}% buffer"
                                            if getattr(e, "cash_sweep", "none") != "none"
                                            or getattr(e, "cash_sweep_threshold", 0) else ""),
@@ -5036,9 +5085,9 @@ with tabs[8]:
             xstats = M.summary(xres.returns, xres.equity,
                                xbench.returns if xbench is not None else None,
                                xres.turnover, xres.exposure,
-                               rcfg.costs.cash_rate_pa, ppy)
+                               rf_bt, ppy)
             xbstats = (M.summary(xbench.returns, xbench.equity, None, None, None,
-                                 rcfg.costs.cash_rate_pa, ppy)
+                                 rf_bt, ppy)
                        if xbench is not None else {})
             _xw0, _xw1 = xres.equity.index[0], xres.equity.index[-1]
             _xnotes = {"Export window": f"{_xw0.date()} to {_xw1.date()}, of a "

@@ -195,12 +195,16 @@ def align_labels(labels: pd.Series, index: pd.DatetimeIndex) -> pd.Series:
 
 def regime_table(returns: Dict[str, pd.Series], labels: pd.Series,
                  order: List[str], ppy: int,
-                 benchmark: Optional[pd.Series] = None) -> pd.DataFrame:
+                 benchmark: Optional[pd.Series] = None,
+                 rf=0.0) -> pd.DataFrame:
     """One row per (regime, series): how the series behaved in that regime.
 
     Annualized return compounds only the periods spent in the regime and
-    scales to a year, so regimes of different lengths are comparable.
+    scales to a year, so regimes of different lengths are comparable. The
+    Sharpe ratio is in excess of `rf` (an annual rate or a series of
+    per-period risk-free returns) over the same periods.
     """
+    from .metrics import rf_per_period
     rows = []
     for name, r in returns.items():
         r = r.dropna()
@@ -209,6 +213,7 @@ def regime_table(returns: Dict[str, pd.Series], labels: pd.Series,
         lab = align_labels(labels, r.index)
         total = int(lab.notna().sum())
         b = benchmark.reindex(r.index) if benchmark is not None else None
+        rfp = rf_per_period(r.index, rf, ppy)
         for reg in order:
             m = (lab == reg).to_numpy()
             x = r[m]
@@ -219,9 +224,10 @@ def regime_table(returns: Dict[str, pd.Series], labels: pd.Series,
                 growth = float((1 + x).prod())
                 row["Ann. return"] = growth ** (ppy / n) - 1 if growth > 0 else -1.0
                 row["Ann. volatility"] = float(x.std(ddof=1) * np.sqrt(ppy)) if n > 1 else np.nan
-                vol = row["Ann. volatility"]
-                row["Sharpe"] = (float(x.mean() * ppy / vol)
-                                 if vol and vol == vol and vol > 0 else np.nan)
+                ex = x - rfp[m]
+                ex_vol = float(ex.std(ddof=1) * np.sqrt(ppy)) if n > 1 else np.nan
+                row["Sharpe"] = (float(ex.mean() * ppy / ex_vol)
+                                 if ex_vol and ex_vol == ex_vol and ex_vol > 0 else np.nan)
                 row["Hit rate"] = float((x > 0).mean())
                 row["Worst period"] = float(x.min())
                 if b is not None:

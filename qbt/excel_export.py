@@ -409,7 +409,8 @@ def robustness_sections(walk_forward: Optional[pd.DataFrame] = None,
 def regime_sections(returns: Dict[str, pd.Series],
                     labels: Dict[str, pd.Series], ppy: int,
                     benchmark: Optional[pd.Series] = None,
-                    module: str = "Market regimes") -> List[Section]:
+                    module: str = "Market regimes",
+                    rf=0.0) -> List[Section]:
     """Every regime dimension: an overview of annualized return by regime
     for each series, then the full table (volatility, Sharpe, hit rate,
     time spent, excess over the benchmark)."""
@@ -418,7 +419,7 @@ def regime_sections(returns: Dict[str, pd.Series],
     for k, dim in RG.DIMENSIONS.items():
         if k not in labels:
             continue
-        t = RG.regime_table(returns, labels[k], dim.order, ppy, benchmark)
+        t = RG.regime_table(returns, labels[k], dim.order, ppy, benchmark, rf)
         t = t[t["Periods"] > 0]
         if not t.empty:
             t.insert(0, "Dimension", dim.title)

@@ -1370,8 +1370,21 @@ Conventions worth knowing:
   before the first return, so the first return counts in total return,
   CAGR, drawdown and "since inception". CAGR spans N - 1 periods for N
   values.
+- Sharpe, Sortino and alpha are measured in excess of a risk-free rate.
+  In a backtest it is what the portfolio's own cash earned (the cash
+  proxy, or the cash rate); for a return stream it is chosen in the
+  sidebar -- the historical US 3-month T-bill (default; each period earns
+  the yield known at its start), a fixed rate, a column of the file, or
+  none. The robustness tests, Monte Carlo and regime tables use the same
+  rate, so their Sharpe ratios are comparable with the headline one.
+- Alpha is Jensen's alpha: the intercept of the strategy's excess returns
+  regressed on the benchmark's excess returns, times the periods in a year.
 - Sortino uses the downside deviation: the root mean square of shortfalls
   below the risk-free rate over all periods.
+- Trailing windows on month-end data run month-end to month-end (1M on a
+  30 September close starts 31 August), and multi-year windows are
+  annualized over their number of periods, so "Since inception" equals
+  the CAGR.
 - Drawdown episodes start at the peak they fall from.
 - The cash rate compounds to the stated annual rate (3% a year earns 3.00%).
 - Skew and excess kurtosis are sample statistics; a normal distribution has

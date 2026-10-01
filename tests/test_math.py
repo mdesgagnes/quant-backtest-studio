@@ -57,10 +57,10 @@ def test_metrics_match_reference_formulas():
     s = M.summary(r, M.to_equity(r, 100.0), b, None, None, 0.02, 252)
     x = r.to_numpy()
     E = np.concatenate([[1.0], np.cumprod(1 + x)])
-    ex = x - 0.02 / 252
+    ex = x - ((1.02) ** (1 / 252) - 1)
     dd = E / np.maximum.accumulate(E) - 1
     q = np.quantile(x, 0.05)
-    beta, a0 = np.polyfit(b.to_numpy() - 0.02 / 252, ex, 1)
+    beta, a0 = np.polyfit(b.to_numpy() - ((1.02) ** (1 / 252) - 1), ex, 1)
     act = x - b.to_numpy()
     te = np.std(act, ddof=1) * np.sqrt(252)
     ref = {
@@ -418,6 +418,41 @@ def test_rebalance_frequency_as_a_sweep_axis():
         assert len(sw2) == 4 and len(calls) == 2 and "error" not in sw2
     finally:
         strat.generate = orig
+
+
+# ----------------------------------------------------------------------
+def test_trailing_windows_are_month_end_to_month_end():
+    idx = pd.date_range("2019-12-31", "2026-09-30", freq="ME")
+    r = pd.Series(np.linspace(-0.02, 0.03, len(idx)), idx)
+    tr = M.trailing_returns(M.to_equity(r), 12).set_index("Period")
+    assert str(tr.loc["1M", "From"]) == "2026-08-31"          # not 2026-07-31
+    assert str(tr.loc["6M", "From"]) == "2026-03-31"          # not 2026-02-28
+    assert np.isclose(tr.loc["1M", "Return"], r.iloc[-1])
+    assert np.isclose(tr.loc["6M", "Return"], (1 + r.iloc[-6:]).prod() - 1)
+    assert np.isclose(tr.loc["Since inception", "Return"], M.cagr(M.to_equity(r), 12))
+
+
+def test_risk_free_rate_in_sharpe_sortino_alpha():
+    rng = np.random.default_rng(11)
+    idx = pd.date_range("1990-01-31", periods=360, freq="ME")
+    b = pd.Series(rng.normal(0.007, 0.04, 360), idx)
+    r = 0.5 * b + pd.Series(rng.normal(0.003, 0.01, 360), idx)
+    y = pd.Series(np.linspace(8.0, 1.0, 400), pd.date_range("1989-12-01", periods=400, freq="21D"))
+    rf = M.rf_from_yield(y, idx)
+    # Each month earns the yield known at its start, for its calendar days.
+    prev = idx[4] - pd.offsets.MonthEnd(1)
+    y0 = y[:prev].iloc[-1] / 100
+    assert np.isclose(rf.iloc[4], (1 + y0) ** ((idx[4] - prev).days / 365.25) - 1)
+    s = M.summary(r, None, b, None, None, rf, 12)
+    ex, bx = (r - rf).to_numpy(), (b - rf).to_numpy()
+    beta, a0 = np.polyfit(bx, ex, 1)
+    assert np.isclose(s["Beta"], beta) and np.isclose(s["Alpha (ann.)"], a0 * 12)
+    assert np.isclose(s["Sharpe"], ex.mean() / ex.std(ddof=1) * np.sqrt(12))
+    assert np.isclose(s["Sortino"], ex.mean() / np.sqrt(np.mean(np.minimum(ex, 0) ** 2)) * np.sqrt(12))
+    # A fixed rate compounds to itself, like the engine's cash.
+    assert np.isclose((1 + M.rf_per_period(idx, 0.03, 12).iloc[0]) ** 12, 1.03)
+    # Zero risk-free credits a low-beta portfolio with the cash yield.
+    assert M.summary(r, None, b, None, None, 0.0, 12)["Alpha (ann.)"] > s["Alpha (ann.)"]
 
 
 if __name__ == "__main__":

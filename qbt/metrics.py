@@ -1,7 +1,7 @@
 """Performance and risk statistics. Pure, stateless functions."""
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -104,27 +104,70 @@ def annual_vol(returns: pd.Series, ppy: int = TRADING_DAYS) -> float:
 RISKLESS_SD = 1e-5
 
 
-def sharpe(returns: pd.Series, rf_pa: float = 0.0, ppy: int = TRADING_DAYS) -> float:
-    ex = returns - rf_pa / ppy
+# The risk-free rate: an annual rate, or a series of per-period risk-free
+# returns (a T-bill, the cash the portfolio actually earned). Sharpe,
+# Sortino and alpha are all measured in excess of it. Leaving it at zero
+# credits a portfolio with the cash yield as though it were skill: over a
+# long history that adds the whole T-bill return to a low-beta portfolio's
+# alpha and inflates every Sharpe ratio.
+RiskFree = Union[float, pd.Series, None]
+
+
+def rf_per_period(index: pd.Index, rf: RiskFree, ppy: int = TRADING_DAYS) -> pd.Series:
+    """Per-period risk-free returns aligned to `index`. An annual rate is
+    converted to the per-period rate that compounds to it -- the engine's
+    own convention for cash -- not divided by the number of periods."""
+    if isinstance(rf, pd.Series):
+        return rf.reindex(index).astype(float).ffill().fillna(0.0)
+    rate = float(rf or 0.0)
+    per = (1.0 + rate) ** (1.0 / max(1, int(ppy))) - 1.0 if rate > -1 else 0.0
+    return pd.Series(per, index=index)
+
+
+def excess_returns(returns: pd.Series, rf: RiskFree, ppy: int = TRADING_DAYS) -> pd.Series:
+    return returns - rf_per_period(returns.index, rf, ppy)
+
+
+def rf_from_yield(yield_pct: pd.Series, index: pd.DatetimeIndex) -> pd.Series:
+    """Per-period risk-free returns from a quoted annual yield in percent
+    (a T-bill rate such as Yahoo's ^IRX). Each period earns the yield
+    known at its start -- the previous observation's date -- for the
+    calendar days it spans, so a monthly, weekly or daily stream gets the
+    right amount whatever its spacing."""
+    idx = pd.DatetimeIndex(index)
+    if len(idx) == 0:
+        return pd.Series(dtype=float)
+    y = (yield_pct.dropna().sort_index() / 100.0)
+    y.index = pd.DatetimeIndex(y.index).tz_localize(None).normalize()
+    y = y[~y.index.duplicated(keep="last")]
+    prev = pd.DatetimeIndex([_base_date(idx)] + list(idx[:-1]))
+    known = y.reindex(y.index.union(prev)).ffill().reindex(prev)
+    days = np.asarray((idx - prev).days, dtype=float)
+    out = (1.0 + known.to_numpy()) ** (days / 365.25) - 1.0
+    return pd.Series(out, index=idx).fillna(0.0)
+
+
+def sharpe(returns: pd.Series, rf_pa: RiskFree = 0.0, ppy: int = TRADING_DAYS) -> float:
+    ex = excess_returns(returns, rf_pa, ppy)
     sd = ex.std(ddof=1)
     return float(ex.mean() / sd * np.sqrt(ppy)) if sd and sd > RISKLESS_SD else np.nan
 
 
-def downside_deviation(returns: pd.Series, rf_pa: float = 0.0,
+def downside_deviation(returns: pd.Series, rf_pa: RiskFree = 0.0,
                        ppy: int = TRADING_DAYS) -> float:
     """Per-period downside deviation below the risk-free target: the root
     mean square of shortfalls, taken over ALL periods (a period above the
     target counts as a zero shortfall). Not the standard deviation of the
     losing periods around their own mean, which measures how much the
     losses vary rather than how large they are."""
-    ex = (returns - rf_pa / ppy).dropna()
+    ex = excess_returns(returns, rf_pa, ppy).dropna()
     if ex.empty:
         return np.nan
     return float(np.sqrt((np.minimum(ex, 0.0) ** 2).mean()))
 
 
-def sortino(returns: pd.Series, rf_pa: float = 0.0, ppy: int = TRADING_DAYS) -> float:
-    ex = returns - rf_pa / ppy
+def sortino(returns: pd.Series, rf_pa: RiskFree = 0.0, ppy: int = TRADING_DAYS) -> float:
+    ex = excess_returns(returns, rf_pa, ppy)
     down = downside_deviation(returns, rf_pa, ppy)
     return float(ex.mean() / down * np.sqrt(ppy)) if down and down > RISKLESS_SD else np.nan
 
@@ -212,13 +255,18 @@ def var_cvar(returns: pd.Series, level: float = 0.05) -> Dict[str, float]:
 
 
 def beta_alpha(returns: pd.Series, bench: pd.Series,
-               rf_pa: float = 0.0, ppy: int = TRADING_DAYS) -> Dict[str, float]:
+               rf_pa: RiskFree = 0.0, ppy: int = TRADING_DAYS) -> Dict[str, float]:
+    """Jensen's alpha and beta from the regression of the excess returns on
+    the benchmark's excess returns, both over the same risk-free rate.
+    Alpha is the per-period intercept times the periods in a year, the same
+    arithmetic annualization the Sharpe ratio's mean uses."""
     df = pd.concat([returns, bench], axis=1).dropna()
     if len(df) < 30:
         return {"beta": np.nan, "alpha": np.nan, "r2": np.nan, "corr": np.nan,
                 "tracking_error": np.nan, "information_ratio": np.nan}
-    y = df.iloc[:, 0] - rf_pa / ppy
-    x = df.iloc[:, 1] - rf_pa / ppy
+    rf = rf_per_period(df.index, rf_pa, ppy)
+    y = df.iloc[:, 0] - rf
+    x = df.iloc[:, 1] - rf
     var_x = x.var(ddof=1)
     b = float(np.cov(y, x, ddof=1)[0, 1] / var_x) if var_x > 0 else np.nan
     a = float((y.mean() - b * x.mean()) * ppy)
@@ -263,7 +311,7 @@ def summary(returns: pd.Series,
             bench_returns: Optional[pd.Series] = None,
             turnover: Optional[pd.Series] = None,
             exposure: Optional[pd.Series] = None,
-            rf_pa: float = 0.0,
+            rf_pa: RiskFree = 0.0,
             ppy: int = TRADING_DAYS) -> Dict[str, float]:
     returns = returns.dropna()
     eq = equity if equity is not None else to_equity(returns)
@@ -380,6 +428,11 @@ def trailing_returns(equity: pd.Series, ppy: int = TRADING_DAYS,
             cutoff = None                      # since inception
         else:
             cutoff = end - pd.DateOffset(months=months)
+            # Month-end to month-end. 30 Sep less one month is 30 Aug, and
+            # the last month-end on or before that is 31 Jul: the "1M"
+            # window would span two months, "6M" seven.
+            if end.is_month_end:
+                cutoff = cutoff + pd.offsets.MonthEnd(0)
 
         if cutoff is None:
             base_pos = 0
@@ -400,8 +453,12 @@ def trailing_returns(equity: pd.Series, ppy: int = TRADING_DAYS,
             continue
 
         total = end_val / base - 1.0
-        years = max((window.index[-1] - window.index[0]).days / 365.25, 1e-9)
-        annualized = years > 1.0000001
+        # Whether to annualize is a calendar question (more than a year);
+        # how many years is counted in periods, exactly as CAGR counts
+        # them, so "Since inception" equals the CAGR to the decimal.
+        span_years = (window.index[-1] - window.index[0]).days / 365.25
+        annualized = span_years > 1.02
+        years = max((len(window) - 1) / ppy, 1e-9)
         value = ((1.0 + total) ** (1.0 / years) - 1.0) if annualized else total
 
         rows.append({
