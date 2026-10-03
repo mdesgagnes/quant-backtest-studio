@@ -256,14 +256,28 @@ def var_cvar(returns: pd.Series, level: float = 0.05) -> Dict[str, float]:
 
 def beta_alpha(returns: pd.Series, bench: pd.Series,
                rf_pa: RiskFree = 0.0, ppy: int = TRADING_DAYS) -> Dict[str, float]:
-    """Jensen's alpha and beta from the regression of the excess returns on
-    the benchmark's excess returns, both over the same risk-free rate.
-    Alpha is the per-period intercept times the periods in a year, the same
-    arithmetic annualization the Sharpe ratio's mean uses."""
+    """Relative statistics against a benchmark, over the dates both cover.
+
+    - `outperformance`: the strategy's CAGR minus the benchmark's -- by how
+      much it beat the benchmark each year. This is what the reports call
+      Alpha.
+    - `alpha`: Jensen's alpha, reported as the risk-adjusted alpha: the
+      intercept of the strategy's excess returns regressed on the
+      benchmark's, both over the same risk-free rate, times the periods in
+      a year. It compares the strategy with the benchmark scaled to the
+      same beta, so a less risky strategy can trail the benchmark and still
+      show a positive risk-adjusted alpha.
+    """
     df = pd.concat([returns, bench], axis=1).dropna()
+    outperf = np.nan
+    if len(df):
+        g = (1.0 + df).prod()
+        if (g > 0).all():
+            outperf = float(g.iloc[0] ** (ppy / len(df)) - g.iloc[1] ** (ppy / len(df)))
     if len(df) < 30:
         return {"beta": np.nan, "alpha": np.nan, "r2": np.nan, "corr": np.nan,
-                "tracking_error": np.nan, "information_ratio": np.nan}
+                "tracking_error": np.nan, "information_ratio": np.nan,
+                "outperformance": outperf}
     rf = rf_per_period(df.index, rf_pa, ppy)
     y = df.iloc[:, 0] - rf
     x = df.iloc[:, 1] - rf
@@ -275,7 +289,7 @@ def beta_alpha(returns: pd.Series, bench: pd.Series,
     te = float(active.std(ddof=1) * np.sqrt(ppy))
     return {
         "beta": b, "alpha": a, "r2": corr ** 2, "corr": corr,
-        "tracking_error": te,
+        "outperformance": outperf, "tracking_error": te,
         "information_ratio": float(active.mean() * ppy / te) if te > 0 else np.nan,
     }
 
@@ -346,7 +360,8 @@ def summary(returns: pd.Series,
     if bench_returns is not None:
         ba = beta_alpha(returns, bench_returns, rf_pa, ppy)
         out.update({
-            "Beta": ba["beta"], "Alpha (ann.)": ba["alpha"], "R\u00b2": ba["r2"],
+            "Beta": ba["beta"], "Alpha (ann.)": ba["outperformance"],
+            "Risk-adjusted alpha (ann.)": ba["alpha"], "R\u00b2": ba["r2"],
             "Tracking Error": ba["tracking_error"],
             "Information Ratio": ba["information_ratio"],
         })
@@ -357,7 +372,8 @@ FORMATS = {
     "Total Return": "pct", "CAGR": "pct", "Volatility": "pct",
     "Max Drawdown": "pct", "VaR 95% (daily)": "pct", "CVaR 95% (daily)": "pct",
     "% Positive Months": "pct", "Best Month": "pct", "Worst Month": "pct",
-    "Alpha (ann.)": "pct", "Tracking Error": "pct", "Average Exposure": "pct",
+    "Alpha (ann.)": "pct", "Risk-adjusted alpha (ann.)": "pct",
+    "Tracking Error": "pct", "Average Exposure": "pct",
 }
 
 

@@ -52,7 +52,8 @@ MONEY = '$#,##0'
 # Statistics shown as percentages.
 _PCT_KEYS = {"Total Return", "CAGR", "Volatility", "Max Drawdown", "VaR 95% (daily)",
              "CVaR 95% (daily)", "% Positive Months", "Best Month", "Worst Month",
-             "Alpha (ann.)", "Tracking Error", "Average Exposure"}
+             "Alpha (ann.)", "Risk-adjusted alpha (ann.)", "Tracking Error",
+             "Average Exposure"}
 
 # Two blocks side by side: B..E on the left, G..J on the right.
 LEFT, RIGHT = 2, 7
@@ -355,7 +356,8 @@ def write_summary(wb, d: Dict[str, Any]) -> None:
                          x.get("Excess") if "Excess" in t else None])
         left_end = p.table(r, LEFT, hdr3, rows, [None, PCT, PCT, PCT],
                            [False, True, True, True])
-    risk = [("Beta", NUM), ("Alpha (ann.)", PCT), ("Tracking Error", PCT),
+    risk = [("Beta", NUM), ("Alpha (ann.)", PCT), ("Risk-adjusted alpha (ann.)", PCT),
+            ("Tracking Error", PCT),
             ("Information Ratio", NUM), ("VaR 95% (daily)", PCT2),
             ("CVaR 95% (daily)", PCT2), ("% Positive Months", PCT),
             ("Annual Turnover", NUM)]

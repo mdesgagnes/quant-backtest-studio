@@ -1370,15 +1370,22 @@ Conventions worth knowing:
   before the first return, so the first return counts in total return,
   CAGR, drawdown and "since inception". CAGR spans N - 1 periods for N
   values.
-- Sharpe, Sortino and alpha are measured in excess of a risk-free rate.
+- Sharpe, Sortino and risk-adjusted alpha are measured in excess of a
+  risk-free rate.
   In a backtest it is what the portfolio's own cash earned (the cash
   proxy, or the cash rate); for a return stream it is chosen in the
   sidebar -- the historical US 3-month T-bill (default; each period earns
   the yield known at its start), a fixed rate, a column of the file, or
   none. The robustness tests, Monte Carlo and regime tables use the same
   rate, so their Sharpe ratios are comparable with the headline one.
-- Alpha is Jensen's alpha: the intercept of the strategy's excess returns
-  regressed on the benchmark's excess returns, times the periods in a year.
+- Alpha is the outperformance: the strategy's CAGR minus the benchmark's,
+  over the dates both cover. A strategy that trails its benchmark has a
+  negative alpha, whatever the risk-free rate.
+- Risk-adjusted alpha is Jensen's alpha: the intercept of the strategy's
+  excess returns regressed on the benchmark's excess returns, times the
+  periods in a year. It compares the strategy with the benchmark scaled to
+  the same beta, so a less risky strategy can trail the benchmark and
+  still show a positive risk-adjusted alpha.
 - Sortino uses the downside deviation: the root mean square of shortfalls
   below the risk-free rate over all periods.
 - Trailing windows on month-end data run month-end to month-end (1M on a

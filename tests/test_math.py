@@ -74,7 +74,8 @@ def test_metrics_match_reference_formulas():
         "VaR 95% (daily)": q,
         "CVaR 95% (daily)": x[x <= q].mean(),
         "Beta": beta,
-        "Alpha (ann.)": a0 * 252,
+        "Alpha (ann.)": E[-1] ** (252 / n) - np.prod(1 + b.to_numpy()) ** (252 / n),
+        "Risk-adjusted alpha (ann.)": a0 * 252,
         "Tracking Error": te,
         "Information Ratio": act.mean() * 252 / te,
     }
@@ -446,13 +447,20 @@ def test_risk_free_rate_in_sharpe_sortino_alpha():
     s = M.summary(r, None, b, None, None, rf, 12)
     ex, bx = (r - rf).to_numpy(), (b - rf).to_numpy()
     beta, a0 = np.polyfit(bx, ex, 1)
-    assert np.isclose(s["Beta"], beta) and np.isclose(s["Alpha (ann.)"], a0 * 12)
+    assert np.isclose(s["Beta"], beta) and np.isclose(s["Risk-adjusted alpha (ann.)"], a0 * 12)
+    # Alpha is the outperformance: CAGR minus the benchmark's CAGR, whatever
+    # the risk-free rate.
+    sb = M.summary(b, None, None, None, None, rf, 12)
+    assert np.isclose(s["Alpha (ann.)"], s["CAGR"] - sb["CAGR"])
+    assert np.isclose(M.summary(r, None, b, None, None, 0.0, 12)["Alpha (ann.)"],
+                      s["Alpha (ann.)"])
     assert np.isclose(s["Sharpe"], ex.mean() / ex.std(ddof=1) * np.sqrt(12))
     assert np.isclose(s["Sortino"], ex.mean() / np.sqrt(np.mean(np.minimum(ex, 0) ** 2)) * np.sqrt(12))
     # A fixed rate compounds to itself, like the engine's cash.
     assert np.isclose((1 + M.rf_per_period(idx, 0.03, 12).iloc[0]) ** 12, 1.03)
     # Zero risk-free credits a low-beta portfolio with the cash yield.
-    assert M.summary(r, None, b, None, None, 0.0, 12)["Alpha (ann.)"] > s["Alpha (ann.)"]
+    assert (M.summary(r, None, b, None, None, 0.0, 12)["Risk-adjusted alpha (ann.)"]
+            > s["Risk-adjusted alpha (ann.)"])
 
 
 if __name__ == "__main__":
