@@ -40,7 +40,7 @@ Simulation model, explicit and verifiable:
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 import numpy as np
 import pandas as pd
@@ -740,8 +740,16 @@ def trim_warmup(res: BacktestResult, start: Optional[pd.Timestamp] = None,
     risk. Only the leading run is removed: a strategy that deliberately
     moves to cash mid-period keeps that stretch, because there the cash
     position is a decision rather than an artefact.
+
+    When the record starts on the day the strategy first buys, that buy is
+    part of the record: the commission and slippage it paid come out of the
+    first day's return and the starting value, so the strategy starts with
+    capital less its entry cost, as a real account would. Cutting the
+    record at any other session (a report window, a later common start)
+    treats that session as a plain origin and charges nothing.
     """
-    start = start or first_active_date(res)
+    first_buy = first_active_date(res)
+    start = start or first_buy
     if start is None or start <= res.equity.index[0]:
         return res
 
@@ -750,12 +758,17 @@ def trim_warmup(res: BacktestResult, start: Optional[pd.Timestamp] = None,
     if len(keep) < 2:
         return res
 
+    # Fraction of the prior value spent on that first buy; zero when the
+    # record is not starting on it.
+    entry = (-float(res.costs.loc[start])
+             if first_buy is not None and start == first_buy else 0.0)
+
     base = float(res.equity.loc[start])
     cap = float(initial_capital) if initial_capital else base
-    equity = res.equity.loc[keep] / base * cap
+    equity = res.equity.loc[keep] / base * cap * (1.0 + entry)
 
     returns = res.returns.loc[keep].copy()
-    returns.iloc[0] = 0.0          # the first retained day is the new origin
+    returns.iloc[0] = entry        # the new origin: nothing earned, entry paid
     gross = res.gross_returns.loc[keep].copy()
     gross.iloc[0] = 0.0
 
@@ -781,7 +794,7 @@ def trim_warmup(res: BacktestResult, start: Optional[pd.Timestamp] = None,
         # above; both are carried through exactly like every other field.
         shares=(res.shares.loc[keep] if res.shares is not None else None),
         fees=(res.fees.loc[keep] if res.fees is not None else None),
-        contributions=_trim_contrib(res.contributions, keep),
+        contributions=_trim_contrib(res.contributions, keep, entry),
         cash_flows=_cut_flows(res.cash_flows, start, None),
     )
 
@@ -839,14 +852,18 @@ def _cut_flows(f: Optional[pd.DataFrame], start, end) -> Optional[pd.DataFrame]:
     return f[keep].reset_index(drop=True)
 
 
-def _trim_contrib(c: Optional[pd.DataFrame],
-                  keep: pd.DatetimeIndex) -> Optional[pd.DataFrame]:
+def _trim_contrib(c: Optional[pd.DataFrame], keep: pd.DatetimeIndex,
+                  entry: float = 0.0) -> Optional[pd.DataFrame]:
     """Contributions from the new origin on. Its first row is zeroed, as
-    the first retained return is: that day is the base, not a result."""
+    the first retained return is: that day is the base, not a result. The
+    one exception is an entry cost (`entry`, a negative fraction), which is
+    that return and sits on the trading-cost line."""
     if c is None:
         return None
     out = c.loc[keep].copy()
     out.iloc[0] = 0.0
+    if entry:
+        out.iloc[0, out.columns.get_loc(COST_LINE)] = entry
     return out
 
 
@@ -868,26 +885,83 @@ def align_start(*results: Optional[BacktestResult],
     in. Passing the date the model first takes a position starts the record
     where the strategy actually begins.
     """
-    live = [r for r in results if r is not None]
-    if not live:
+    common = common_start(*results, signal_start=signal_start)
+    if common is None:
         return list(results)
-    starts = [first_active_date(r) for r in live]
-    starts = [s for s in starts if s is not None]
-    if signal_start is not None:
-        starts.append(pd.Timestamp(signal_start))
-    if not starts:
-        return list(results)
-    common = max(starts)
     return [None if r is None else trim_warmup(r, common, initial_capital)
             for r in results]
 
 
+def common_start(*results: Optional[BacktestResult],
+                 signal_start: Optional[pd.Timestamp] = None
+                 ) -> Optional[pd.Timestamp]:
+    """The first day every result (and `signal_start`) is active, which is
+    where `align_start` cuts. None when nothing is active yet."""
+    starts = [first_active_date(r) for r in results if r is not None]
+    starts = [s for s in starts if s is not None]
+    if signal_start is not None:
+        starts.append(pd.Timestamp(signal_start))
+    return max(starts) if starts else None
+
+
 # ----------------------------------------------------------------------
+BENCHMARK_FRICTIONS = ("commission", "slippage", "fee")
+
+
+def benchmark_costs(costs: CostConfig,
+                    apply: Iterable[str]) -> Optional[CostConfig]:
+    """The strategy's own frictions, cut down to the ones a benchmark is
+    meant to bear. None when nothing is selected, which keeps the benchmark
+    a frictionless index.
+
+    `apply` takes any of: "commission", "slippage" (the half-spread, the
+    per-instrument multipliers and the market-impact model, which are one
+    liquidity cost), and "fee" (the management fee, with its liquidation
+    trades paying whichever of the other two are on). Cash and borrow rates
+    are left at zero: a fully invested benchmark holds no idle cash and
+    uses no leverage, so they would only touch dividends waiting to be
+    reinvested.
+    """
+    on = set(apply)
+    if not on & set(BENCHMARK_FRICTIONS):
+        return None
+    slip = "slippage" in on
+    return CostConfig(
+        commission_bps=costs.commission_bps if "commission" in on else 0.0,
+        slippage_bps=costs.slippage_bps if slip else 0.0,
+        impact_model=costs.impact_model if slip else "flat",
+        impact_bps_at_10pct_adv=costs.impact_bps_at_10pct_adv,
+        impact_coef=costs.impact_coef,
+        slippage_overrides=dict(costs.slippage_overrides) if slip else {},
+        apply_frictions_to_fee_liquidation=costs.apply_frictions_to_fee_liquidation,
+        cash_rate_pa=0.0, borrow_rate_pa=0.0,
+        management_fee_pa=costs.management_fee_pa if "fee" in on else 0.0,
+    )
+
+
+def _carry_entry_cost(res: BacktestResult, capital: float) -> BacktestResult:
+    """Puts a benchmark's entry cost into its return series.
+
+    The engine treats the first session as the base and records no return
+    for it, so a purchase made that day lowers the value (capital less its
+    cost) while the returns, which the statistics are computed from, stay
+    blind to it. Setting that session's return to what the value did
+    relative to the capital makes the two reconcile.
+    """
+    first = float(res.equity.iloc[0]) / float(capital) - 1.0
+    returns = res.returns.copy()
+    returns.iloc[0] = first
+    return replace(res, returns=returns)
+
+
 def benchmark_result(bench_prices: pd.Series, engine: EngineConfig,
                      label: str = "Benchmark",
                      dividends: Optional[pd.Series] = None,
-                     reinvest_rule: Optional[str] = None) -> BacktestResult:
-    """Buy-and-hold on the index, no frictions, for comparison.
+                     reinvest_rule: Optional[str] = None,
+                     costs: Optional[CostConfig] = None,
+                     volume: "Optional[pd.Series | pd.DataFrame]" = None,
+                     start: Optional[pd.Timestamp] = None) -> BacktestResult:
+    """Buy-and-hold on the index, for comparison.
 
     The purchase happens on the first available session. Leaving it to a
     periodic calendar would park the benchmark in cash until the first
@@ -895,13 +969,28 @@ def benchmark_result(bench_prices: pd.Series, engine: EngineConfig,
     quietly understate the bar the strategy is measured against. After that
     single purchase the weight simply drifts, which is what buy-and-hold
     means.
+
+    `costs` are the frictions the benchmark pays (see `benchmark_costs`);
+    left None it is frictionless, as an index is. `volume` feeds the
+    market-impact model, as in `run_backtest`.
+
+    `start` moves the purchase to that session instead of the first one.
+    A benchmark that bought long before the strategy's warm-up ended would
+    have its entry cost cut away with the warm-up when the two are aligned;
+    buying on the shared start date keeps it in the record.
     """
     px = bench_prices.dropna().to_frame()
+    if start is not None:
+        px = px.loc[px.index >= pd.Timestamp(start)]
     if px.empty:
         raise ValueError("Benchmark series is empty.")
     w = pd.DataFrame(1.0, index=px.index, columns=px.columns)
-    zero_costs = CostConfig(commission_bps=0, slippage_bps=0,
-                            cash_rate_pa=0, borrow_rate_pa=0)
+    zero_costs = costs if costs is not None else CostConfig(
+        commission_bps=0, slippage_bps=0, cash_rate_pa=0, borrow_rate_pa=0)
+    vol = None
+    if volume is not None:
+        vol = volume.to_frame(px.columns[0]) if isinstance(volume, pd.Series) else volume
+        vol = vol.reindex(index=px.index, columns=px.columns)
     eng = EngineConfig(initial_capital=engine.initial_capital, rebalance="D",
                        execution_lag=0, max_leverage=1.0,
                        min_trade_weight=0.0,
@@ -923,8 +1012,10 @@ def benchmark_result(bench_prices: pd.Series, engine: EngineConfig,
     else:
         dates = pd.DatetimeIndex([px.index[0]])
 
-    return run_backtest(px, w, eng, zero_costs, label=label,
-                        rebalance_dates=dates, dividends=div)
+    res = run_backtest(px, w, eng, zero_costs, label=label,
+                       rebalance_dates=dates, dividends=div, volume=vol)
+    return (_carry_entry_cost(res, engine.initial_capital)
+            if costs is not None else res)
 
 
 def blended_benchmark(prices: pd.DataFrame,
@@ -932,14 +1023,20 @@ def blended_benchmark(prices: pd.DataFrame,
                       engine: EngineConfig,
                       label: str = "Benchmark",
                       dividends: Optional[pd.DataFrame] = None,
-                      rebalance: str = "A") -> BacktestResult:
+                      rebalance: str = "A",
+                      costs: Optional[CostConfig] = None,
+                      volume: Optional[pd.DataFrame] = None,
+                      start: Optional[pd.Timestamp] = None) -> BacktestResult:
     """A fixed-weight benchmark across several instruments.
 
     The blend is run through the same engine as everything else rather than
     being averaged: a 60/40 that is rebalanced is not the same thing as the
     weighted average of its two return series, because the drift between
-    rebalances is real. Frictions are zero, since a policy benchmark is a
-    measuring stick and nobody pays commissions on it.
+    rebalances is real. Frictions are zero by default, since a policy
+    benchmark is a measuring stick; `costs` (see `benchmark_costs`) charges
+    it the strategy's commission, slippage and fee on its entry and on every
+    rebalance back to target. `volume` feeds the market-impact model, and
+    `start` moves the purchase to that session, as in `benchmark_result`.
 
     `rebalance` sets how often the blend is restored to its target weights.
     This matters more than it looks: an unrebalanced 60/40 drifts toward
@@ -958,14 +1055,19 @@ def blended_benchmark(prices: pd.DataFrame,
     first = px.dropna().index
     if len(first):
         px = px.loc[first[0]:]
+    if start is not None:
+        px = px.loc[px.index >= pd.Timestamp(start)]
+        if px.empty:
+            raise ValueError("The benchmark's instruments have no history "
+                             "from the requested start.")
 
     total = sum(abs(float(weights[c])) for c in cols) or 1.0
     w = pd.DataFrame(
         {c: float(weights[c]) / total for c in cols},
         index=px.index)
 
-    zero = CostConfig(commission_bps=0, slippage_bps=0,
-                      cash_rate_pa=0, borrow_rate_pa=0)
+    zero = costs if costs is not None else CostConfig(
+        commission_bps=0, slippage_bps=0, cash_rate_pa=0, borrow_rate_pa=0)
     eng = EngineConfig(initial_capital=engine.initial_capital,
                        rebalance=rebalance, execution_lag=0,
                        max_leverage=1.0, min_trade_weight=0.0,
@@ -979,8 +1081,12 @@ def blended_benchmark(prices: pd.DataFrame,
 
     dates = rebalance_calendar(px.index, rebalance)
     dates = pd.DatetimeIndex(sorted(set([px.index[0]]) | set(dates)))
-    return run_backtest(px, w, eng, zero, label=label,
-                        rebalance_dates=dates, dividends=div)
+    vol = (volume.reindex(index=px.index, columns=cols)
+           if volume is not None else None)
+    res = run_backtest(px, w, eng, zero, label=label,
+                       rebalance_dates=dates, dividends=div, volume=vol)
+    return (_carry_entry_cost(res, engine.initial_capital)
+            if costs is not None else res)
 
 
 def align_results(results: Dict[str, "BacktestResult | pd.Series"]) -> pd.DataFrame:

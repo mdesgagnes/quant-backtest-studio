@@ -463,6 +463,126 @@ def test_risk_free_rate_in_sharpe_sortino_alpha():
             > s["Risk-adjusted alpha (ann.)"])
 
 
+def test_benchmark_frictions_are_opt_in():
+    from qbt.engine import (align_start, benchmark_costs, benchmark_result,
+                            blended_benchmark, common_start)
+    px, _, _ = _market(n=700, m=2, seed=5)
+    eng = EngineConfig(initial_capital=100_000.0)
+    cost = CostConfig(commission_bps=5, slippage_bps=25, management_fee_pa=0.01)
+    s = px["A0"]
+
+    # Nothing selected: no costs object, and the benchmark is the bare index.
+    assert benchmark_costs(cost, []) is None
+    bare = benchmark_result(s, eng)
+    assert np.isclose(bare.equity.iloc[-1] / bare.equity.iloc[0], s.iloc[-1] / s.iloc[0])
+    assert float(bare.costs.sum()) == 0.0
+
+    # Each choice carries only its own friction.
+    only = benchmark_costs(cost, ["commission"])
+    assert (only.commission_bps, only.slippage_bps, only.management_fee_pa) == (5, 0, 0)
+    only = benchmark_costs(cost, ["slippage"])
+    assert (only.commission_bps, only.slippage_bps, only.management_fee_pa) == (0, 25, 0)
+    only = benchmark_costs(cost, ["fee"])
+    assert (only.commission_bps, only.slippage_bps, only.management_fee_pa) == (0, 0, 0.01)
+
+    # One purchase, then drift: the entry costs commission + slippage once,
+    # and the rest of the path is the price path.
+    paid = benchmark_result(s, eng, costs=benchmark_costs(cost, ["commission", "slippage"]))
+    rate = (5 + 25) / 10_000.0
+    assert np.isclose(paid.equity.iloc[0], 100_000.0 / (1 + rate), rtol=1e-6)
+    assert np.isclose(paid.equity.iloc[-1] / paid.equity.iloc[0], s.iloc[-1] / s.iloc[0])
+    # The statistics read the returns, so they must reconcile to the value
+    # curve: the entry cost is in both.
+    assert np.isclose((1 + paid.returns).prod(), paid.equity.iloc[-1] / 100_000.0)
+    assert np.isclose(paid.returns.iloc[0], -rate / (1 + rate))
+    fee_only = benchmark_result(s, eng, costs=benchmark_costs(cost, ["fee"]))
+    assert np.isclose((1 + fee_only.returns).prod(), fee_only.equity.iloc[-1] / 100_000.0)
+    assert fee_only.returns.iloc[0] == 0.0
+    assert np.isclose(float(paid.costs.sum()), rate / (1 + rate), rtol=1e-6)   # fraction of NAV
+
+    # The fee is a drag of about its rate per year, on top of the index.
+    fee = benchmark_result(s, eng, costs=benchmark_costs(cost, ["fee"]))
+    years = (s.index[-1] - s.index[0]).days / 365.25
+    ratio = fee.equity.iloc[-1] / bare.equity.iloc[-1]
+    assert 0.98 ** years < ratio < 1.0
+    assert abs(np.log(ratio) / years + 0.01) < 0.0015
+
+    # A blend pays on its entry and on every rebalance back to target.
+    w = {"A0": 0.6, "A1": 0.4}
+    free = blended_benchmark(px, w, eng, rebalance="Q")
+    dear = blended_benchmark(px, w, eng, rebalance="Q",
+                             costs=benchmark_costs(cost, ["commission", "slippage"]))
+    assert float(free.costs.sum()) == 0.0
+    assert float(dear.costs.sum()) > rate / (1 + rate)
+    assert dear.equity.iloc[-1] < free.equity.iloc[-1]
+
+
+def test_benchmark_entry_cost_survives_the_warmup_trim():
+    from qbt.engine import (align_start, benchmark_costs, benchmark_result,
+                            common_start)
+    px, _, _ = _market(n=700, m=3, seed=6)
+    eng = EngineConfig(initial_capital=100_000.0)
+    cost = CostConfig(commission_bps=5, slippage_bps=25)
+    strat = run_backtest(px, _weights(px), eng, ZERO)     # flat for 40 sessions
+    start = common_start(strat)
+    assert start > px.index[0]
+    bc = benchmark_costs(cost, ["commission", "slippage"])
+    rate = (5 + 25) / 10_000.0
+
+    # Bought on its own first session, the entry falls in the warm-up and
+    # is trimmed away with it: nothing is charged.
+    early = benchmark_result(px["A0"], eng, costs=bc)
+    _, early = align_start(strat, early, initial_capital=100_000.0)
+    assert float(early.costs.sum()) == 0.0
+
+    # Bought on the shared start date, the entry is part of the record.
+    late = benchmark_result(px["A0"], eng, costs=bc, start=start)
+    assert late.equity.index[0] == start
+    _, late = align_start(strat, late, initial_capital=100_000.0)
+    assert np.isclose(float(late.costs.sum()), rate / (1 + rate), rtol=1e-6)
+    assert late.equity.index[0] == start
+
+
+def test_strategy_and_benchmark_both_pay_their_entry():
+    from qbt.engine import (align_start, benchmark_costs, benchmark_result,
+                            common_start, window)
+    px, _, _ = _market(n=700, m=3, seed=6)
+    eng = EngineConfig(initial_capital=100_000.0)
+    cost = CostConfig(commission_bps=5, slippage_bps=25)
+    rate = 30 / 10_000.0
+    entry = rate / (1 + rate)
+
+    # A strategy that is flat for a warm-up, then holds the one asset.
+    w = pd.DataFrame(0.0, px.index, px.columns)
+    w.iloc[40:, 0] = 1.0
+    raw = run_backtest(px, w, eng, cost)
+    strat = trim_warmup(raw, None, 100_000.0)
+
+    # Its first buy is in the record: the first return is the entry cost,
+    # the starting value is capital less it, and the two reconcile.
+    assert np.isclose(strat.returns.iloc[0], -entry)
+    assert np.isclose(strat.equity.iloc[0], 100_000.0 * (1 - entry))
+    assert np.isclose((1 + strat.returns).prod(), strat.equity.iloc[-1] / 100_000.0)
+    assert (strat.contributions.sum(axis=1) - strat.returns).abs().max() < 1e-12
+
+    # The benchmark, bought the same day with the same costs, starts level.
+    start = common_start(raw)
+    bench = benchmark_result(px["A0"], eng, costs=benchmark_costs(
+        cost, ["commission", "slippage"]), start=start)
+    s2, b2 = align_start(raw, bench, initial_capital=100_000.0)
+    assert np.isclose(s2.equity.iloc[0], b2.equity.iloc[0])
+    assert np.isclose(s2.returns.iloc[0], b2.returns.iloc[0])
+    # Frictionless, the strategy and the benchmark are the same series.
+    free = run_backtest(px, w, eng, ZERO)
+    s3, b3 = align_start(free, benchmark_result(px["A0"], eng, start=start),
+                         initial_capital=100_000.0)
+    assert np.allclose(s3.equity.values, b3.equity.values)
+
+    # A report window opening later is a plain origin: no entry is charged.
+    win = window(raw, px.index[300])
+    assert win.returns.iloc[0] == 0.0
+
+
 if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore")

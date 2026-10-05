@@ -27,6 +27,7 @@ from qbt.external import (load_target_weights, prepare_target_weights,
 from qbt.engine import _cash_returns
 from qbt.engine import (run_backtest, benchmark_result, blended_benchmark,
                         align_results, align_start, first_active_date,
+                        benchmark_costs, common_start,
                         window as result_window)
 from qbt.strategies import REGISTRY, get as get_strategy
 from qbt import metrics as M
@@ -2158,6 +2159,25 @@ if benchmark:
              "dividends sit in cash until the rebalance, which is closer to "
              "how a real account behaves.")
 
+_BENCH_FRIC = {"Commission": "commission",
+               "Slippage and market impact": "slippage",
+               "Management fee": "fee"}
+bench_fric: List[str] = []
+if benchmark:
+    bench_fric = [_BENCH_FRIC[k] for k in st.sidebar.multiselect(
+        "Charge the benchmark these frictions", list(_BENCH_FRIC),
+        help="Off by default: an index is a measuring stick that pays "
+             "nothing. Pick any to charge the benchmark the same rates as "
+             "the strategy (set under Frictions), for a like-for-like "
+             "comparison against something you could actually buy and "
+             "hold. They apply to its purchase on the shared start date, "
+             "and to every later trade: reinvesting dividends, rebalancing "
+             "a blend back to target, or selling units to pay the fee. "
+             "Slippage includes the per-instrument multipliers and the "
+             "market-impact model. A benchmark that is itself a fund "
+             "already carries its own expense ratio in its price, so adding "
+             "the fee on top counts it twice.")]
+
 if source == "Yahoo Finance":
     price_mode = st.sidebar.selectbox(
         "Price convention",
@@ -3006,6 +3026,21 @@ if run_clicked and not blocking:
                                   cash_px, run_label, rebal_dates,
                                   open_prices=open_px, dividends=div_px,
                                   volume=vol_px)
+            # Where the model itself first takes a position. A permanently
+            # held core keeps total exposure above zero from session one,
+            # hiding the model's warm-up; the record starts here instead.
+            sig_start = (sleeve_report.signal_start
+                         if sleeve_report is not None else None)
+            # A benchmark that pays frictions buys on the shared start date,
+            # not on its own first session: its entry cost would otherwise
+            # fall inside the warm-up and be trimmed away with it.
+            bench_costs = benchmark_costs(cfg.costs, bench_fric)
+            bench_vol, bench_start = None, None
+            if bench_costs is not None:
+                if market.volume is not None and cfg.costs.impact_model != "flat":
+                    bench_vol = market.volume.reindex(index=prices.index)
+                if cfg.engine.trim_warmup:
+                    bench_start = common_start(result, signal_start=sig_start)
             bench = None
             bdiv = None
             if benchmark == BLEND and bench_blend:
@@ -3034,7 +3069,9 @@ if run_clicked and not blocking:
                     try:
                         bench = blended_benchmark(
                             bsrc, have, cfg.engine, blabel,
-                            dividends=bdiv, rebalance=bench_blend_rule)
+                            dividends=bdiv, rebalance=bench_blend_rule,
+                            costs=bench_costs, volume=bench_vol,
+                            start=bench_start)
                     except Exception as exc:
                         quality.warnings.append(f"Benchmark blend failed: {exc}")
             elif benchmark and benchmark in prices.columns:
@@ -3062,17 +3099,14 @@ if run_clicked and not blocking:
                             f"understates it.")
                 bench = benchmark_result(bseries.dropna(), cfg.engine, benchmark,
                                          dividends=bdiv,
-                                         reinvest_rule=cfg.engine.rebalance)
+                                         reinvest_rule=cfg.engine.rebalance,
+                                         costs=bench_costs, volume=bench_vol,
+                                         start=bench_start)
 
             # Warm-up: both series must start on the same day or the
             # benchmark is credited with a stretch the strategy sat out.
             raw_start = result.equity.index[0]
             if cfg.engine.trim_warmup:
-                # A permanently held core keeps total exposure above zero from
-                # session one, hiding the model's warm-up. Start the record
-                # where the model itself first takes a position.
-                sig_start = (sleeve_report.signal_start
-                             if sleeve_report is not None else None)
                 result, bench = align_start(
                     result, bench, initial_capital=cfg.engine.initial_capital,
                     signal_start=sig_start)
@@ -3098,6 +3132,7 @@ if run_clicked and not blocking:
                 st.session_state.get("_preset_applied", ""), list(universe.columns))),
             "market": market,
             "bench_mode": bench_mode,
+            "bench_frictions": list(bench_fric) if bench is not None else [],
             "raw_start": raw_start,
             "trimmed": bool(cfg.engine.trim_warmup
                             and result.equity.index[0] > raw_start),
@@ -5052,6 +5087,11 @@ with tabs[8]:
             "Units": "whole units only" if e.whole_shares else "fractional",
             "Minimum trade": f"{e.min_trade_weight * 100:.2f}% of value",
             "Benchmark": (f"{bl}, {run.get('bench_mode', '').lower()}" if bl else "none"),
+            "Benchmark frictions": (
+                ", ".join({"commission": "commission", "slippage": "slippage and impact",
+                           "fee": "management fee"}[k]
+                          for k in run.get("bench_frictions", []))
+                if bl and run.get("bench_frictions") else "none (frictionless index)"),
             "Warm-up": "trimmed to first investment" if e.trim_warmup else "included",
         }
         return {

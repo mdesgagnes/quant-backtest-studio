@@ -501,8 +501,9 @@ return series -- the drift between rebalances is real. Its rebalance
 frequency is set separately and is worth thinking about: an unrebalanced
 60/40 drifts toward equities over a long window, which quietly makes it a
 harder bar in a bull market and an easier one in a drawdown. Annual is the
-default, matching most policy benchmarks. Frictions are zero, since nobody
-pays commission on a measuring stick.
+default, matching most policy benchmarks. Frictions are zero by default,
+since nobody pays commission on a measuring stick. See **Benchmark
+frictions** below to charge it the strategy's costs.
 
 **Benchmark convention.** Set independently of the strategy, because the
 two questions are unrelated: how you model your own portfolio's dividends
@@ -520,6 +521,19 @@ understates the bar by roughly its dividend yield every year. On a Canadian
 equity ETF that is around two to three points annually - more than enough
 to turn a losing strategy into an apparent winner. The third option exists
 so the gap can be measured, not because it makes a fair comparison.
+
+**Benchmark frictions.** Off by default: the benchmark is a frictionless
+index. "Charge the benchmark these frictions" lets you pick any of
+commission, slippage (the half-spread, per-instrument multipliers and the
+market-impact model) and the management fee. The benchmark then pays the
+rates set under Frictions, on its purchase and on every later trade:
+reinvesting dividends, rebalancing a blend back to target, and selling units
+to pay the fee. The purchase is made on the shared start date, and so is the
+strategy's first buy: both pay their entry cost, so each record starts at
+capital less that cost rather than at capital. A benchmark that is
+itself a fund already carries its expense ratio in its price, so adding the
+management fee on top counts it twice. The choice is listed in the report's
+settings.
 
 ---
 
