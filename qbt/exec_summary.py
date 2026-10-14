@@ -129,6 +129,32 @@ class _Page:
             self.ws.row_dimensions[r].height = height
 
 
+def current_weights_table(res) -> pd.DataFrame:
+    """The "Current weights" table: every position held or targeted on the
+    last date, largest first, then cash.
+
+    Instrument, Weight, Target, Value. The Cash row is appended with a
+    concat on a clean index. Appending it with `.loc[len(table) + 1]` is
+    wrong: after the filter and the sort the index labels are the original,
+    gapped ones, so that label can already belong to a real position, and
+    assigning to it silently overwrites that position with Cash. Which one
+    goes missing depends on the strategy, which is how it went unnoticed.
+    """
+    last = res.weights.index[-1]
+    w = res.weights.iloc[-1]
+    t = res.target_weights.reindex(columns=w.index).iloc[-1]
+    v = float(res.equity.iloc[-1])
+    table = pd.DataFrame({"Instrument": list(w.index), "Weight": w.values,
+                          "Target": t.values, "Value": w.values * v})
+    table = table[(table["Weight"].abs() > 1e-9) | (table["Target"].abs() > 1e-9)]
+    table = table.sort_values("Weight", ascending=False).reset_index(drop=True)
+    cw = float(res.cash_weight.iloc[-1])
+    cash = pd.DataFrame([{"Instrument": "Cash", "Weight": cw,
+                          "Target": max(0.0, 1.0 - float(t.sum())),
+                          "Value": cw * v}])
+    return pd.concat([table, cash], ignore_index=True)
+
+
 def _lines_needed(text: str, chars_per_line: int = 125) -> int:
     return max(1, int(np.ceil(len(text) / chars_per_line)))
 

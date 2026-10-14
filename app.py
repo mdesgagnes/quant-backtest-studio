@@ -44,6 +44,7 @@ from qbt import returns_input as RS
 from qbt import presets as PRESETS
 from qbt import formula as FORMULA
 from qbt import excel_export as XL
+from qbt import exec_summary as ES
 from qbt import allocation as ALLOC
 from qbt import schedule as SCHED
 from qbt.brand import BRAND, css_variables
@@ -5459,15 +5460,7 @@ with tabs[9]:
         mc = mc if isinstance(mc, dict) else None
         # Current weights against the last rebalance's targets, with cash.
         _last = res.weights.index[-1]
-        _w = res.weights.iloc[-1]
-        _t = res.target_weights.reindex(columns=_w.index).iloc[-1]
-        _v = float(res.equity.iloc[-1])
-        weights = pd.DataFrame({"Instrument": list(_w.index), "Weight": _w.values,
-                                "Target": _t.values, "Value": _w.values * _v})
-        weights = weights[(weights["Weight"].abs() > 1e-9) | (weights["Target"].abs() > 1e-9)]
-        weights = weights.sort_values("Weight", ascending=False)
-        _cw = float(res.cash_weight.iloc[-1])
-        weights.loc[len(weights) + 1] = ["Cash", _cw, max(0.0, 1.0 - float(_t.sum())), _cw * _v]
+        weights = ES.current_weights_table(res)
         contributions = (ATTR.summary(res, None, ppy_)
                          if res.contributions is not None else None)
         e, c = rcfg.engine, rcfg.costs

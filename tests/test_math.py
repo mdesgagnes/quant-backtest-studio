@@ -639,3 +639,39 @@ if __name__ == "__main__":
     for t in tests:
         t()
         print("PASS", t.__name__)
+
+
+def test_executive_summary_lists_every_position_and_cash():
+    """The current-weights table must show every held or targeted position
+    plus cash. It once appended Cash with `.loc[len(table) + 1]`, which
+    overwrote a real position whenever that label already existed in the
+    filtered table: a book of five positions drawn from eight names, with
+    the sixth name held, lost it."""
+    from qbt.exec_summary import current_weights_table
+    px, _, _ = _market(m=8)
+    w = pd.DataFrame(0.0, px.index, px.columns)
+    held = ["A0", "A1", "A3", "A4", "A6"]               # labels 0,1,3,4,6: len + 1 == 6
+    for c in held:
+        w[c] = 0.2
+    w.iloc[:40] = 0.0
+    res = run_backtest(px, w, EngineConfig(min_trade_weight=0.0, rebalance="M"), ZERO)
+    table = current_weights_table(res)
+    assert set(table["Instrument"]) == set(held) | {"Cash"}, list(table["Instrument"])
+    assert table["Instrument"].is_unique and table["Instrument"].iloc[-1] == "Cash"
+    # nothing is lost: the weights shown add up to the whole portfolio
+    assert abs(table["Weight"].sum() - 1.0) < 1e-9
+    assert abs(table["Value"].sum() - float(res.equity.iloc[-1])) < 1e-6
+    # every sizing of book, from one name to all of them
+    for k in range(1, 9):
+        w2 = pd.DataFrame(0.0, px.index, px.columns)
+        for c in px.columns[:k]:
+            w2[c] = 1.0 / k
+        w2.iloc[:40] = 0.0
+        r2 = run_backtest(px, w2, EngineConfig(min_trade_weight=0.0, rebalance="M"), ZERO)
+        got = current_weights_table(r2)
+        assert set(got["Instrument"]) == set(px.columns[:k]) | {"Cash"}, k
+        # and in any order: the original labels are what used to collide
+        px3 = px[list(px.columns[::-1])]
+        w3 = w2[px3.columns]
+        r3 = run_backtest(px3, w3, EngineConfig(min_trade_weight=0.0, rebalance="M"), ZERO)
+        assert set(current_weights_table(r3)["Instrument"]) == set(px.columns[:k]) | {"Cash"}, k
