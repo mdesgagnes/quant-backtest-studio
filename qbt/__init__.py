@@ -15,6 +15,7 @@ import pandas as pd
 from .config import RunConfig, DataConfig, EngineConfig, CostConfig, StrategyConfig
 from .data import load_yfinance, load_file, clean_prices
 from .engine import run_backtest, benchmark_result, BacktestResult, align_results
+from .fx import FxBook
 from .strategies import REGISTRY, get as get_strategy, list_strategies
 from . import metrics, charts, robustness, report
 
@@ -25,7 +26,7 @@ __all__ = [
     "load_yfinance", "load_file", "clean_prices", "run_backtest",
     "benchmark_result", "BacktestResult", "align_results", "REGISTRY",
     "get_strategy", "list_strategies", "metrics", "charts", "robustness",
-    "report", "run_from_config",
+    "report", "run_from_config", "FxBook",
 ]
 
 
@@ -37,6 +38,15 @@ def run_from_config(cfg: RunConfig) -> Tuple[BacktestResult, Optional[BacktestRe
             tickers.append(extra)
 
     raw = load_yfinance(tickers, cfg.data.start, cfg.data.end, cfg.data.price_field)
+    # With a base currency set, every price is converted into it before
+    # anything else reads one; the cash proxy stays in its own currency
+    # because its return is a rate, not a holding.
+    fx_book = None
+    if cfg.data.base_currency:
+        fx_book = FxBook.build(tickers, cfg.data.base_currency, cfg.data.currencies,
+                               cfg.data.start, cfg.data.end)
+        raw = fx_book.convert_frame(
+            raw, skip=[cfg.data.cash_proxy] if cfg.data.cash_proxy else [])
     prices, _ = clean_prices(raw, cfg.data)
 
     cash_px = prices[cfg.data.cash_proxy] if (
@@ -47,7 +57,8 @@ def run_from_config(cfg: RunConfig) -> Tuple[BacktestResult, Optional[BacktestRe
 
     strat = get_strategy(cfg.strategy.name)
     weights = strat.generate(universe, cfg.strategy.params)
-    res = run_backtest(universe, weights, cfg.engine, cfg.costs, cash_px, cfg.label)
+    res = run_backtest(universe, weights, cfg.engine, cfg.costs, cash_px, cfg.label,
+                       fx=fx_book)
 
     bench = None
     if cfg.data.benchmark and cfg.data.benchmark in prices.columns:

@@ -31,6 +31,7 @@ from qbt.engine import (run_backtest, benchmark_result, blended_benchmark,
                         window as result_window)
 from qbt.strategies import REGISTRY, get as get_strategy
 from qbt import metrics as M
+from qbt import compare as CMP
 from qbt import charts as C
 from qbt import robustness as R
 from qbt import stress as STRESS
@@ -52,6 +53,7 @@ from qbt import monitor as MON
 from qbt import tvchart as TV
 from qbt import names as N
 from qbt import price_import as PI
+from qbt import fx as FX
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -562,6 +564,21 @@ def fetch_market(tickers: tuple, start: str, end: Optional[str],
     return load_market_data(list(tickers), start, end, adjusted=adjusted,
                             want_open=want_open, want_dividends=want_div,
                             want_ohlc=want_ohlc)
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_currency_guess(tickers: tuple, ask_yahoo: bool) -> dict:
+    """What each instrument is quoted in: Yahoo's answer where it can be
+    asked, the ticker's shape where it cannot."""
+    return FX.detect_currencies(tickers, None if ask_yahoo else (lambda t: None))
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_fxbook(tickers: tuple, base: str, overrides: tuple, ask_yahoo: bool,
+                 start: str, end: Optional[str]) -> "FX.FxBook":
+    """Currencies and daily exchange rates for a run."""
+    return FX.FxBook.build(list(tickers), base, dict(overrides), start, end,
+                           detect=None if ask_yahoo else (lambda t: None))
 
 
 def tv(html: str, height: int) -> None:
@@ -2100,7 +2117,8 @@ sel_universe = st.sidebar.multiselect(
              if t in univ_options] or univ_options)
 
 BLEND = "Blend of several"
-bench_choices = ["None"] + univ_options + [BLEND]
+BENCH_STRAT = "Another strategy"
+bench_choices = ["None"] + univ_options + [BLEND, BENCH_STRAT]
 _pb = st.session_state.get("_preset_bench")
 bench_default = _pb if _pb in univ_options else (
     d0.benchmark if d0.benchmark in univ_options else None)
@@ -2144,6 +2162,17 @@ if benchmark == BLEND:
     benchmark = BLEND if bench_blend else None
 else:
     benchmark = None if benchmark == "None" else benchmark
+
+# A strategy as the benchmark: it is run like any other comparison strategy
+# (set under "Compare strategies" further down), so there is no ticker, no
+# dividend convention and no benchmark-only frictions to choose here.
+bench_is_strategy = benchmark == BENCH_STRAT
+if bench_is_strategy:
+    benchmark = None
+    st.sidebar.markdown(
+        '<div class="note">The benchmark is a strategy, chosen under '
+        '<b>Compare strategies</b> below. It trades the same universe '
+        'with the same frictions as yours.</div>', unsafe_allow_html=True)
 
 BENCH_MODES = ["Total return (adjusted close)",
                "Price return + dividends reinvested at rebalance",
@@ -2227,6 +2256,84 @@ cash_proxy = st.sidebar.selectbox("Cash remuneration", cash_choices,
                                        "realistic opportunity cost for staying out "
                                        "of the market.")
 cash_proxy = None if cash_proxy == "Fixed rate" else cash_proxy
+
+# --- Currency ---
+# Every price below is read as being in one currency unless a base currency
+# is chosen here. Then each instrument is converted from the currency it is
+# quoted in, at that day's exchange rate, before any signal is computed.
+st.sidebar.markdown('<div class="eyebrow">Currency</div>', unsafe_allow_html=True)
+_CUR_OFF = "Off (all prices in one currency)"
+_BASES = ["CAD", "USD", "EUR", "GBP", "CHF", "JPY", "AUD"]
+_b0 = (d0.base_currency or "").upper()
+if _b0 and _b0 not in _BASES:
+    _BASES.append(_b0)
+_base_pick = st.sidebar.selectbox(
+    "Base currency", [_CUR_OFF] + _BASES,
+    index=([_CUR_OFF] + _BASES).index(_b0) if _b0 else 0,
+    key="base_currency_pick",
+    help="The currency the account is measured in. Instruments quoted in "
+         "another currency (SPY for a Canadian investor) are converted into "
+         "it at each day's exchange rate, so their return includes the "
+         "currency move. The account keeps a cash balance in each currency "
+         "it trades, and pays the conversion spread only on money that "
+         "actually changes currency. Off treats every price as already in "
+         "one currency, as before.")
+base_currency = "" if _base_pick == _CUR_OFF else _base_pick
+
+_fx_universe = list(dict.fromkeys(
+    [str(t).strip().upper() for t in (
+        list(sel_universe)
+        + ([benchmark] if isinstance(benchmark, str) and benchmark != BLEND else [])
+        + list(bench_blend.keys())
+        + ([cash_proxy] if cash_proxy else []))]))
+fx_overrides: Dict[str, str] = {}
+fx_preview: Optional["FX.FxBook"] = None
+if base_currency and _fx_universe:
+    _ask_yahoo = source == "Yahoo Finance"
+    _loaded_ccy = {str(k).upper(): v for k, v in (d0.currencies or {}).items()}
+    _ccy_text = st.sidebar.text_area(
+        "Currency of an instrument (optional)",
+        value=st.session_state.get("ccy_override_text", "\n".join(
+            f"{k}: {v}" for k, v in _loaded_ccy.items() if k in _fx_universe)),
+        key="ccy_override_text", height=70, placeholder="VOD.L: GBp\nSAP.DE: EUR",
+        help="One per line, TICKER: CODE. Only needed where the detected "
+             "currency below is wrong, or for instruments from a file. Use "
+             "GBp for pence (London quotes in pence; the prices are divided "
+             "by 100). This is the currency the instrument is QUOTED in, "
+             "not the currency of what it holds: XUU.TO holds US stocks but "
+             "is quoted in CAD, so it is not converted.")
+    for _line in _ccy_text.replace(",", "\n").split("\n"):
+        if ":" in _line:
+            _k, _, _v = _line.partition(":")
+            if _k.strip() and _v.strip():
+                fx_overrides[_k.strip().upper()] = _v.strip()
+    try:
+        _det = fetch_currency_guess(tuple(_fx_universe), _ask_yahoo)
+        fx_preview = FX.FxBook.resolve(_fx_universe, base_currency, fx_overrides, _det)
+        st.sidebar.dataframe(fx_preview.summary(_fx_universe), hide_index=True,
+                             use_container_width=True)
+        if any(v == "guessed from ticker" for v in fx_preview.source.values()):
+            st.sidebar.markdown(
+                '<div class="flag">Some currencies are guessed from the ticker '
+                'suffix. Check them, and correct any that are wrong above.</div>',
+                unsafe_allow_html=True)
+        if not fx_preview.foreign_currencies(_fx_universe):
+            st.sidebar.markdown(
+                f'<div class="note">Every instrument is already quoted in '
+                f'{base_currency}: nothing to convert.</div>',
+                unsafe_allow_html=True)
+    except Exception as _exc:
+        st.sidebar.markdown(f'<div class="flag">Currencies could not be '
+                            f'resolved: {_exc}</div>', unsafe_allow_html=True)
+elif not base_currency and len(sel_universe) > 1:
+    _mixed = sorted({FX.parse_currency(FX.guess_currency(t))[0] for t in sel_universe})
+    if len(_mixed) > 1:
+        st.sidebar.markdown(
+            f'<div class="flag">These instruments look to be quoted in '
+            f'different currencies ({", ".join(_mixed)}). With the base '
+            f'currency off their prices are added up as if they were one. '
+            f'Pick a base currency above to convert them.</div>',
+            unsafe_allow_html=True)
 
 # --- Exogenous series ---
 st.sidebar.markdown('<div class="eyebrow">Exogenous series</div>', unsafe_allow_html=True)
@@ -2475,6 +2582,44 @@ if mode == "builtin":
                 st.markdown('<div class="flag">No valid holding parsed. Use '
                             'TICKER:WEIGHT.</div>', unsafe_allow_html=True)
 
+def strategy_inputs(strat_obj, prefix: str) -> Dict[str, Any]:
+    """One input per parameter of a model, in the current container, keyed
+    `<prefix>_<param>`. Returns the values as a parameter dict."""
+    out: Dict[str, Any] = {}
+    for sp in strat_obj.params:
+        wkey = f"{prefix}_{sp.key}"
+        if sp.kind == "int":
+            out[sp.key] = st.number_input(
+                sp.label, int(sp.min), int(sp.max), int(sp.default),
+                int(sp.step), help=sp.help or None, key=wkey)
+        elif sp.kind == "float":
+            out[sp.key] = st.number_input(
+                sp.label, float(sp.min), float(sp.max),
+                float(sp.default), float(sp.step),
+                help=sp.help or None, key=wkey)
+        elif sp.kind == "bool":
+            out[sp.key] = st.checkbox(
+                sp.label, bool(sp.default), help=sp.help or None, key=wkey)
+        elif sp.kind == "series":
+            opts = exog_columns or ["No series imported"]
+            pick = st.selectbox(sp.label, opts, key=wkey)
+            out[sp.key] = "" if pick == "No series imported" else pick
+        elif sp.kind == "formula":
+            out[sp.key] = st.text_area(
+                sp.label, str(sp.default or ""), height=70,
+                help=sp.help or None, key=wkey)
+        elif sp.kind == "choice" and sp.choices:
+            opts = list(sp.choices)
+            out[sp.key] = st.selectbox(
+                sp.label, opts,
+                index=opts.index(sp.default) if sp.default in opts else 0,
+                help=sp.help or None, key=wkey)
+        else:
+            out[sp.key] = st.text_input(
+                sp.label, str(sp.default or ""), help=sp.help or None, key=wkey)
+    return out
+
+
 blend_sleeves: List[Dict[str, Any]] = []
 if mode == "builtin" and construction == "Blend of strategies":
     with st.sidebar.expander("Strategy blend", expanded=True):
@@ -2497,41 +2642,8 @@ if mode == "builtin" and construction == "Blend of strategies":
             bud_i = st.number_input("Budget (%)", 0.0, 100.0, float(_even), 5.0,
                                     key=f"bl_bud_{i}") / 100.0
             strat_i = REGISTRY[key_i]
-            params_i: Dict[str, Any] = {}
             with st.expander(f"{strat_i.label} parameters", expanded=False):
-                for sp in strat_i.params:
-                    wkey = f"bl_{i}_{key_i}_{sp.key}"
-                    if sp.kind == "int":
-                        params_i[sp.key] = st.number_input(
-                            sp.label, int(sp.min), int(sp.max), int(sp.default),
-                            int(sp.step), help=sp.help or None, key=wkey)
-                    elif sp.kind == "float":
-                        params_i[sp.key] = st.number_input(
-                            sp.label, float(sp.min), float(sp.max),
-                            float(sp.default), float(sp.step),
-                            help=sp.help or None, key=wkey)
-                    elif sp.kind == "bool":
-                        params_i[sp.key] = st.checkbox(
-                            sp.label, bool(sp.default), help=sp.help or None,
-                            key=wkey)
-                    elif sp.kind == "series":
-                        opts = exog_columns or ["No series imported"]
-                        pick = st.selectbox(sp.label, opts, key=wkey)
-                        params_i[sp.key] = "" if pick == "No series imported" else pick
-                    elif sp.kind == "formula":
-                        params_i[sp.key] = st.text_area(
-                            sp.label, str(sp.default or ""), height=70,
-                            help=sp.help or None, key=wkey)
-                    elif sp.kind == "choice" and sp.choices:
-                        opts = list(sp.choices)
-                        params_i[sp.key] = st.selectbox(
-                            sp.label, opts,
-                            index=opts.index(sp.default) if sp.default in opts else 0,
-                            help=sp.help or None, key=wkey)
-                    else:
-                        params_i[sp.key] = st.text_input(
-                            sp.label, str(sp.default or ""),
-                            help=sp.help or None, key=wkey)
+                params_i = strategy_inputs(strat_i, f"bl_{i}_{key_i}")
             if strat_i.needs_exog and not exog_columns:
                 st.markdown('<div class="flag">This model reads exogenous '
                             'series; none is loaded, so it will hold '
@@ -2712,6 +2824,53 @@ with st.sidebar.expander("Execution", expanded=False):
              "this share of the portfolio. 0 turns the trigger off. Must be "
              "above the buffer.") / 100.0
 
+# --- Comparison strategies ---
+# Each runs over the same universe, calendar, execution rules and frictions
+# as the strategy above, so a gap between two of them is the model's alone.
+cmp_specs: List[Dict[str, Any]] = []
+cmp_bench_idx = 0
+with st.sidebar.expander(
+        "Compare strategies",
+        expanded=bool(bench_is_strategy or st.session_state.get("ncmp", 0))):
+    st.markdown('<div class="note">Add up to three more models to set '
+                'against this one on the Compare tab, or pick one as the '
+                'benchmark above. Same universe, rebalancing, execution and '
+                'frictions; every strategy is measured from the latest '
+                'date any of them first holds a position.</div>',
+                unsafe_allow_html=True)
+    n_cmp = st.number_input("Extra strategies", 0, 3, 1 if bench_is_strategy else 0,
+                            1, key="ncmp")
+    _cmp_pool = sorted(REGISTRY.keys(), key=lambda k: REGISTRY[k].label)
+    # Suggested models: not the main one, and none that need imported data
+    # that is not there, since those would simply hold cash.
+    _cmp_default = [k for k in _cmp_pool if k != strat_key
+                    and (exog_columns or not REGISTRY[k].needs_exog)] or _cmp_pool
+    for i in range(int(n_cmp)):
+        st.markdown(f'<div class="eyebrow" style="margin:.8rem 0 .25rem;">'
+                    f'Strategy {chr(66 + i)}</div>', unsafe_allow_html=True)
+        key_c = st.selectbox(
+            "Model", _cmp_pool,
+            index=_cmp_pool.index(_cmp_default[i % len(_cmp_default)]),
+            format_func=lambda k: REGISTRY[k].label, key=f"cmp_model_{i}")
+        strat_c = REGISTRY[key_c]
+        with st.expander(f"{strat_c.label} parameters", expanded=False):
+            params_c = strategy_inputs(strat_c, f"cmp_{i}_{key_c}")
+        if strat_c.needs_exog and not exog_columns:
+            st.markdown('<div class="flag">This model reads exogenous series; '
+                        'none is loaded, so it will hold nothing.</div>',
+                        unsafe_allow_html=True)
+        cmp_specs.append({"key": key_c, "params": params_c,
+                          "label": strat_c.label})
+    if bench_is_strategy:
+        if cmp_specs:
+            _cmp_names = CMP.unique_labels([], [s["label"] for s in cmp_specs])
+            cmp_bench_idx = st.selectbox(
+                "Use as the benchmark", range(len(cmp_specs)),
+                format_func=lambda j: _cmp_names[j], key="cmp_bench_pick")
+        else:
+            st.markdown('<div class="flag">Add at least one strategy to use '
+                        'as the benchmark.</div>', unsafe_allow_html=True)
+
 with st.sidebar.expander("Frictions", expanded=False):
     comm = st.number_input("Commission (bps)", 0.0, 200.0, float(c0.commission_bps), 1.0,
                            help="A flat broker fee. Never scaled by trade "
@@ -2800,6 +2959,41 @@ with st.sidebar.expander("Frictions", expanded=False):
              "invested book has no idle cash to pay from, so the deduction "
              "sells holdings pro rata, exactly as a fund liquidates units "
              "to meet its own fee.") / 100.0
+    fx_spread = float(c0.fx_spread_bps)
+    fx_cash_policy = e0.fx_cash
+    fx_cash_rate = float(c0.foreign_cash_rate_pa)
+    if base_currency:
+        st.markdown('<div class="eyebrow" style="margin:.8rem 0 .25rem;">'
+                    'Currency conversion</div>', unsafe_allow_html=True)
+        fx_spread = st.number_input(
+            "Exchange spread (bps, each way)", 0.0, 300.0, fx_spread, 5.0,
+            key="fx_spread_bps",
+            help="What it costs to move money between currencies, charged "
+                 "on the amount actually converted. Roughly: 1-5 bps at an "
+                 "institutional desk or Interactive Brokers, 5-15 bps for "
+                 "Norbert's gambit, 100-200 bps at a bank-owned broker "
+                 "converting automatically. 25 is a middle-of-the-road "
+                 "default; set the one you really pay.")
+        fx_cash_policy = st.radio(
+            "Foreign-currency cash", ["net", "hold"],
+            index=0 if fx_cash_policy == "net" else 1, horizontal=True,
+            format_func=lambda k: {"net": "Convert at each trade",
+                                   "hold": "Hold until needed"}[k],
+            key="fx_cash_policy",
+            help="Convert at each trade: at every rebalance the balance in "
+                 "each foreign currency is settled, buys against sells "
+                 "first, and only the remainder crosses currencies (selling "
+                 "one US ETF to buy another costs no conversion). Hold until "
+                 "needed: sale proceeds and dividends stay in their own "
+                 "currency, earn its interest, move with its exchange rate, "
+                 "and fund the next purchase there; money is converted only "
+                 "to cover a shortfall. That is how a USD account behaves, "
+                 "and it carries currency exposure while the cash sits.")
+        fx_cash_rate = st.number_input(
+            "Interest on foreign-currency cash (annual %)", 0.0, 15.0,
+            fx_cash_rate * 100, 0.25, key="fx_cash_rate",
+            help="Paid on every foreign-currency balance. Many brokers "
+                 "pay little or nothing on USD cash.") / 100.0
     fee_pays_frictions = st.checkbox(
         "Fee liquidation pays the same commission and slippage",
         value=bool(getattr(c0, "apply_frictions_to_fee_liquidation", True)),
@@ -2836,6 +3030,9 @@ cfg = RunConfig(
         benchmark=(None if benchmark == BLEND else benchmark),
         cash_proxy=cash_proxy,
         adjusted=bool(adjusted), use_dividends=bool(use_divs),
+        base_currency=base_currency,
+        currencies=(dict(fx_preview.raw) if (base_currency and fx_preview is not None)
+                    else {}),
     ),
     exog=ExogConfig(
         enabled=exog_raw is not None,
@@ -2859,8 +3056,11 @@ cfg = RunConfig(
                         cash_buffer=float(cash_buffer),
                         day_rule=day_rule, day_of_month=int(day_of_month),
                         weekday=int(weekday), nth=int(nth),
-                        anchor_month=int(anchor_month)),
+                        anchor_month=int(anchor_month),
+                        fx_cash=fx_cash_policy),
     costs=CostConfig(commission_bps=comm, slippage_bps=slip,
+                     fx_spread_bps=float(fx_spread),
+                     foreign_cash_rate_pa=float(fx_cash_rate),
                      impact_model=impact_model,
                      impact_bps_at_10pct_adv=impact_bps10,
                      impact_coef=impact_coef,
@@ -2915,9 +3115,39 @@ if run_clicked and not blocking:
     try:
         with st.spinner("Loading prices..."):
             market = build_market()
+            fx_book = None
+            if cfg.data.base_currency:
+                with st.spinner("Loading exchange rates..."):
+                    fx_book = fetch_fxbook(
+                        tuple(_fx_universe), cfg.data.base_currency,
+                        tuple(sorted((k, v) for k, v in cfg.data.currencies.items())),
+                        source == "Yahoo Finance",
+                        str(cfg.data.start), cfg.data.end)
+                # A cash proxy outside the universe is a RATE, not a holding:
+                # its own-currency return is what cash earns, so it is not
+                # converted (that would pour exchange-rate noise into cash).
+                market = fx_book.convert_market(
+                    market, skip=([cash_proxy] if cash_proxy and
+                                  cash_proxy not in sel_universe else []),
+                    at_open=bool(cfg.engine.execute_at_open
+                                 and market.open is not None))
             prices, quality = clean_prices(market.close, cfg.data)
             for msg in market.notes:
                 quality.warnings.append(msg)
+            if fx_book is not None and cash_proxy:
+                _pc_ccy = fx_book.currency_of(cash_proxy)
+                if _pc_ccy != fx_book.base:
+                    quality.warnings.append(
+                        f"The cash proxy {cash_proxy} is quoted in {_pc_ccy}, not "
+                        f"{fx_book.base}: its own-currency return is used as the "
+                        f"{fx_book.base} cash rate. Use a {fx_book.base} cash ETF "
+                        f"or a fixed rate for a cash rate that belongs to the "
+                        f"base currency.")
+            if fx_book is not None and not fx_book.is_active(
+                    [c for c in sel_universe]):
+                quality.warnings.append(
+                    f"Every instrument is quoted in {fx_book.base}: nothing was "
+                    f"converted.")
 
         cash_px = prices[cash_proxy] if (cash_proxy and cash_proxy in prices.columns) else None
         drop = [c for c in [cash_proxy] if c and c in prices.columns and c not in sel_universe]
@@ -3025,12 +3255,59 @@ if run_clicked and not blocking:
             result = run_backtest(universe, weights, cfg.engine, cfg.costs,
                                   cash_px, run_label, rebal_dates,
                                   open_prices=open_px, dividends=div_px,
-                                  volume=vol_px)
+                                  volume=vol_px, fx=fx_book)
+            # Comparison strategies: the same inputs, calendar, execution and
+            # frictions as the main run, each with its own model.
+            cmp_results: Dict[str, Any] = {}
+            cmp_weights: Dict[str, pd.DataFrame] = {}
+            cmp_names = CMP.unique_labels(
+                [run_label], [s["label"] for s in cmp_specs])
+            for spec, name in zip(cmp_specs, cmp_names):
+                try:
+                    w_c = REGISTRY[spec["key"]].generate(
+                        universe, spec["params"], exog_aligned, cash_series)
+                    cmp_weights[name] = w_c
+                    cmp_results[name] = run_backtest(
+                        universe, w_c, cfg.engine, cfg.costs, cash_px, name,
+                        None, open_prices=open_px, dividends=div_px,
+                        volume=vol_px, fx=fx_book)
+                except Exception as exc:
+                    quality.warnings.append(
+                        f"Comparison strategy {name} failed: {exc}")
+            bench_strat_name = (cmp_names[cmp_bench_idx] if bench_is_strategy
+                                and cmp_bench_idx < len(cmp_names)
+                                and cmp_names[cmp_bench_idx] in cmp_results
+                                else None)
+
             # Where the model itself first takes a position. A permanently
             # held core keeps total exposure above zero from session one,
             # hiding the model's warm-up; the record starts here instead.
             sig_start = (sleeve_report.signal_start
                          if sleeve_report is not None else None)
+            # With several strategies the record starts on the latest date
+            # any of them first holds a position. One that was invested
+            # earlier would only be cut down to that date, never paying to
+            # enter on it, so it is run again with its weights held at zero
+            # until then: every strategy buys, and pays, on the shared date.
+            shared_start = None
+            if cfg.engine.trim_warmup:
+                shared_start = common_start(
+                    result, *cmp_results.values(), signal_start=sig_start)
+            if shared_start is not None and cmp_results:
+                def _enter_on_shared_start(r, w, dates=None):
+                    first = first_active_date(r)
+                    if first is None or first >= shared_start:
+                        return r
+                    return run_backtest(
+                        universe,
+                        CMP.masked_until(w, shared_start, cfg.engine.execution_lag),
+                        cfg.engine, cfg.costs, cash_px, r.label, dates,
+                        open_prices=open_px, dividends=div_px, volume=vol_px,
+                        fx=fx_book)
+                result = _enter_on_shared_start(result, weights, rebal_dates)
+                cmp_results = {k: _enter_on_shared_start(v, cmp_weights[k])
+                               for k, v in cmp_results.items()}
+
             # A benchmark that pays frictions buys on the shared start date,
             # not on its own first session: its entry cost would otherwise
             # fall inside the warm-up and be trimmed away with it.
@@ -3039,8 +3316,7 @@ if run_clicked and not blocking:
             if bench_costs is not None:
                 if market.volume is not None and cfg.costs.impact_model != "flat":
                     bench_vol = market.volume.reindex(index=prices.index)
-                if cfg.engine.trim_warmup:
-                    bench_start = common_start(result, signal_start=sig_start)
+                bench_start = shared_start
             bench = None
             bdiv = None
             if benchmark == BLEND and bench_blend:
@@ -3103,13 +3379,26 @@ if run_clicked and not blocking:
                                          costs=bench_costs, volume=bench_vol,
                                          start=bench_start)
 
+            if bench_strat_name is not None:
+                bench = cmp_results[bench_strat_name]
+                bdiv = div_px          # for the benchmark's tax calculation
+            elif bench_is_strategy:
+                quality.warnings.append(
+                    "No strategy was available to use as the benchmark: the "
+                    "run has none.")
+
             # Warm-up: both series must start on the same day or the
             # benchmark is credited with a stretch the strategy sat out.
             raw_start = result.equity.index[0]
             if cfg.engine.trim_warmup:
-                result, bench = align_start(
-                    result, bench, initial_capital=cfg.engine.initial_capital,
+                aligned = align_start(
+                    result, bench, *cmp_results.values(),
+                    initial_capital=cfg.engine.initial_capital,
                     signal_start=sig_start)
+                result, bench = aligned[0], aligned[1]
+                cmp_results = dict(zip(cmp_results, aligned[2:]))
+                if bench_strat_name is not None:
+                    bench = cmp_results[bench_strat_name]
 
         st.session_state["run"] = {
             "result": result, "bench": bench, "bench_dividends": bdiv,
@@ -3124,6 +3413,7 @@ if run_clicked and not blocking:
             "volume": vol_px,
             "dividends": div_px,
             "open": open_px,
+            "fx": fx_book,
             "construction": construction,
             # Asset class per instrument, for the Attribution tab: the
             # sleeve assignment when the run was built by asset class,
@@ -3132,7 +3422,10 @@ if run_clicked and not blocking:
                 st.session_state.get("_preset_applied", ""), list(universe.columns))),
             "market": market,
             "bench_mode": bench_mode,
-            "bench_frictions": list(bench_fric) if bench is not None else [],
+            "bench_frictions": (list(bench_fric) if bench is not None
+                                and bench_strat_name is None else []),
+            "compare": cmp_results,
+            "bench_strategy": bench_strat_name,
             "raw_start": raw_start,
             "trimmed": bool(cfg.engine.trim_warmup
                             and result.equity.index[0] > raw_start),
@@ -3222,8 +3515,8 @@ if run.get("trimmed"):
     _bits.append('<span class="item">warm-up trimmed</span>')
 st.markdown(f'<div class="runbar">{"".join(_bits)}</div>', unsafe_allow_html=True)
 
-tabs = st.tabs(["Results", "Signals", "Positions", "Attribution", "Tax",
-                "Robustness", "Data", "Builder", "Export"])
+tabs = st.tabs(["Results", "Compare", "Signals", "Positions", "Attribution",
+                "Tax", "Robustness", "Data", "Builder", "Export"])
 
 # --------------------------- RESULTS -----------------------------------
 with tabs[0]:
@@ -3342,8 +3635,81 @@ with tabs[0]:
     st.dataframe(signed(dd_tbl, ["Drawdown"]), use_container_width=True,
                  hide_index=True)
 
-# --------------------------- SIGNALS -------------------------------------
+# --------------------------- COMPARE -------------------------------------
 with tabs[1]:
+    cmp_res = run.get("compare") or {}
+    if not cmp_res:
+        note("Nothing to compare yet. Under <b>Compare strategies</b> in the "
+             "sidebar, add up to three more models, then run the backtest "
+             "again. They run on the same universe, rebalancing, execution "
+             "and frictions as this one, so the differences are the models'. "
+             "You can also choose <b>Another strategy</b> as the comparison "
+             "benchmark.")
+    else:
+        everyone = {res.label: res, **cmp_res}
+        _bs = run.get("bench_strategy")
+        note(f"{len(everyone)} strategies over {res.equity.index[0].date()} "
+             f"to {res.equity.index[-1].date()}, the window they all share: "
+             f"it starts on the latest date any of them first holds a "
+             f"position, so none is credited with a stretch another sat out. "
+             f"Same universe, calendar, execution and frictions throughout."
+             + (f" <b>{_bs}</b> is also the benchmark." if _bs else ""))
+
+        # The benchmark joins the charts unless it is one of the strategies.
+        _plot = dict(everyone)
+        if bench is not None and not any(bench is r for r in everyone.values()):
+            _plot[bench.label] = bench
+        _log = st.toggle("Log scale", value=True, key="cmp_log")
+        st.plotly_chart(
+            C.equity_curve(align_results(_plot), _log), use_container_width=True,
+            key="cmp_equity",
+            config={"displaylogo": False})
+        st.plotly_chart(C.underwater({k: v.equity for k, v in _plot.items()}),
+                        key="cmp_underwater",
+                        use_container_width=True, config={"displaylogo": False})
+
+        eyebrow("Full statistics")
+        ctab = CMP.comparison_table(everyone, bench, rf_bt, ppy)
+        st.dataframe(
+            pd.DataFrame({c: [M.format_metric(k, ctab.loc[k, c]) for k in ctab.index]
+                          for c in ctab.columns}, index=ctab.index
+                         ).rename_axis("Metric").reset_index(),
+            use_container_width=True, hide_index=True)
+
+        eyebrow(f"{res.label} against each of the others")
+        h2h = CMP.head_to_head(res.label, everyone, rf_bt, ppy)
+        if not h2h.empty:
+            _pct = ("Excess CAGR", "Tracking error", "Months ahead")
+            h2h_f = h2h.copy().astype(object)
+            for c in h2h_f.columns:
+                h2h_f[c] = h2h[c].map(
+                    lambda v, c=c: "n/a" if pd.isna(v) else (
+                        f"{v*100:+.2f}%" if c == "Excess CAGR" else
+                        f"{v*100:.1f}%" if c in _pct else f"{v:.2f}"))
+            h2h_f = h2h_f.rename_axis("Versus").reset_index()
+            st.dataframe(signed(h2h_f, ["Excess CAGR"]),
+                         use_container_width=True, hide_index=True)
+            note("<b>Excess CAGR</b> is the difference in annualized return "
+                 "(positive: the first strategy is ahead). <b>Months ahead</b> "
+                 "is the share of months it beat the other. Beta and the "
+                 "information ratio are of the first strategy on the other.")
+
+        eyebrow("Calendar years")
+        cyt = CMP.calendar_year_table(everyone)
+        cyt_f = cyt.map(lambda v: "n/a" if pd.isna(v) else f"{v*100:+.2f}%")
+        cyt_f = cyt_f.reset_index()
+        cyt_f["Year"] = cyt_f["Year"].astype(int).astype(str)
+        st.dataframe(signed(cyt_f, [c for c in cyt_f.columns if c != "Year"]),
+                     use_container_width=True, hide_index=True)
+
+        eyebrow("How alike they are")
+        st.plotly_chart(C.correlation_matrix(CMP.return_correlation(everyone),
+                                             title="Correlation of returns"),
+                        key="cmp_corr",
+                        use_container_width=True, config={"displaylogo": False})
+
+# --------------------------- SIGNALS -------------------------------------
+with tabs[2]:
     _sk = run.get("strategy_key")
     _strat = REGISTRY.get(_sk) if run_mode == "builtin" else None
     _params = run.get("params", {})
@@ -3454,7 +3820,7 @@ with tabs[1]:
 
 
 # --------------------------- POSITIONS ----------------------------------
-with tabs[2]:
+with tabs[3]:
     if w_report is not None:
         eyebrow("Target weights file check")
         a, b, c, d = st.columns(4)
@@ -3618,6 +3984,53 @@ with tabs[2]:
                                _cf.to_csv(index=False).encode("utf-8"),
                                "cash_flows.csv", "text/csv", key="dlcashflows")
 
+    _fxb = run.get("fx")
+    if _fxb is not None and res.foreign_cash is not None:
+        eyebrow(f"Currency ({_fxb.base} base)")
+        _prev = res.equity.shift(1).fillna(float(rcfg.engine.initial_capital))
+        _fx_paid = float((res.fx_costs * _prev).sum())
+        _yrs = max(len(res.equity) / ppy, 1e-9)
+        _cur = {}
+        for _a in res.weights.columns:
+            _c = _fxb.currency_of(_a)
+            _cur[_c] = _cur.get(_c, 0) + res.weights[_a]
+        _cur = pd.DataFrame(_cur)
+        for _c in res.foreign_cash.columns:
+            _cur[_c] = _cur.get(_c, 0) + res.foreign_cash[_c] / res.equity
+        _held_cash = (res.cash_weight - (res.foreign_cash.sum(axis=1) / res.equity))
+        f1, f2, f3, f4 = st.columns(4)
+        with f1:
+            dial("Exchange spread paid", f"{_fxb.base} {_fx_paid:,.0f}",
+                 f"{_fx_paid / max(res.equity.mean(), 1e-9) / _yrs * 1e4:.1f} bps a year")
+        with f2:
+            dial("Share of all costs",
+                 f"{(res.fx_costs.sum() / max(res.costs.sum(), 1e-12)) * 100:.0f}%"
+                 if res.costs.sum() > 0 else "n/a", "the rest is commission and slippage")
+        with f3:
+            dial("Foreign cash held", f"{(res.foreign_cash.sum(axis=1) / res.equity).mean() * 100:.2f}%",
+                 "average share of the portfolio")
+        with f4:
+            _nconv = 0 if res.cash_flows is None else int(
+                (res.cash_flows["Type"] == "FX conversion").sum())
+            dial("Conversions", f"{_nconv:,}", "movements between currencies")
+        _tbl = pd.DataFrame({"Average": _cur.mean(), "Latest": _cur.iloc[-1],
+                             "Highest": _cur.max()}).mul(100).round(2)
+        _tbl.index.name = "Currency exposure (% of portfolio)"
+        _tbl["Average"] = _tbl["Average"].map(lambda v: f"{v:.2f}%")
+        _tbl["Latest"] = _tbl["Latest"].map(lambda v: f"{v:.2f}%")
+        _tbl["Highest"] = _tbl["Highest"].map(lambda v: f"{v:.2f}%")
+        st.dataframe(_tbl.reset_index(), use_container_width=True, hide_index=True)
+        note("Prices and dividends of foreign instruments are converted at each "
+             "day's exchange rate, so their returns include the currency move. "
+             "The account holds a cash balance per currency; the spread is "
+             "paid only on the net amount converted at each settlement. "
+             "Exposure is by the currency an instrument is quoted in, so a "
+             "Canadian-listed ETF holding US stocks counts as the base "
+             "currency. Trades at the close convert at that day's close rate. "
+             "Trades at the open convert at the previous close's rate, the "
+             "only one known when the order is placed; the rest of the day "
+             "then earns the move to the close.")
+
     eyebrow("Trade log")
     if res.trades.empty:
         note("No trades were generated.")
@@ -3627,8 +4040,10 @@ with tabs[2]:
             if c in t: t[c] = t[c].map(lambda v: f"{v:,.4f}".rstrip("0").rstrip("."))
         if "Change" in t:
             t["Change"] = t["Change"].map(lambda v: f"{v:+,.4f}".rstrip("0").rstrip("."))
-        for c in ("Price", "Notional"):
+        for c in ("Price", "Notional", "Local Price"):
             if c in t: t[c] = t[c].map(lambda v: f"{v:,.2f}")
+        if "FX Rate" in t:
+            t["FX Rate"] = t["FX Rate"].map(lambda v: f"{v:.4f}")
         if "Effective Cost (bps)" in t:
             t["Effective Cost (bps)"] = t["Effective Cost (bps)"].map(
                 lambda v: f"{v:.1f}" if pd.notna(v) else "n/a")
@@ -3640,7 +4055,8 @@ with tabs[2]:
              "traded size incurred, so the execution and cost assumptions "
              "can both be checked rather than taken on trust. With "
              "execution set to the open, these prices are that session's "
-             "opens.")
+             "opens. In a multi-currency run Price is in the base currency, "
+             "and Local Price and FX Rate show what it was converted from.")
         if n_liq:
             st.markdown(
                 f'<div class="flag">{n_liq} of these are pro-rata sales to '
@@ -3653,7 +4069,7 @@ with tabs[2]:
                            "trades.csv", "text/csv")
 
 # --------------------------- ATTRIBUTION -------------------------------
-with tabs[3]:
+with tabs[4]:
     if res.contributions is None:
         note("Run the backtest again to see return contribution: this "
              "result was produced before the engine recorded it.")
@@ -3802,7 +4218,7 @@ with tabs[3]:
 
 
 # --------------------------- TAX ------------------------------------------
-with tabs[4]:
+with tabs[5]:
     note("Tax friendliness for a Canadian non-registered account, where "
          "the fiscal year is the calendar year. Realized capital gains use "
          "the Adjusted Cost Base method Canadian tax law requires, not "
@@ -4022,7 +4438,7 @@ with tabs[4]:
                                "tax_realized_sales.csv", "text/csv", key="dltaxsales")
 
 # --------------------------- ROBUSTNESS ----------------------------------
-with tabs[5]:
+with tabs[6]:
     note("A single backtest is only one observation. These four tests probe "
          "whether the result holds up beyond the exact parameter set chosen.")
 
@@ -4034,7 +4450,7 @@ with tabs[5]:
     # headline result, and starts on the same date, so the tests describe
     # the backtest on screen rather than a variant of it.
     _same = dict(dividends=run.get("dividends"), open_prices=run.get("open"),
-                 rf=rf_bt)
+                 rf=rf_bt, fx=run.get("fx"))
     kw = dict(cash_prices=run.get("cash_series") if run.get("cash_series")
               is not None else run["cash"],
               exog=exog_used, weights=fixed_w, rebalance_dates=run_rebal,
@@ -4389,7 +4805,7 @@ with tabs[5]:
                          use_container_width=True, hide_index=True)
 
 # --------------------------- DATA ----------------------------------------
-with tabs[6]:
+with tabs[7]:
     a, b, c = st.columns(3)
     with a:
         dial("Sessions", f"{quality.rows:,}")
@@ -4457,7 +4873,7 @@ with tabs[6]:
                        universe.to_csv().encode("utf-8"), "prices.csv", "text/csv")
 
 # --------------------------- BUILDER --------------------------------------
-with tabs[7]:
+with tabs[8]:
     note("Build a strategy from criteria. Each rule is an indicator, a "
          "comparison and a value; rules combine into a filter that decides "
          "what is eligible and a score that ranks it. The result compiles to "
@@ -4627,7 +5043,7 @@ with tabs[7]:
 
 
 # --------------------------- EXPORT ---------------------------------------
-with tabs[8]:
+with tabs[9]:
     note("Every export below reproduces the backtest currently on screen. "
          "The tearsheet is the fastest way to share a result; the workbook "
          "and CSVs are for further analysis elsewhere.")
@@ -5086,12 +5502,17 @@ with tabs[8]:
                                            or getattr(e, "cash_sweep_threshold", 0) else ""),
             "Units": "whole units only" if e.whole_shares else "fractional",
             "Minimum trade": f"{e.min_trade_weight * 100:.2f}% of value",
-            "Benchmark": (f"{bl}, {run.get('bench_mode', '').lower()}" if bl else "none"),
+            "Benchmark": (
+                f"{bl}, a strategy run like this one" if bl and run.get("bench_strategy")
+                else f"{bl}, {run.get('bench_mode', '').lower()}" if bl else "none"),
             "Benchmark frictions": (
+                "same as the strategy" if run.get("bench_strategy") else
                 ", ".join({"commission": "commission", "slippage": "slippage and impact",
                            "fee": "management fee"}[k]
                           for k in run.get("bench_frictions", []))
                 if bl and run.get("bench_frictions") else "none (frictionless index)"),
+            "Compared strategies": (
+                ", ".join(run["compare"]) if run.get("compare") else "none"),
             "Warm-up": "trimmed to first investment" if e.trim_warmup else "included",
         }
         return {

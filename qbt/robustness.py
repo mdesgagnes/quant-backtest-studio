@@ -23,18 +23,19 @@ RunFn = Callable[[pd.DataFrame, Dict[str, Any], EngineConfig, CostConfig], Backt
 
 def _run(prices, w, engine, costs, cash_prices=None, rebalance_dates=None,
          volume=None, dividends=None, open_prices=None,
-         start: Optional[pd.Timestamp] = None) -> BacktestResult:
+         start: Optional[pd.Timestamp] = None, fx=None) -> BacktestResult:
     """One re-run on exactly the inputs the headline backtest used.
 
     Every test here re-runs the engine, and each re-run has to see the
     same dividends and the same execution price as the result it is
-    testing; leaving them out quietly tests a different strategy. The
-    record then starts where the headline one does (`start`), or, for a
+    testing; leaving them out quietly tests a different strategy. The same
+    goes for the currency book (`fx`): without it a two-currency account
+    would be re-run as if it paid no exchange spread. The record then starts where the headline one does (`start`), or, for a
     variant with its own warm-up, on its own first invested day.
     """
     res = run_backtest(prices, w, engine, costs, cash_prices,
                        rebalance_dates=rebalance_dates, volume=volume,
-                       dividends=dividends, open_prices=open_prices)
+                       dividends=dividends, open_prices=open_prices, fx=fx)
     if start is not None:
         return trim_warmup(res, pd.Timestamp(start), engine.initial_capital)
     if getattr(engine, "trim_warmup", False):
@@ -105,7 +106,7 @@ def parameter_sweep(prices: pd.DataFrame, strategy, base_params: Dict[str, Any],
                     volume: Optional[pd.DataFrame] = None,
                     dividends: Optional[pd.DataFrame] = None,
                     open_prices: Optional[pd.DataFrame] = None,
-                    rf: M.RiskFree = 0.0) -> pd.DataFrame:
+                    rf: M.RiskFree = 0.0, fx=None) -> pd.DataFrame:
     """Sweeps a parameter grid. A flat surface is worth more than a sharp peak.
     Each combination is measured from its own first invested day, since a
     longer lookback has a longer warm-up.
@@ -137,7 +138,8 @@ def parameter_sweep(prices: pd.DataFrame, strategy, base_params: Dict[str, Any],
             if freq is not None and freq != engine.rebalance:
                 eng = _replace(engine, rebalance=freq, anchor_month=12)
             res = _run(prices, weights_cache[key], eng, costs, cash_prices,
-                       volume=volume, dividends=dividends, open_prices=open_prices)
+                       volume=volume, dividends=dividends, open_prices=open_prices,
+                       fx=fx)
             row.update(_stats(res, engine.periods_per_year, rf))
         except Exception as exc:  # an invalid combination must not halt the sweep
             row["error"] = str(exc)[:120]
@@ -162,7 +164,7 @@ def walk_forward(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                  dividends: Optional[pd.DataFrame] = None,
                  open_prices: Optional[pd.DataFrame] = None,
                  start: Optional[pd.Timestamp] = None,
-                 rf: M.RiskFree = 0.0) -> pd.DataFrame:
+                 rf: M.RiskFree = 0.0, fx=None) -> pd.DataFrame:
     """Splits the history into successive folds and measures stability.
 
     Signals are generated over the full history, then evaluated fold by
@@ -172,7 +174,7 @@ def walk_forward(prices: pd.DataFrame, strategy, params: Dict[str, Any],
     """
     w = _weights_for(strategy, prices, params, exog, weights, cash_prices)
     res = _run(prices, w, engine, costs, cash_prices, rebalance_dates, volume,
-               dividends, open_prices, start)
+               dividends, open_prices, start, fx)
     # The first retained day is the origin (a zero return by construction),
     # not an observation.
     return fold_stats(res.returns.iloc[1:], n_folds, engine.periods_per_year, rf)
@@ -188,11 +190,11 @@ def in_out_sample(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                   dividends: Optional[pd.DataFrame] = None,
                   open_prices: Optional[pd.DataFrame] = None,
                   start: Optional[pd.Timestamp] = None,
-                  rf: M.RiskFree = 0.0) -> pd.DataFrame:
+                  rf: M.RiskFree = 0.0, fx=None) -> pd.DataFrame:
     """Compares the first portion of the history to the last."""
     w = _weights_for(strategy, prices, params, exog, weights, cash_prices)
     res = _run(prices, w, engine, costs, cash_prices, rebalance_dates, volume,
-               dividends, open_prices, start)
+               dividends, open_prices, start, fx)
     r_all = res.returns.iloc[1:]
     cut = int(len(r_all) * split)
     parts = {"In-sample": r_all.iloc[:cut],
@@ -225,7 +227,7 @@ def cost_sensitivity(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                      dividends: Optional[pd.DataFrame] = None,
                      open_prices: Optional[pd.DataFrame] = None,
                      start: Optional[pd.Timestamp] = None,
-                     rf: M.RiskFree = 0.0) -> pd.DataFrame:
+                     rf: M.RiskFree = 0.0, fx=None) -> pd.DataFrame:
     """At what level of frictions does the strategy stop paying off?
 
     The level is a flat cost in bps of each trade's value, charged on
@@ -242,9 +244,13 @@ def cost_sensitivity(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                        borrow_rate_pa=costs.borrow_rate_pa,
                        management_fee_pa=getattr(costs, "management_fee_pa", 0.0),
                        apply_frictions_to_fee_liquidation=getattr(
-                           costs, "apply_frictions_to_fee_liquidation", True))
+                           costs, "apply_frictions_to_fee_liquidation", True),
+                       # The exchange spread is not the axis being varied:
+                       # it stays at the configured value.
+                       fx_spread_bps=getattr(costs, "fx_spread_bps", 0.0),
+                       foreign_cash_rate_pa=getattr(costs, "foreign_cash_rate_pa", 0.0))
         res = _run(prices, w, engine, c, cash_prices, rebalance_dates, None,
-                   dividends, open_prices, start)
+                   dividends, open_prices, start, fx)
         rows.append({
             COST_AXIS: lv,
             "CAGR": M.cagr(res.equity, engine.periods_per_year),
@@ -358,7 +364,7 @@ def rebalance_day_sweep(prices: pd.DataFrame, strategy, params: Dict[str, Any],
                         volume: Optional[pd.DataFrame] = None,
                         dividends: Optional[pd.DataFrame] = None,
                         open_prices: Optional[pd.DataFrame] = None,
-                        rf: M.RiskFree = 0.0) -> pd.DataFrame:
+                        rf: M.RiskFree = 0.0, fx=None) -> pd.DataFrame:
     """Runs the same strategy on every plausible trading day.
 
     The day a strategy rebalances is a parameter like any other, and one
@@ -393,7 +399,7 @@ def rebalance_day_sweep(prices: pd.DataFrame, strategy, params: Dict[str, Any],
             w = (weights if weights is not None
                  else strategy.generate(prices, params, exog, cash_prices))
             res = _run(prices, w, eng, costs, cash_prices, volume=volume,
-                       dividends=dividends, open_prices=open_prices)
+                       dividends=dividends, open_prices=open_prices, fx=fx)
             row = {"Trading day": spec.label()}
             row.update(_stats(res, engine.periods_per_year, rf))
             rows.append(row)

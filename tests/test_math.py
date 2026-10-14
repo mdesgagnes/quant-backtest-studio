@@ -583,6 +583,55 @@ def test_strategy_and_benchmark_both_pay_their_entry():
     assert win.returns.iloc[0] == 0.0
 
 
+def test_compared_strategies_enter_on_the_shared_start():
+    from qbt import compare as CMP
+    from qbt.engine import align_start, common_start, first_active_date
+    px, _, _ = _market(n=700, m=3, seed=8)
+    eng = EngineConfig(initial_capital=100_000.0)
+    cost = CostConfig(commission_bps=5, slippage_bps=25)
+    rate = 30 / 10_000.0
+    entry = rate / (1 + rate)
+
+    # Two strategies hold the same single asset; one warms up for 40
+    # sessions, the other for 200.
+    def holds_from(n):
+        w = pd.DataFrame(0.0, px.index, px.columns)
+        w.iloc[n:, 0] = 1.0
+        return w
+    early_w, late_w = holds_from(40), holds_from(200)
+    early = run_backtest(px, early_w, eng, cost)
+    late = run_backtest(px, late_w, eng, cost)
+    start = common_start(early, late)
+    assert start == first_active_date(late) > first_active_date(early)
+
+    # Merely trimmed, the earlier one is cut down to that date without ever
+    # paying to enter on it.
+    e_trim, l_trim = align_start(early, late, initial_capital=100_000.0)
+    assert e_trim.returns.iloc[0] == 0.0 and np.isclose(l_trim.returns.iloc[0], -entry)
+
+    # Run again with its weights held at zero until then, it enters on the
+    # shared date like the other, and the two start level.
+    again = run_backtest(px, CMP.masked_until(early_w, start, eng.execution_lag), eng, cost)
+    assert first_active_date(again) == start
+    e2, l2 = align_start(again, late, initial_capital=100_000.0)
+    assert np.isclose(e2.returns.iloc[0], -entry)
+    assert np.isclose(e2.equity.iloc[0], l2.equity.iloc[0])
+    assert np.allclose(e2.equity.values, l2.equity.values)    # same holding, same path
+    # Nothing before `start` is touched but the weights themselves.
+    m = CMP.masked_until(early_w, start, eng.execution_lag)
+    assert (m.loc[:px.index[150]].sum().sum() == 0.0) and m.loc[start].equals(early_w.loc[start])
+
+    # Tables over the same results.
+    allr = {"A": early, "B": late}
+    assert list(CMP.unique_labels(["A"], ["A", "A", "C"])) == ["A (2)", "A (3)", "C"]
+    t = CMP.comparison_table({"A": e2, "B": l2}, None, 0.0, 252)
+    assert np.isclose(t.loc["CAGR", "A"], t.loc["CAGR", "B"])
+    h = CMP.head_to_head("A", {"A": e2, "B": l2}, 0.0, 252)
+    assert abs(h.loc["B", "Excess CAGR"]) < 1e-9
+    assert CMP.calendar_year_table(allr).shape[1] == 2
+    assert np.isclose(CMP.return_correlation({"A": e2, "B": l2}).loc["A", "B"], 1.0)
+
+
 if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore")

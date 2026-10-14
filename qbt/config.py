@@ -38,6 +38,13 @@ class DataConfig:
     # option -- this changes only which one a fresh run starts on.
     adjusted: bool = False                 # True = total-return prices
     use_dividends: bool = True             # credit dividends as cash (needs adjusted=False)
+    # Currency. Empty = off: every price is read as already being in one
+    # currency, exactly as before. Set (e.g. "CAD"), every instrument quoted
+    # in another currency is converted into it at the daily exchange rate.
+    base_currency: str = ""
+    # Instrument -> currency, only where it differs from what Yahoo reports
+    # (or where the data came from a file). "GBp" means pence.
+    currencies: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -60,6 +67,12 @@ class CostConfig:
     cash_rate_pa: float = 0.0              # used when no cash_proxy is provided
     borrow_rate_pa: float = 0.0            # cost of leverage beyond 100%
     management_fee_pa: float = 0.0         # accrued daily, deducted monthly
+    # Moving money between currencies. The spread is charged on the amount
+    # actually converted, which is the NET of what a rebalance buys and sells
+    # in that currency. Typical: a few bps (IBKR, Norbert's gambit), 100-200
+    # bps at a bank-owned broker. Only used when a base currency is set.
+    fx_spread_bps: float = 25.0
+    foreign_cash_rate_pa: float = 0.0      # interest on balances held in a foreign currency
 
 
 @dataclass
@@ -86,6 +99,12 @@ class EngineConfig:
     cash_sweep: str = "none"               # none | W | M | Q
     cash_sweep_threshold: float = 0.0      # cash weight that triggers it; 0 = off
     cash_buffer: float = 0.01              # cash weight left after reinvesting
+    # Foreign cash between trades. "net": at every trade the balance in each
+    # foreign currency is settled to zero -- buys and sells in that currency
+    # net off first, and only the remainder is converted. "hold": proceeds
+    # and dividends stay in the foreign currency and fund the next purchase
+    # there; money is converted only to cover a shortfall.
+    fx_cash: str = "net"                   # net | hold
 
 
 @dataclass
@@ -179,6 +198,21 @@ class RunConfig:
         if self.costs.management_fee_pa > 0.10:
             errs.append("WARNING: a management fee above 10% per year is "
                         "almost certainly a units error.")
+        base = (self.data.base_currency or "").strip()
+        if base and not (len(base) == 3 and base.isalpha()):
+            errs.append("The base currency must be a three-letter code such as CAD.")
+        for k, v in (self.data.currencies or {}).items():
+            if not (isinstance(v, str) and len(v.strip()) == 3 and v.strip().isalpha()):
+                errs.append(f"Currency for {k} must be a three-letter code.")
+        if self.engine.fx_cash not in ("net", "hold"):
+            errs.append("fx_cash must be 'net' or 'hold'.")
+        if self.costs.fx_spread_bps < 0:
+            errs.append("The exchange spread cannot be negative.")
+        if self.costs.fx_spread_bps > 300:
+            errs.append("WARNING: an exchange spread above 3% each way is "
+                        "almost certainly a units error.")
+        if self.costs.foreign_cash_rate_pa < 0:
+            errs.append("The foreign cash rate cannot be negative.")
         if self.data.use_dividends and self.data.adjusted:
             errs.append(
                 "Dividends cannot be credited on top of adjusted prices: they "

@@ -352,6 +352,61 @@ over, the average value it accrued on, the rate, and how it was paid.
 
 ---
 
+## 3 sexies. Currencies
+
+An account can hold instruments quoted in different currencies: a Canadian
+investor with XIC.TO and SPY in one portfolio, say. **Base currency**
+(sidebar, *Currency*) says which currency the account is measured in. Left
+on *Off*, every price is read as already being in one currency, exactly as
+before.
+
+With a base currency set:
+
+- **Each instrument's currency** is read from Yahoo Finance, falling back to
+  the ticker suffix (`.TO` is CAD, `.L` is pence, no suffix is USD), and is
+  shown in a table with how it was decided. Correct any of them in the
+  override box (`VOD.L: GBp`). It is the currency the instrument is *quoted*
+  in, not the currency of what it holds: XUU.TO holds US stocks but is
+  quoted in CAD, so it is not converted. Pence (`GBp`), agorot and South
+  African cents are divided by 100.
+- **Prices, opens, highs, lows, adjusted closes and dividends** of foreign
+  instruments are converted at each day's exchange rate before anything else
+  runs, so signals, the benchmark, attribution and tax all see the
+  investor's currency, and a US position returns the stock's return plus the
+  move in the exchange rate. Volume is not touched. Rates come from Yahoo
+  (direct pair, its inverse, or a cross through USD); a one-day move above
+  7% is flagged as a possible bad print.
+- **The account keeps a cash balance per currency.** A foreign trade settles
+  in its own currency and a dividend lands there. The spread (*Exchange
+  spread*, in Frictions) is paid only on money that actually changes
+  currency, on the *net* amount: selling one US ETF to buy another costs no
+  conversion. *Convert at each trade* settles every foreign balance at each
+  rebalance; *Hold until needed* keeps proceeds and dividends in the foreign
+  currency, earning its interest and moving with its rate, and converts only
+  to cover a shortfall.
+- **Costs** appear in `costs` like any other, and apart in
+  `BacktestResult.fx_costs`. The Positions tab shows what was paid, the
+  average foreign cash held, and exposure by currency. The trade log gains
+  *Currency*, *Local Price* and *FX Rate*.
+
+A trade at the close converts at that day's closing rate. A trade at the
+open converts at the **previous close's** rate -- the only one that exists
+when the order is placed -- for the fill price, the conversion of cash, and
+the dividends that go ex at the open; the rest of the day then earns the move
+from that rate to the close. So no fill, and no order size, depends on an
+exchange rate from later that day. (It is stale by the overnight move, which
+is noise, not bias.) What is deliberately simplified: the intraday exchange
+rate is not modelled; one spread is applied to every currency; a cash proxy is read in its own
+currency as the cash rate; the tax module still uses the instrument's
+suffix to class dividends and does not model foreign-currency gains on cash
+held in USD. A benchmark in a foreign currency is converted like any other
+series and, like any benchmark, pays no friction unless you charge it one.
+
+From the library, set `data.base_currency` (and optionally
+`data.currencies`) in the YAML; `run_from_config` converts the same way.
+
+---
+
 ## 4. Exporting results
 
 Every export reproduces the backtest currently on screen. Everything lives
@@ -521,6 +576,25 @@ understates the bar by roughly its dividend yield every year. On a Canadian
 equity ETF that is around two to three points annually - more than enough
 to turn a losing strategy into an apparent winner. The third option exists
 so the gap can be measured, not because it makes a fair comparison.
+
+**Comparing strategies.** Under *Compare strategies* in the sidebar, add up
+to three more models, each with its own parameters. They run on the same
+universe, rebalance calendar, execution rules and frictions as the main
+strategy, so a gap between two of them is the models' alone. The **Compare**
+tab shows them together: growth and drawdown curves, a full statistics
+table, the main strategy against each of the others (excess return,
+tracking error, information ratio, beta, correlation, share of months
+ahead), calendar-year returns, and the correlation of their returns.
+
+Any of them can also be the benchmark: choose *Another strategy* under
+*Comparison benchmark*, then pick which one under *Compare strategies*. Every
+existing tab then measures against it. A strategy benchmark runs like any
+other, with the full frictions, so the benchmark convention and
+benchmark-frictions choices do not apply to it.
+
+All strategies are measured from the latest date any of them first holds a
+position. One that was invested earlier is run again with its weights held at
+zero until then, so each buys, and pays its entry cost, on the same date.
 
 **Benchmark frictions.** Off by default: the benchmark is a frictionless
 index. "Charge the benchmark these frictions" lets you pick any of
@@ -1378,6 +1452,12 @@ against the returns, the robustness re-runs against the headline result,
 and the tax module against hand-computed ACB. Run it with
 `python tests/test_math.py` (or `python -m pytest tests`).
 
+`tests/test_fx.py` does the same for currencies: the conversion against price
+times rate, pence, the rate routes, a zero-cost multi-currency run against the
+converted single-currency run, the entry spread against its closed form, no
+conversion on a rotation between two USD instruments, foreign cash held and
+revalued, and a ledger that reconciles every day under every engine option.
+
 Conventions worth knowing:
 
 - A value curve built from returns starts at the base value one period
@@ -1507,6 +1587,7 @@ qbt/
   presets.py               preset universes
   returns_input.py         imported return streams
   engine.py                day-by-day simulation
+  fx.py                    currencies: detection, exchange rates, conversion
   metrics.py                performance and risk
   charts.py                Plotly charts (dark in-app theme + light print theme)
   report.py                tearsheet HTML report builder

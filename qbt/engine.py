@@ -40,12 +40,13 @@ Simulation model, explicit and verifiable:
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from .config import EngineConfig, CostConfig
+from .fx import FxBook
 from .schedule import RebalanceSpec, build_calendar
 
 _RESAMPLE = {"D": None, "W": "W-FRI", "M": "ME", "Q": "QE", "A": "YE"}
@@ -88,6 +89,13 @@ class BacktestResult:
     # management-fee deduction (with what it was accrued on and how it was
     # paid), each dividend, and each cash reinvestment.
     cash_flows: Optional[pd.DataFrame] = None
+    # Multi-currency runs only. `foreign_cash`: what each foreign-currency
+    # cash balance is worth in the base currency, per day. `fx_costs`: the
+    # spread paid on conversions, as a fraction of the previous day's value
+    # (already inside `costs`; shown apart so the friction can be read on
+    # its own).
+    foreign_cash: Optional[pd.DataFrame] = None
+    fx_costs: Optional[pd.Series] = None
 
     @property
     def nav(self) -> pd.Series:
@@ -175,8 +183,20 @@ def run_backtest(prices: pd.DataFrame,
                  rebalance_dates: Optional[pd.DatetimeIndex] = None,
                  open_prices: Optional[pd.DataFrame] = None,
                  dividends: Optional[pd.DataFrame] = None,
-                 volume: Optional[pd.DataFrame] = None) -> BacktestResult:
+                 volume: Optional[pd.DataFrame] = None,
+                 fx: Optional[FxBook] = None) -> BacktestResult:
     """Simulates the portfolio day by day. Returns all diagnostics.
+
+    `fx` switches on multi-currency accounting. `prices` and `dividends`
+    (and `open_prices`) must already be in the base currency -- the book
+    converts them once, up front, so signals and everything else live in the
+    investor's currency -- and `fx` says which instrument is quoted in which
+    currency, with the daily rates. The account then keeps one cash balance
+    per foreign currency. A trade in a foreign instrument settles in that
+    currency; dividends land there; the spread is paid only on the NET
+    amount that crosses between currencies at a settlement (see
+    `EngineConfig.fx_cash`). Without foreign instruments, or without `fx`,
+    nothing below differs from a single-currency run.
 
     `rebalance_dates` overrides the periodic calendar when dates are imposed
     externally (e.g. an imported target-weights file). These dates are
@@ -321,6 +341,53 @@ def run_backtest(prices: pd.DataFrame,
     n, m = len(idx), len(assets)
     T = w_exec.to_numpy(dtype=float)
 
+    # --- Currencies -----------------------------------------------------
+    # K foreign currencies actually present in the book. With none, every
+    # branch below guarded by `K` is skipped and the arithmetic is the
+    # single-currency arithmetic, operation for operation.
+    fx_ccys: List[str] = fx.foreign_currencies(assets) if fx is not None else []
+    K = len(fx_ccys)
+    kidx = np.full(m, -1, dtype=int)            # which foreign currency each asset settles in
+    for j, a in enumerate(assets):
+        if K and fx.currency_of(a) in fx_ccys:
+            kidx[j] = fx_ccys.index(fx.currency_of(a))
+    FXR = fx.aligned(idx, fx_ccys) if K else np.ones((n, 0))   # base per foreign unit
+    # The rate at which the day's trades, conversions and dividends happen.
+    # A fill at the close can use the close rate. A fill at the open cannot:
+    # that day's close is in the future, and the only rate known at the open
+    # is the previous close. Using today's would let a fill (and the size of
+    # the order) depend on information that does not exist yet. The rest of
+    # the day then earns the move from that rate to the close.
+    FXE = (np.vstack([FXR[:1], FXR[:-1]]) if (K and trade_at_open) else FXR)
+    fx_spread = float(getattr(costs, "fx_spread_bps", 0.0)) / 10_000.0 if K else 0.0
+    fx_hold = bool(K) and str(getattr(engine, "fx_cash", "net")) == "hold"
+    foreign_daily = ((1.0 + float(getattr(costs, "foreign_cash_rate_pa", 0.0)))
+                     ** (1.0 / ppy) - 1.0) if K else 0.0
+    # The spread each foreign trade could pay, added to its rate only when
+    # SIZING an order. The order is sized as if every foreign trade were
+    # converted on its own; the actual settlement nets them, so what is
+    # really paid never exceeds what was reserved and cash cannot go short.
+    fxv = np.where(kidx >= 0, fx_spread, 0.0)
+    fc = np.zeros(K)                 # foreign cash, in units of each foreign currency
+    FCV = np.zeros((n, K))           # ... and its worth in base currency, per day
+    FXC = np.zeros(n)
+    fx_day = 0.0                     # spread paid today
+    FX_DUST = 1e-9
+
+    def _fcv(i, rates=None):
+        """Foreign cash, valued in the base currency: at the close rate, or
+        at `rates` (the execution-time rate, for an order placed at the open)."""
+        return float((fc * (FXR if rates is None else rates)[i]).sum()) if K else 0.0
+
+    def _fx_cols(j, i, price_base):
+        """Currency columns for a trade-log row; none in a one-currency run."""
+        if not K:
+            return {}
+        k = kidx[j]
+        rate = 1.0 if k < 0 else float(FXE[i, k])
+        return {"Currency": fx_ccys[k] if k >= 0 else fx.base,
+                "Local Price": float(price_base) / rate, "FX Rate": rate}
+
     # Fee charge dates: the last session of each calendar month. Accrual is
     # daily, the deduction is monthly, which is how a management fee is
     # actually billed.
@@ -358,6 +425,129 @@ def run_backtest(prices: pd.DataFrame,
     def _valid(row):
         return np.isfinite(row) & (row > 0)
 
+    # --- Settling a trade across currencies -----------------------------
+    # `flow` is a trade's cash effect per asset in base units, costs
+    # included (positive = cash in). A foreign instrument's flow moves that
+    # currency's balance; base-currency instruments move the base balance.
+    # The balances are then reconciled: under "net" every foreign balance is
+    # brought to zero, under "hold" only a shortfall is bought. Either way
+    # the spread is paid on the amount converted -- the NET of the day's
+    # buys and sells in that currency, not each trade on its own.
+    kmasks = [kidx == k for k in range(K)]
+    base_mask = kidx < 0
+    KM = np.zeros((m, K))                       # asset -> its foreign currency
+    for k in range(K):
+        KM[kmasks[k], k] = 1.0
+    BM = base_mask.astype(float)
+
+    def _plan(i, flow, detail=False):
+        """What settling `flow` would do, with no side effects:
+        (base cash change, new foreign balances, conversions, reserve),
+        where `reserve` is the base value foreign cash left over could still
+        raise, so feasibility is judged on total liquidity. The conversions
+        are listed only when `detail` asks for them."""
+        fxi = FXE[i]
+        bal = fc + (flow @ KM) / fxi
+        conv = np.minimum(bal, 0.0) if fx_hold else bal      # + sold, - bought
+        value = np.abs(conv) * fxi
+        live = value > FX_DUST
+        c_k = np.where(live, value * fx_spread, 0.0)
+        base_flow = float(flow @ BM) + float(
+            np.where(live, np.where(conv > 0, value, -value) - c_k, 0.0).sum())
+        new_fc = np.where(live, bal - conv, bal)
+        reserve = float((np.clip(new_fc, 0.0, None) * fxi).sum()) * (1.0 - fx_spread)
+        convs = ([(k, float(conv[k]), float(value[k]), float(c_k[k]))
+                  for k in range(K) if live[k]] if detail else None)
+        return base_flow, new_fc, convs, reserve
+
+    def _raise_from_foreign(i, date, short, fxi=None):
+        """Sells foreign cash, largest first, to raise `short` of base cash,
+        at the execution-time rate unless `fxi` says otherwise."""
+        nonlocal cash, fx_day
+        fxi = FXE[i] if fxi is None else fxi
+        got = 0.0
+        for k in np.argsort(-(fc * fxi)):
+            if short - got <= FX_DUST:
+                break
+            if fc[k] <= 0:
+                continue
+            per_unit = fxi[k] * (1.0 - fx_spread)
+            take = min(short - got, fc[k] * per_unit)
+            units = take / per_unit
+            c_k = units * fxi[k] * fx_spread
+            fc[k] = 0.0 if units >= fc[k] * (1.0 - 1e-12) else fc[k] - units
+            cash += take
+            fx_day += c_k
+            got += take
+            flows.append({"Date": date, "Type": "FX conversion",
+                          "Instrument": fx_ccys[k], "Amount": float(take),
+                          "Units": float(units), "Per unit": float(fxi[k]),
+                          "Trading costs": float(c_k)})
+        return got
+
+    def _settle(i, date, flow):
+        """Books `flow`, converting as the policy requires. The spread paid
+        is added to today's `fx_day`."""
+        nonlocal cash, fx_day
+        fxi = FXE[i]
+        base_flow, new_fc, convs, _ = _plan(i, flow, True)
+        for k, conv, value, c_k in convs:
+            fx_day += c_k
+            flows.append({"Date": date, "Type": "FX conversion",
+                          "Instrument": fx_ccys[k],
+                          "Amount": float((value if conv > 0 else -value) - c_k),
+                          "Units": float(conv), "Per unit": float(fxi[k]),
+                          "Trading costs": float(c_k)})
+        cash += base_flow
+        fc[:] = new_fc
+        if fx_hold and cash < -FX_DUST:
+            _raise_from_foreign(i, date, -cash)
+
+    def _fit_buys(i, sells, buys, px_, rate):
+        """The largest fraction of the buys that the account can pay for,
+        spread included, found against the same settlement it will use.
+
+        Liquidity falls steadily as more is bought, and is piecewise linear
+        (it bends only where a currency's balance changes sign), so a
+        bracketed secant search lands on it in a handful of steps."""
+        def liquidity(lam):
+            d = sells + lam * buys
+            flow = -d * px_ - np.abs(d) * px_ * rate
+            base_flow, _, _, reserve = _plan(i, flow)
+            return cash + base_flow + reserve
+        f_hi = liquidity(1.0)
+        if f_hi >= -1e-9:
+            return 1.0
+        f_lo = liquidity(0.0)
+        if f_lo < -1e-9:
+            return 0.0
+        lo, hi, side = 0.0, 1.0, 0
+        for _ in range(80):
+            lam = hi - f_hi * (hi - lo) / (f_hi - f_lo)
+            f = liquidity(lam)
+            if -1e-9 <= f <= 1e-7:
+                return lam
+            if f > 0:
+                lo, f_lo = lam, f
+                if side == 1:
+                    f_hi *= 0.5            # Illinois step: keeps the secant from stalling
+                side = 1
+            else:
+                hi, f_hi = lam, f
+                if side == -1:
+                    f_lo *= 0.5
+                side = -1
+        return lo
+
+    def _idle(i, date):
+        """No trade today. Under net settlement, foreign cash left from
+        dividends still goes home. Returns (spread paid, turnover)."""
+        if K and not fx_hold and np.any(np.abs(fc * FXE[i]) > FX_DUST):
+            before = fx_day
+            _settle(i, date, np.zeros(m))
+            return fx_day - before, 0.0
+        return 0.0, 0.0
+
     def _execute(i, date, price_row, portfolio_value):
         """Moves the book to the target at `price_row`. Returns cost paid.
 
@@ -389,7 +579,7 @@ def run_backtest(prices: pd.DataFrame,
         tiny = (notional < min_trade * portfolio_value) & ~exiting
         delta = np.where(tiny, 0.0, delta)
         if not np.any(delta):
-            return 0.0, 0.0
+            return _idle(i, date)
 
         # The rate is computed once, from the size implied by the target
         # weights, and reused through the cash-availability adjustment
@@ -415,17 +605,25 @@ def run_backtest(prices: pd.DataFrame,
         buy_notional_i = buys * np.where(ok, price_row, 0.0)
         buy_notional = float(buy_notional_i.sum())
         if buy_notional > 0:
-            need = float((buy_notional_i * (1.0 + rate)).sum())
-            if need > cash_avail + 1e-9:
-                scale = max(0.0, cash_avail / need) if need > 1e-12 else 0.0
-                buys = buys * min(1.0, scale)
+            if K:
+                # Several currencies: how much can be bought depends on how
+                # much of it must be converted, so the fraction is solved
+                # against the settlement itself rather than a flat rate.
+                buys = buys * _fit_buys(i, sells, buys, np.where(ok, price_row, 0.0), rate)
                 if whole:
                     buys = np.trunc(buys)
+            else:
+                need = float((buy_notional_i * (1.0 + rate)).sum())
+                if need > cash_avail + 1e-9:
+                    scale = max(0.0, cash_avail / need) if need > 1e-12 else 0.0
+                    buys = buys * min(1.0, scale)
+                    if whole:
+                        buys = np.trunc(buys)
 
         delta = sells + buys
         notional = np.abs(delta) * np.where(ok, price_row, 0.0)
         if not np.any(delta):
-            return 0.0, 0.0
+            return _idle(i, date)
         cost = float((notional * rate).sum())
         net_spend = float((delta * np.where(ok, price_row, 0.0)).sum())
 
@@ -437,9 +635,15 @@ def run_backtest(prices: pd.DataFrame,
                     "Change": delta[j], "Price": float(price_row[j]),
                     "Notional": float(abs(delta[j]) * price_row[j]),
                     "Effective Cost (bps)": float(rate[j]) * 10_000.0,
+                    **_fx_cols(j, i, price_row[j]),
                 })
         shares = shares + delta
-        cash -= net_spend + cost
+        if K:
+            before = fx_day
+            _settle(i, date, -(delta * np.where(ok, price_row, 0.0)) - notional * rate)
+            cost += fx_day - before        # the spread is a cost of this trade
+        else:
+            cash -= net_spend + cost
         return cost, float(notional.sum()) / portfolio_value
 
     def _reinvest(i, date, price_row, portfolio_value):
@@ -454,7 +658,7 @@ def run_backtest(prices: pd.DataFrame,
         ok = _valid(price_row) & (last_target > 0)
         if portfolio_value <= 0 or not ok.any():
             return 0.0, 0.0
-        excess = cash - buffer_w * portfolio_value
+        excess = cash + _fcv(i, FXE) - buffer_w * portfolio_value
         if excess <= max(min_trade * portfolio_value, 1e-9):
             return 0.0, 0.0
         px_ = np.where(ok, price_row, 1.0)
@@ -465,7 +669,9 @@ def run_backtest(prices: pd.DataFrame,
         spend = min(excess, total_gap)
         alloc = gaps * (spend / total_gap)              # dollars, costs included
         rate = commission_rate + _rate_vector(i, alloc)
-        buy = np.where(ok, alloc / (1.0 + rate) / px_, 0.0)
+        # A foreign purchase may need converting first: size it as if it
+        # does. What settlement really charges is never more than this.
+        buy = np.where(ok, alloc / (1.0 + (rate + fxv if K else rate)) / px_, 0.0)
         if whole:
             buy = np.floor(buy)
         notional = buy * px_
@@ -482,14 +688,21 @@ def run_backtest(prices: pd.DataFrame,
                     "Notional": float(notional[j]),
                     "Effective Cost (bps)": float(rate[j]) * 10_000.0,
                     "Reason": "Cash reinvestment",
+                    **_fx_cols(j, i, price_row[j]),
                 })
         shares = shares + buy
-        cash -= float(notional.sum()) + cost
+        fx_paid = 0.0
+        if K:
+            before = fx_day
+            _settle(i, date, -notional - notional * rate)
+            fx_paid = fx_day - before
+        else:
+            cash -= float(notional.sum()) + cost
         flows.append({"Date": date, "Type": "Cash reinvestment",
-                      "Amount": -(float(notional.sum()) + cost),
-                      "Trading costs": cost, "Cash before": cash_before,
+                      "Amount": -(float(notional.sum()) + cost + fx_paid),
+                      "Trading costs": cost + fx_paid, "Cash before": cash_before,
                       "Cash after": cash})
-        return cost, float(notional.sum()) / portfolio_value
+        return cost + fx_paid, float(notional.sum()) / portfolio_value
 
     # ------------------------------------------------------------------
     # One day at a time. Nothing below reads a future row.
@@ -502,6 +715,7 @@ def run_backtest(prices: pd.DataFrame,
         shares_open = shares.copy()        # units carried into the day
         cash_pnl = 0.0
         div_vec = np.zeros(m)
+        fx_day = 0.0                       # exchange spread paid today
 
         if i > 0:
             # 1) Cash earns overnight; leverage is charged for.
@@ -511,12 +725,32 @@ def run_backtest(prices: pd.DataFrame,
             lev = max(0.0, gross_prev - prev_value)
             cash -= lev * borrow_daily
             cash_pnl -= lev * borrow_daily
+            if K:
+                # Foreign cash earns its own rate, and is worth whatever the
+                # exchange rate says today: that revaluation is the currency
+                # return on cash, and sits on the cash line of the ledger.
+                fc_pre = fc.copy()
+                fc *= (1.0 + foreign_daily)
+                if trade_at_open:
+                    # Interest, at the rate it accrued under. The exchange-rate
+                    # move is earned after the open, on what is held then.
+                    cash_pnl += float(((fc - fc_pre) * FXR[i - 1]).sum())
+                else:
+                    cash_pnl += (float((fc * FXR[i]).sum())
+                                 - float((fc_pre * FXR[i - 1]).sum()))
 
             # 2) Dividends go ex at the open, on the units held into the day.
             if div_ps[i].any():
                 div_vec = shares * div_ps[i]
                 div_i = float(div_vec.sum())
-                cash += div_i
+                if K:
+                    # A dividend is paid in the currency of its instrument
+                    # and stays there until the account converts it.
+                    cash += float(div_vec[base_mask].sum())
+                    for k in range(K):
+                        fc[k] += float(div_vec[kmasks[k]].sum()) / FXE[i, k]
+                else:
+                    cash += div_i
                 for j in np.flatnonzero(div_vec):
                     flows.append({"Date": date, "Type": "Dividend",
                                   "Instrument": assets[j],
@@ -536,16 +770,21 @@ def run_backtest(prices: pd.DataFrame,
         trades_at_open = trade_at_open and (can_trade or can_sweep)
         if trades_at_open:
             mark_open = np.where(_valid(exec_px[i]), exec_px[i], 0.0)
-            value_at_open = float((shares * mark_open).sum()) + cash
+            value_at_open = float((shares * mark_open).sum()) + cash + _fcv(i, FXE)
             if can_trade:
                 cost_i, tr = _execute(i, date, exec_px[i], value_at_open)
             else:
                 cost_i, tr = _reinvest(i, date, exec_px[i], value_at_open)
             turn[i] = tr
 
+        if K and trade_at_open and i > 0:
+            # Foreign cash held after the open's trades earns the move from
+            # the rate it was converted at to the close.
+            cash_pnl += float((fc * (FXR[i] - FXE[i])).sum())
+
         # 4) Mark to the close.
         mark = np.where(_valid(close_px[i]), close_px[i], 0.0)
-        value = float((shares * mark).sum()) + cash
+        value = float((shares * mark).sum()) + cash + _fcv(i)
 
         # Price P&L per instrument. Trading at the open splits the day:
         # the overnight move on the units carried in, the intraday move on
@@ -569,7 +808,7 @@ def run_backtest(prices: pd.DataFrame,
             else:
                 cost_i, tr = _reinvest(i, date, close_px[i], value)
             turn[i] = tr
-            value = float((shares * mark).sum()) + cash
+            value = float((shares * mark).sum()) + cash + _fcv(i)
 
         # 5) Management fee: accrued every day on the marked value,
         #    deducted once a month.
@@ -586,7 +825,14 @@ def run_backtest(prices: pd.DataFrame,
                 fee_i = min(fee_accrued, max(0.0, value))
                 cash_before_fee = cash
                 raised = 0.0
+                fx_raise_cost = 0.0
                 shortfall = fee_i - cash
+                if shortfall > 0 and K:
+                    # Idle foreign cash pays before any holding is sold.
+                    before = fx_day
+                    raised += _raise_from_foreign(i, date, shortfall, FXR[i])
+                    fx_raise_cost = fx_day - before
+                    shortfall = fee_i - cash
                 if shortfall > 0:
                     holdings_val = float((shares * mark).sum())
                     if holdings_val > 1e-12:
@@ -603,10 +849,15 @@ def run_backtest(prices: pd.DataFrame,
                         # single-pass approach as an ordinary trade, not a
                         # fixed-point iteration.
                         naive_keep = max(0.0, 1.0 - shortfall / holdings_val)
-                        if apply_fee_frictions:
+                        if apply_fee_frictions or K:
                             naive_sold = shares * (1.0 - naive_keep)
                             naive_notional = np.abs(naive_sold * mark)
-                            rate0 = commission_rate + _rate_vector(i, naive_notional)
+                            # A foreign holding sold for the fee is converted
+                            # on the spot, so its spread is part of the rate.
+                            rate0 = ((commission_rate + _rate_vector(i, naive_notional))
+                                     if apply_fee_frictions else np.zeros(m))
+                            if K:
+                                rate0 = rate0 + fxv
                             sold_total = float(naive_notional.sum())
                             # The rate weighted by what is actually being
                             # SOLD, not by total holdings -- dividing by
@@ -627,8 +878,12 @@ def run_backtest(prices: pd.DataFrame,
                                 sold_shares, shares, mark, rate0, shortfall)
                         proceeds_gross = float((sold_shares * mark).sum())
                         rate_final = np.zeros(m)
-                        if apply_fee_frictions and proceeds_gross > 0:
-                            rate_final = commission_rate + _rate_vector(i, np.abs(sold_shares * mark))
+                        if (apply_fee_frictions or K) and proceeds_gross > 0:
+                            rate_final = ((commission_rate + _rate_vector(i, np.abs(sold_shares * mark)))
+                                          if apply_fee_frictions else np.zeros(m))
+                            if K:
+                                rate_final = rate_final + fxv
+                                fx_day += float((np.abs(sold_shares * mark) * fxv).sum())
                             liq_cost = float((np.abs(sold_shares * mark) * rate_final).sum())
                         # Every sale is logged, whether or not it pays
                         # frictions: units leaving the book are a trade.
@@ -643,11 +898,13 @@ def run_backtest(prices: pd.DataFrame,
                                     "Notional": float(abs(sold_shares[j]) * mark[j]),
                                     "Effective Cost (bps)": float(rate_final[j]) * 10_000.0,
                                     "Reason": "Fee liquidation",
+                                    **_fx_cols(j, i, mark[j]),
                                 })
                         shares = shares - sold_shares
                         cash += proceeds_gross - liq_cost
-                        raised = proceeds_gross - liq_cost
+                        raised += proceeds_gross - liq_cost
                 cash -= fee_i
+                liq_cost += fx_raise_cost
                 flows.append({
                     "Date": date, "Type": "Management fee", "Amount": -fee_i,
                     "Sessions accrued": fee_sessions,
@@ -659,7 +916,7 @@ def run_backtest(prices: pd.DataFrame,
                     "Cash before": cash_before_fee, "Cash after": cash})
                 fee_accrued -= fee_i
                 fee_sessions = 0
-                value = float((shares * mark).sum()) + cash
+                value = float((shares * mark).sum()) + cash + _fcv(i)
 
         nav[i] = value
         if i > 0:
@@ -672,9 +929,12 @@ def run_backtest(prices: pd.DataFrame,
         fee_arr[i] = fee_i / prev_value if prev_value > 0 else 0.0
         div_arr[i] = div_i / prev_value if prev_value > 0 else 0.0
         SH[i] = shares
+        if K:
+            FCV[i] = fc * FXR[i]
+            FXC[i] = fx_day / prev_value if prev_value > 0 else 0.0
         if value > 0:
             W[i] = shares * mark / value
-            cash_w[i] = cash / value
+            cash_w[i] = (cash + _fcv(i)) / value
 
     weights = pd.DataFrame(W, index=idx, columns=assets)
     trades_df = pd.DataFrame(trades) if trades else pd.DataFrame(
@@ -714,6 +974,8 @@ def run_backtest(prices: pd.DataFrame,
         fees=pd.Series(fee_arr, index=idx),
         contributions=contributions,
         cash_flows=pd.DataFrame(flows, columns=CASH_FLOW_COLUMNS),
+        foreign_cash=(pd.DataFrame(FCV, index=idx, columns=fx_ccys) if K else None),
+        fx_costs=(pd.Series(FXC, index=idx) if K else None),
     )
 
 
@@ -796,6 +1058,9 @@ def trim_warmup(res: BacktestResult, start: Optional[pd.Timestamp] = None,
         fees=(res.fees.loc[keep] if res.fees is not None else None),
         contributions=_trim_contrib(res.contributions, keep, entry),
         cash_flows=_cut_flows(res.cash_flows, start, None),
+        foreign_cash=(res.foreign_cash.loc[keep]
+                      if res.foreign_cash is not None else None),
+        fx_costs=(res.fx_costs.loc[keep] if res.fx_costs is not None else None),
     )
 
 
@@ -837,7 +1102,8 @@ def window(res: BacktestResult, start: Optional[pd.Timestamp] = None,
         trades=trades, dividend_income=cut(out.dividend_income),
         shares=cut(out.shares), fees=cut(out.fees),
         contributions=cut(out.contributions),
-        cash_flows=_cut_flows(out.cash_flows, None, keep[-1]))
+        cash_flows=_cut_flows(out.cash_flows, None, keep[-1]),
+        foreign_cash=cut(out.foreign_cash), fx_costs=cut(out.fx_costs))
 
 
 def _cut_flows(f: Optional[pd.DataFrame], start, end) -> Optional[pd.DataFrame]:
