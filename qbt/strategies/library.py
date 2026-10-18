@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from .base import (
-    Param, register, sma, ema, total_return, realized_vol, rsi,
+    Param, register, sma, ema, total_return, realized_vol, downside_vol, rsi,
     efficiency_ratio, size_equal, size_inverse_vol, apply_vol_target,
 )
 

@@ -675,3 +675,14 @@ def test_executive_summary_lists_every_position_and_cash():
         w3 = w2[px3.columns]
         r3 = run_backtest(px3, w3, EngineConfig(min_trade_weight=0.0, rebalance="M"), ZERO)
         assert set(current_weights_table(r3)["Instrument"]) == set(px.columns[:k]) | {"Cash"}, k
+
+
+def test_risk_parity_score_with_downside_volatility():
+    """The downside option used to raise NameError (downside_vol was not imported)."""
+    from qbt.strategies import REGISTRY
+    rng = np.random.default_rng(0)
+    idx = pd.bdate_range("2020-01-01", periods=300)
+    px = pd.DataFrame(100 * np.exp(np.cumsum(rng.normal(0, .01, (300, 3)), 0)),
+                      idx, list("ABC"))
+    s = REGISTRY["risk_parity"].score(px, {"downside": True})
+    assert s is not None and s.iloc[-1].notna().all()
