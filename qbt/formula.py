@@ -25,7 +25,7 @@ there is no route from an expression to the interpreter.
 from __future__ import annotations
 
 import ast
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -173,8 +173,6 @@ def build_namespace(price: pd.DataFrame,
         for col in exog.columns:
             key = sanitize(str(col))
             if key and key not in ns:
-                ns[key] = exog[[col]] if False else exog[col].to_frame().reindex(
-                    columns=[col])
                 # a macro series is one column: broadcast it across the universe
                 ns[key] = pd.DataFrame(
                     np.repeat(exog[[col]].to_numpy(), price.shape[1], axis=1),
@@ -190,23 +188,6 @@ def sanitize(name: str) -> str:
     return out.strip("_")
 
 
-def available_names(price_cols: List[str],
-                    exog_cols: Optional[List[str]] = None) -> Dict[str, List[str]]:
-    """What the editor should offer, grouped for display."""
-    groups = {
-        "Data": ["price"],
-        "Trend": ["sma(x, n)", "ema(x, n)", "mom(x, n)"],
-        "Risk": ["vol(x, n)", "dvol(x, n)"],
-        "Oscillators": ["rsi(x, n)", "er(x, n)"],
-        "Statistics": ["zscore(x, n)", "mean(x, n)", "std(x, n)",
-                       "mmax(x, n)", "mmin(x, n)", "shift(x, n)"],
-        "Cross-section": ["pctrank(x)", "rank(x)"],
-        "Shaping": ["ifelse(cond, a, b)", "clip(x, lo, hi)", "abs(x)",
-                    "log(x)", "sign(x)"],
-    }
-    if exog_cols:
-        groups["Imported series"] = [sanitize(str(c)) for c in exog_cols]
-    return groups
 
 
 # ----------------------------------------------------------------------

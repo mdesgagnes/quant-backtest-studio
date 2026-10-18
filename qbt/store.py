@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Tuple
 
 STORE_DIR = os.environ.get("QBT_PRESET_DIR", ".qbt_presets")
@@ -188,8 +187,6 @@ def import_all(text: str, replace: bool = False) -> Tuple[bool, str]:
     return True, msg
 
 
-def store_location() -> str:
-    return os.path.abspath(STORE_FILE)
 
 
 def is_ephemeral() -> bool:

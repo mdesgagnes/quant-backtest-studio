@@ -25,7 +25,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional
 
-import numpy as np
 import pandas as pd
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
@@ -107,15 +106,6 @@ def _semi_months(anchor: int) -> List[int]:
     return sorted({m, ((m + 5) % 12) + 1})
 
 
-def _snap(index: pd.DatetimeIndex, targets: pd.DatetimeIndex,
-          how: str = "next") -> pd.DatetimeIndex:
-    """Maps target dates onto real trading days."""
-    if len(targets) == 0:
-        return pd.DatetimeIndex([])
-    method = "bfill" if how == "next" else "ffill"
-    pos = index.get_indexer(targets, method=method)
-    pos = pos[pos >= 0]
-    return pd.DatetimeIndex(sorted(set(index[pos])))
 
 
 def _period_key(index: pd.DatetimeIndex, spec: RebalanceSpec) -> Optional[pd.Series]:

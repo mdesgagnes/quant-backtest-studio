@@ -103,11 +103,3 @@ def css_variables() -> str:
     return "\n  ".join(f"{k}:{v};" for k, v in pairs)
 
 
-def config_toml() -> str:
-    """Streamlit's own theme block, so its widgets match the CSS."""
-    return (f'[theme]\nbase = "dark"\n'
-            f'primaryColor = "{BRAND["red"]}"\n'
-            f'backgroundColor = "{BRAND["bg"]}"\n'
-            f'secondaryBackgroundColor = "{BRAND["panel"]}"\n'
-            f'textColor = "{BRAND["text"]}"\n'
-            f'font = "sans serif"\n')

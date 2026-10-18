@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import itertools
 from dataclasses import replace as _replace
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -18,7 +18,6 @@ from .engine import run_backtest, BacktestResult, trim_warmup
 from . import metrics as M
 
 
-RunFn = Callable[[pd.DataFrame, Dict[str, Any], EngineConfig, CostConfig], BacktestResult]
 
 
 def _run(prices, w, engine, costs, cash_prices=None, rebalance_dates=None,
@@ -378,7 +377,7 @@ def rebalance_day_sweep(prices: pd.DataFrame, strategy, params: Dict[str, Any],
     evidence the edge is real; a wide one means the reported figure
     depended on a date nobody chose deliberately.
     """
-    from .schedule import RebalanceSpec, day_variants, month_variants
+    from .schedule import day_variants, month_variants
     from .engine import spec_from_engine
     from dataclasses import replace as _replace
 

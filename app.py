@@ -15,11 +15,10 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 import streamlit as st
-import yaml
 
 from qbt.config import (RunConfig, DataConfig, EngineConfig, CostConfig,
                         StrategyConfig, ExogConfig, REBALANCE_RULES)
-from qbt.data import (load_yfinance, load_market_data, load_file, clean_prices,
+from qbt.data import (load_yfinance, load_market_data, clean_prices,
                       excel_sheet_names, MarketData)
 from qbt.exog import load_exog, prepare_exog, exog_report, split_roles
 from qbt.external import (load_target_weights, prepare_target_weights,
@@ -29,7 +28,7 @@ from qbt.engine import (run_backtest, benchmark_result, blended_benchmark,
                         align_results, align_start, first_active_date,
                         benchmark_costs, common_start,
                         window as result_window)
-from qbt.strategies import REGISTRY, get as get_strategy
+from qbt.strategies import REGISTRY
 from qbt import metrics as M
 from qbt import compare as CMP
 from qbt import charts as C
@@ -2129,7 +2128,6 @@ benchmark = st.sidebar.selectbox(
 
 bench_blend: Dict[str, float] = {}
 bench_blend_rule = "A"
-bench_extra: List[str] = []
 if benchmark == BLEND:
     bench_spec = st.sidebar.text_area(
         "Benchmark weights", value=st.session_state.get(
@@ -2156,7 +2154,6 @@ if benchmark == BLEND:
             '<div class="note">' + ", ".join(
                 f"{k} {abs(v)/_tot*100:.0f}%" for k, v in bench_blend.items())
             + "</div>", unsafe_allow_html=True)
-        bench_extra = [t for t in bench_blend if t not in univ_options]
     else:
         st.sidebar.markdown('<div class="flag">No valid weight parsed. Use '
                             'TICKER:WEIGHT.</div>', unsafe_allow_html=True)

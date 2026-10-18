@@ -23,8 +23,8 @@ order is presentational anyway -- weights decide the outcome, not position
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass, asdict
+from typing import Any, Dict, List
 
 # ----------------------------------------------------------------------
 # What a rule can be built from. Each entry is (label, template, needs_n).

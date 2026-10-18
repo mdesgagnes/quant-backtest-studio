@@ -19,7 +19,7 @@ path, two destinations, so the two documents cannot drift apart visually.
 from __future__ import annotations
 
 import io
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 import matplotlib
 matplotlib.use("Agg")   # no display backend needed or wanted here

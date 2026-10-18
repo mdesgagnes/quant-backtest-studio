@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -335,10 +335,3 @@ def excel_sheet_names(file_obj) -> List[str]:
 
 
 # ----------------------------------------------------------------------
-def align_universe(prices: pd.DataFrame, benchmark: Optional[str],
-                   cash_proxy: Optional[str]) -> Dict[str, pd.DataFrame]:
-    """Separates the investable universe from the benchmark and cash proxy."""
-    bench = prices[[benchmark]].copy() if benchmark and benchmark in prices.columns else None
-    cash = prices[[cash_proxy]].copy() if cash_proxy and cash_proxy in prices.columns else None
-    universe = prices.drop(columns=[c for c in (cash_proxy,) if c and c in prices.columns])
-    return {"universe": universe, "benchmark": bench, "cash": cash}

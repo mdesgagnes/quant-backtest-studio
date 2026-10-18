@@ -19,8 +19,7 @@ actually downloaded.
 """
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -50,10 +49,6 @@ NUM = '0.00'
 MONEY = '$#,##0'
 
 # Statistics shown as percentages.
-_PCT_KEYS = {"Total Return", "CAGR", "Volatility", "Max Drawdown", "VaR 95% (daily)",
-             "CVaR 95% (daily)", "% Positive Months", "Best Month", "Worst Month",
-             "Alpha (ann.)", "Risk-adjusted alpha (ann.)", "Tracking Error",
-             "Average Exposure"}
 
 # Two blocks side by side: B..E on the left, G..J on the right.
 LEFT, RIGHT = 2, 7
@@ -140,7 +135,6 @@ def current_weights_table(res) -> pd.DataFrame:
     assigning to it silently overwrites that position with Cash. Which one
     goes missing depends on the strategy, which is how it went unnoticed.
     """
-    last = res.weights.index[-1]
     w = res.weights.iloc[-1]
     t = res.target_weights.reindex(columns=w.index).iloc[-1]
     v = float(res.equity.iloc[-1])

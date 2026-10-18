@@ -298,7 +298,6 @@ def run_backtest(prices: pd.DataFrame,
     ADV_WINDOW = 20
     adv_dollars = None
     sigma = None
-    no_volume_assets: List[str] = []
     if impact_model == "sqrt_vol":
         from .costs import daily_volatility
         sigma = daily_volatility(prices, ADV_WINDOW).to_numpy(dtype=float)
@@ -310,8 +309,6 @@ def run_backtest(prices: pd.DataFrame,
             # own not-yet-complete volume.
             trail = vol.rolling(ADV_WINDOW, min_periods=max(5, ADV_WINDOW // 4)).mean().shift(1)
             adv_dollars = (trail * prices).to_numpy(dtype=float)
-        no_volume_assets = [a for i, a in enumerate(assets)
-                            if adv_dollars is None or not np.isfinite(adv_dollars[:, i]).any()]
 
     impact_bps_10 = float(getattr(costs, "impact_bps_at_10pct_adv", 0.0))
     apply_fee_frictions = bool(getattr(costs, "apply_frictions_to_fee_liquidation", True))

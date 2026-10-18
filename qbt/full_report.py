@@ -23,7 +23,6 @@ import io
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 from . import metrics as M
@@ -309,10 +308,9 @@ def render_full_report_pdf(bundle: Dict[str, Any]) -> bytes:
     from reportlab.lib.units import inch
     from reportlab.lib import colors as rl_colors
     from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
-                                    TableStyle, Image as RLImage, PageBreak,
-                                    KeepTogether)
+                                    TableStyle, Image as RLImage, PageBreak)
     from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+    from reportlab.lib.enums import TA_RIGHT
 
     bg = rl_colors.HexColor(BRAND["bg"])
     panel = rl_colors.HexColor(BRAND["panel"])

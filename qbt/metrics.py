@@ -421,7 +421,6 @@ def trailing_returns(equity: pd.Series, ppy: int = TRADING_DAYS,
 
     end = as_of or eq.index[-1]
     eq = eq.loc[:end]
-    start_all = eq.index[0]
     end_val = float(eq.iloc[-1])
 
     # A return is measured *between* two observations, so the base is the

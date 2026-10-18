@@ -67,8 +67,6 @@ _INDEX_CCY = {
 }
 
 # The currencies offered in the interface; any 3-letter code is accepted.
-COMMON_CURRENCIES = ["CAD", "USD", "EUR", "GBP", "GBp", "CHF", "JPY", "AUD",
-                     "HKD", "SEK", "NOK", "DKK", "NZD", "SGD", "CNY", "INR"]
 
 FX_FILL_LIMIT = 5            # sessions an exchange rate may be carried forward
 JUMP_WARN = 0.07             # a one-day move in a rate worth flagging
