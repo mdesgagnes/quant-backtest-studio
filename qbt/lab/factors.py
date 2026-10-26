@@ -444,7 +444,9 @@ def quantile_returns(scores: pd.DataFrame, prices: pd.DataFrame, n_q: int = 5,
     spread = (tab[n_q] - tab[1]).dropna()
     per_year = TRADING_DAYS / max(1, horizon)
     mean_by_q = tab.mean()
-    mono = float(pd.Series(mean_by_q.values).corr(pd.Series(range(len(mean_by_q))), method="spearman")) \
+    # Spearman by hand (Pearson on ranks): pandas' method="spearman" needs scipy,
+    # which the deployed app does not install.
+    mono = float(pd.Series(mean_by_q.values).rank().corr(pd.Series(range(len(mean_by_q))).rank())) \
         if len(mean_by_q) > 2 else float("nan")
     sd = spread.std(ddof=1)
     return {"table": tab, "mean_by_q": mean_by_q, "spread": spread,

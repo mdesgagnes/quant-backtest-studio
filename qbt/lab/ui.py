@@ -208,6 +208,10 @@ def _tab_factors(S_: Dict[str, Any], ds) -> None:
                                   hypothesis_id=S_.get("hid"))
         S_["screen"] = out
     out = S_.get("screen")
+    if out and "error" not in out and (not out["top"] or "t-stat" not in out["top"][0]):
+        # Every factor failed: show why, rather than an empty or broken table.
+        msgs = sorted({str(r.get("error")) for r in out["top"] if r.get("error")})
+        out = {"error": "No factor could be scored. " + ("; ".join(msgs) or "No data.")}
     if out and "error" not in out:
         rows = pd.DataFrame(out["top"])
         k1, k2 = st.columns(2)
@@ -219,8 +223,12 @@ def _tab_factors(S_: Dict[str, Any], ds) -> None:
         fmt = {c: "{:+.3f}" for c in ("Mean IC", "ICIR")} | {"t-stat": "{:+.2f}", "p": "{:.3f}",
                                                            "p_bonferroni": "{:.3f}", "p_bh": "{:.3f}",
                                                            "Spread Sharpe": "{:+.2f}"}
-        st.dataframe(rows.style.format(fmt, na_rep="n/a").background_gradient(subset=["t-stat"], cmap="RdYlGn", vmin=-4, vmax=4),
-                     hide_index=True, use_container_width=True, height=420)
+        styled = rows.style.format({k: v for k, v in fmt.items() if k in rows}, na_rep="n/a")
+        try:                                         # the colour scale needs matplotlib
+            styled = styled.background_gradient(subset=["t-stat"], cmap="RdYlGn", vmin=-4, vmax=4)
+        except Exception:
+            pass
+        st.dataframe(styled, hide_index=True, use_container_width=True, height=420)
         _section("Inspect one factor")
         key_map = {r["Factor"]: r.get("Key") for r in rows.to_dict("records")}
         pick = st.selectbox("Factor", list(key_map), key="lab_f_pick")

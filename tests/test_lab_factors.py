@@ -95,3 +95,12 @@ def test_zoo_factor_runs_through_engine_and_registry():
     ds = synthetic_dataset(edge=0.05, seed=3)
     res = run_strategy(ds, "zoo_factor", {"factor": "mom_12_1", "top_n": 3})
     assert len(res.returns) > 500 and np.isfinite(res.equity.iloc[-1])
+
+
+def test_screen_needs_no_scipy(px, monkeypatch):
+    """The deployed app does not install scipy; pandas' spearman needs it. A screen must still score every factor."""
+    import sys
+    monkeypatch.setitem(sys.modules, "scipy", None)
+    out = F.screen(px, ["mom_126", "vol_63", "rsi_14"], 21)
+    assert "error" not in out.columns and out["t-stat"].notna().all()
+    assert out["Monotonicity"].notna().all()
