@@ -10,7 +10,7 @@ interface (`app.py`) is just a front end: all logic lives in pure functions.
 
 ---
 
-## 0. Two workspaces
+## 0. Three workspaces
 
 The sidebar switches between them.
 
@@ -43,6 +43,18 @@ falls back to the bare ticker rather than guessing. Dense visual displays
 keep bare tickers on purpose, since a name on every point there would be
 clutter rather than clarity -- the accompanying table carries the full name
 instead.
+
+**Research** is the layer around the backtest: it decides whether there is
+anything worth backtesting and whether a result is evidence or luck. It
+holds a factor library with multiple-testing-corrected screening, a
+validation suite (deflated Sharpe, stationary bootstrap, random-timing test,
+probability of backtest overfitting, combinatorial purged CV), run cards
+with hashes that can be verified and reproduced offline, a risk x-ray, an
+event study, a hypothesis ledger that counts every trial, and a decay
+monitor for strategies you have frozen. The same functions are available
+from the command line (`python -m qbt.lab`) and as an MCP server so Claude
+can drive them. Research only: nothing in it trades. Full guide:
+[docs/RESEARCH_LAB.md](docs/RESEARCH_LAB.md).
 
 ### Rebasing, and why it is done on the common period
 

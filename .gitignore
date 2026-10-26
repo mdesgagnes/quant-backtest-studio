@@ -6,3 +6,5 @@ __pycache__/
 *.xlsx
 !example_*.xlsx
 .DS_Store
+
+.qbt_lab/

@@ -10,6 +10,7 @@ from .base import (  # noqa: F401
     efficiency_ratio, zscore, size_equal, size_inverse_vol, apply_vol_target,
 )
 from . import library  # noqa: F401  (side effect: registration)
+from . import zoo  # noqa: F401  (factor-zoo strategy for the research lab)
 
 
 def get(key: str) -> Strategy:

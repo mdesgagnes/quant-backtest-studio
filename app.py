@@ -697,9 +697,16 @@ def parse_weights(content: bytes, name: str, sheet: Optional[str]) -> pd.DataFra
 # the other describes a market. Keeping them apart stops the sidebar from
 # holding sixty controls of which forty are irrelevant to what is on screen.
 # ----------------------------------------------------------------------
-WORKSPACES = ["Backtest", "Markets"]
+WORKSPACES = ["Backtest", "Markets", "Research"]
 workspace = st.sidebar.radio("Workspace", WORKSPACES, horizontal=True,
                              label_visibility="collapsed", key="workspace")
+
+# The Research workspace (qbt/lab) owns its own sidebar and page; nothing
+# below this point runs for it.
+if workspace == "Research":
+    from qbt.lab import ui as lab_ui
+    lab_ui.render()
+    st.stop()
 
 st.sidebar.markdown('<div class="side-label">Settings</div>',
                     unsafe_allow_html=True)
