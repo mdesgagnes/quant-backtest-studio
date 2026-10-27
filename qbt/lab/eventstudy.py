@@ -18,19 +18,24 @@ against.
 from __future__ import annotations
 
 import math
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 
 
-def event_study(prices: pd.DataFrame, market: pd.Series,
+def event_study(prices: pd.DataFrame, market: Optional[pd.Series],
                 events: Iterable[Tuple[str, str]],
                 pre: int = 5, post: int = 20, est_len: int = 200, gap: int = 10,
                 min_est: int = 60) -> Dict[str, object]:
-    """Run the study. `events` is an iterable of (ticker, date) pairs."""
+    """Run the study. `events` is an iterable of (ticker, date) pairs.
+
+    With `market=None` there is no market model: the baseline is the
+    security's own average return over the estimation window (beta = 0).
+    Weaker, but it lets a backtest with no benchmark be studied at all."""
     rets = prices.pct_change(fill_method=None)
-    mret = market.pct_change(fill_method=None)
+    no_mkt = market is None
+    mret = (pd.Series(0.0, index=rets.index) if no_mkt else market.pct_change(fill_method=None))
     rel = np.arange(-pre, post + 1)
     paths, rows, skipped = [], [], []
 
@@ -57,13 +62,17 @@ def event_study(prices: pd.DataFrame, market: pd.Series,
         if len(est) < min_est:
             skipped.append((tk, str(d.date()), "estimation window too thin"))
             continue
-        var_m = est["m"].var(ddof=1)
-        if var_m <= 0:
-            skipped.append((tk, str(d.date()), "market has no variance in the window"))
-            continue
-        beta = float(est["r"].cov(est["m"]) / var_m)
-        alpha = float(est["r"].mean() - beta * est["m"].mean())
-        resid_sd = float((est["r"] - alpha - beta * est["m"]).std(ddof=2))
+        if no_mkt:
+            beta, alpha = 0.0, float(est["r"].mean())
+            resid_sd = float(est["r"].std(ddof=1))
+        else:
+            var_m = est["m"].var(ddof=1)
+            if var_m <= 0:
+                skipped.append((tk, str(d.date()), "market has no variance in the window"))
+                continue
+            beta = float(est["r"].cov(est["m"]) / var_m)
+            alpha = float(est["r"].mean() - beta * est["m"].mean())
+            resid_sd = float((est["r"] - alpha - beta * est["m"]).std(ddof=2))
         win = pd.concat([rets[tk].iloc[lo:hi + 1], mret.iloc[lo:hi + 1]], axis=1,
                         keys=["r", "m"])
         if win.isna().any().any():
@@ -112,4 +121,58 @@ def parse_events(text: str) -> List[Tuple[str, str]]:
         parts = line.split()
         if len(parts) >= 2:
             out.append((parts[0].strip().upper(), parts[1].strip()))
+    return out
+
+
+# ----------------------------------------------------------------------
+# Studying a backtest's own return stream
+# ----------------------------------------------------------------------
+def series_event_study(returns: Dict[str, pd.Series], market_returns: Optional[pd.Series],
+                       dates: Sequence, pre: int = 5, post: int = 20, est_len: int = 200,
+                       gap: int = 10) -> Dict[str, Dict[str, object]]:
+    """Event study on one or more strategy return streams.
+
+    Each stream is turned back into an index (the cumulative product of its
+    returns) so the ordinary security-level study applies, with the benchmark's
+    returns as the market. Result: one `event_study` result per series name.
+    """
+    mkt = None
+    if market_returns is not None and len(market_returns.dropna()):
+        mkt = (1.0 + market_returns.fillna(0.0)).cumprod()
+    out: Dict[str, Dict[str, object]] = {}
+    for name, r in returns.items():
+        r = r.dropna()
+        if len(r) < 60:
+            continue
+        idx = (1.0 + r).cumprod().to_frame(name)
+        m = mkt.reindex(idx.index).ffill() if mkt is not None else None
+        out[name] = event_study(idx, m, [(name, d) for d in dates], pre, post, est_len, gap)
+    return out
+
+
+def worst_days(market_returns: pd.Series, n: int = 20, min_gap: int = 10) -> List[pd.Timestamp]:
+    """Dates of the market's `n` worst days, de-clustered: a crash is one event,
+    not twelve, so a day within `min_gap` sessions of a worse one is skipped."""
+    clean = market_returns.dropna()
+    pos = {d: i for i, d in enumerate(clean.index)}
+    chosen: List[pd.Timestamp] = []
+    for d in clean.sort_values().index:
+        if all(abs(pos[d] - pos[c]) > min_gap for c in chosen):
+            chosen.append(d)
+        if len(chosen) >= n:
+            break
+    return sorted(chosen)
+
+
+def parse_dates(text: str) -> List[pd.Timestamp]:
+    """One date per line (commas also separate); anything after the first token is ignored."""
+    out = []
+    for line in text.replace(",", "\n").splitlines():
+        tok = line.strip().split()
+        if not tok:
+            continue
+        try:
+            out.append(pd.Timestamp(tok[0]))
+        except (ValueError, TypeError):
+            continue
     return out

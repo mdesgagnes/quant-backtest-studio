@@ -1718,6 +1718,10 @@ if source == "Return stream":
                     mat.to_csv(index=False).encode("utf-8"),
                     "stress_periods.csv", "text/csv", key="rsdlstress")
 
+        eyebrow("Around dated events")
+        from qbt.lab import ui as lab_ui
+        lab_ui.event_panel(series, r_bench, periods=_rs_periods, key="rs_ev")
+
     # ==================================================================
     # Market regimes
     # ==================================================================
@@ -4779,6 +4783,12 @@ with tabs[6]:
                 "Download stress test results (CSV)",
                 ev.to_csv(index=False).encode("utf-8"),
                 "stress_periods.csv", "text/csv", key="dlstress")
+
+    eyebrow("5b. Around dated events")
+    from qbt.lab import ui as lab_ui
+    lab_ui.event_panel({res.label: res.returns},
+                       bench.returns if bench is not None else None,
+                       periods=_periods, rebalances=res.rebalance_dates, key="rb_ev")
 
     eyebrow("6. Sampling uncertainty")
     c1, c2 = st.columns(2)

@@ -25,6 +25,29 @@ Research only. Nothing in `qbt/lab` places or could place an order.
 | MCP server (74 tools), LLM agent | `lab/mcp_server.py`, `lab/assistant.py` | A small stdlib-only MCP server (17 tools) so Claude Code/Desktop can drive the lab at no extra cost. Optional in-app assistant (needs `anthropic` + `ANTHROPIC_API_KEY`), restricted to the lab's tools. |
 | Multi-market engines, 20 data loaders, brokers, paper trading, swarm presets | **not taken** | Out of scope for research, or already covered (QBS has its own engine and FX accounting). |
 
+## Reading the screens
+
+The workspace opens on **Start here**: what the lab is for, the six-step workflow
+with a live checklist of where you are, a "what to do with each result" table,
+and a glossary of every unconventional term (IC, ICIR, t-stat, adjusted p, PSR,
+DSR, PBO, CPCV, CAR...) with what good looks like and what to watch out for. The
+same glossary sits under each tab, every table column has a hover explanation,
+and every result carries a plain-words verdict (the factor screen's **Verdict**
+column, the validation's one-paragraph summary and per-check "what to do").
+Wording lives in `qbt/lab/explain.py`, apart from the maths, so it can be edited
+without touching a calculation.
+
+## Event study in the Backtest workspace
+
+The same event study is available beside the stress periods in the Backtest
+workspace: **Robustness, section 5b** (single backtest) and the **Stress tests**
+tab of the results view (one or several series). It studies the strategy's own
+returns against the benchmark around: the start of each stress period, the
+benchmark's worst days, the strategy's rebalance dates, or dates you type. It
+answers a different question from the stress periods: not "what happened inside
+this episode" but "what does the strategy do around this date, relative to the
+market". With no benchmark the baseline is the strategy's own average return.
+
 ## The workflow
 
 1. **Ledger** - write the hypothesis (what, and why it should work) before

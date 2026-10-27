@@ -283,7 +283,7 @@ def validate_run_tool(run_id: str, grid: Optional[Dict[str, List[Any]]] = None,
                          metrics={"grade": v["grade"]["label"], "score": v["grade"]["score"]},
                          verdict=v["grade"]["label"])
     return {"grade": v["grade"], "n_trials_counted": v["n_trials"],
-            "checks": [{"check": c.title, "status": c.status, "value": c.value, "evidence": c.detail,
+            "checks": [{"key": c.key, "check": c.title, "status": c.status, "value": c.value, "evidence": c.detail,
                         "threshold": c.threshold} for c in v["checks"]]}
 
 
