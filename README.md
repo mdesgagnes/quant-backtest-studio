@@ -804,6 +804,42 @@ inventing one.
 
 ---
 
+## 4 septies. Next rebalance: the trades for the next session
+
+A backtest stops at the last price in the data, but the signal that last
+close produces has not been traded yet. With a one-session lag, the
+month-end signal of Friday 30 October is acted on at Monday's open, after the
+data ends, so neither the equity curve nor the "target weight" on the last
+date (which is the *previous* signal, shifted by the lag) shows it.
+
+The **Positions** tab now opens with a **Next rebalance** section, and
+**Results** carries a one-line pointer to it:
+
+- **When.** If the last close is itself a rebalance signal, it says so and
+  names the session the trades happen on and whether that is the open or the
+  close. If not, it names the next scheduled signal and trade dates, and shows
+  what the *latest* signal would trade if it were acted on at the first
+  session available -- a preview, which changes as prices move.
+- **What.** Every instrument and cash: weight now, target, weight after,
+  change, units, price and amount, as a CSV too. The size box rescales units
+  and amounts to your own account value (weights do not change).
+- **How it is worked out.** The engine is replayed over a few extra sessions
+  priced flat at the last close, carrying the model's own weights on the last
+  date as the new signal. The trades therefore follow the backtest's own
+  rules: minimum trade size, whole units, commission, slippage, impact,
+  currencies, execution lag. The replay's history is checked against the
+  original run, and the section says so if they differ.
+
+Limits: the price at the next open or close is not known, so units and
+amounts are sized on the last close and move a little with it; dates assume
+the market is open on every weekday, so a holiday moves a trade to the next
+session; the list assumes the account holds what the model holds; and with
+imported target weights only the latest row is traded, since the file's next
+date is unknown. If the latest price in the data is more than a business day
+old, the section warns that the signal is out of date.
+
+---
+
 ## 5. Engine assumptions
 
 The simulation holds **share counts and a cash balance in currency**, not
@@ -1589,6 +1625,7 @@ qbt/
   monitor.py               market monitor analytics
   stress.py                stress test periods against named historical episodes
   regimes.py               market regimes: rates, recessions, yield curve, drawdown, VIX
+  nextrade.py              the trades the latest signal calls for (engine replay)
   tax.py                   Canadian tax friendliness: ACB gains, eligible/foreign dividends
   attribution.py           return contribution by security / asset class, and risk share
   full_report.py           detailed HTML + PDF report combining every module

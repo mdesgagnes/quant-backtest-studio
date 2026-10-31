@@ -54,6 +54,7 @@ from qbt import tvchart as TV
 from qbt import names as N
 from qbt import price_import as PI
 from qbt import fx as FX
+from qbt import nextrade as NR
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -668,6 +669,28 @@ def _deferred_book(build):
                 buf, index=False)
             return buf.getvalue()
     return _make
+
+
+def _next_rebalance_for(run):
+    """What the latest signal would trade next, for the run on screen.
+
+    The replay costs a second simulation, so it is done once per run and kept
+    in the session. Returns (result, error text).
+    """
+    cached = st.session_state.get("_nextrb")
+    if cached is not None and cached[0] == run["stamp"]:
+        return cached[1], cached[2]
+    nx, err = None, ""
+    try:
+        c = run["cfg"]
+        nx = NR.next_rebalance(
+            run["prices"], run["weights"], c.engine, c.costs, run["cash"],
+            run.get("rebalance_dates"), run.get("open"), run.get("dividends"),
+            run.get("volume"), run.get("fx"), reference=run["result"])
+    except Exception as exc:
+        err = str(exc)
+    st.session_state["_nextrb"] = (run["stamp"], nx, err)
+    return nx, err
 
 
 @st.cache_data(show_spinner=False)
@@ -3539,6 +3562,10 @@ with tabs[0]:
              f"{res.equity.index[0].date()}, {_why}, rather than {dropped}. "
              f"Anything held before that (a fixed core, cash) is "
              f"excluded, and the benchmark is measured over the same window.")
+    _nx, _nx_err = _next_rebalance_for(run)
+    if _nx is not None:
+        note("<b>Next rebalance.</b> " + _nx.headline()
+             + " The trade list is in Positions.")
     keys = ["CAGR", "Volatility", "Sharpe", "Max Drawdown", "Calmar", "Sortino"]
     cols = st.columns(len(keys))
     for col, k in zip(cols, keys):
@@ -3954,6 +3981,88 @@ with tabs[3]:
     st.plotly_chart(C.bar_series(avg.index, avg.values,
                                  "Average weight over the period", "%"),
                     use_container_width=True, config={"displaylogo": False})
+
+    eyebrow("Next rebalance")
+    nx, nx_err = _next_rebalance_for(run)
+    if nx is None:
+        st.markdown(f'<div class="flag">The next trades could not be worked out: '
+                    f'{nx_err}</div>', unsafe_allow_html=True)
+    else:
+        note(nx.headline())
+        _today = pd.Timestamp.today().normalize()
+        _due = pd.bdate_range(end=_today, periods=2)[0]
+        if nx.as_of < _due:
+            st.markdown(
+                f'<div class="flag">The latest price in the data is '
+                f'{nx.as_of.date()}, but today is {_today.date()}: the signal is '
+                f'out of date. Run the backtest again to pull the latest prices '
+                f'(downloaded prices are kept for an hour).</div>',
+                unsafe_allow_html=True)
+        n1, n2, n3, n4 = st.columns(4)
+        with n1:
+            dial("Trades", f"{nx.n_buys} buy / {nx.n_sells} sell",
+                 "from the latest signal" if nx.has_trades
+                 else "the book is already on target")
+        with n2:
+            dial("Trades on", f"{nx.exec_date:%a %b} {nx.exec_date.day}",
+                 "at the open" if nx.at_open else "at the close")
+        with n3:
+            dial("Signal from", f"{nx.as_of:%a %b} {nx.as_of.day}",
+                 "last close in the data")
+        with n4:
+            dial("Estimated cost",
+                 f"{nx.cost / max(nx.portfolio_value, 1e-9) * 1e4:.1f} bps",
+                 f"{nx.cost:,.0f} on the model portfolio")
+        _acct = st.number_input(
+            "Size the trades for an account of ($)", min_value=0.0,
+            value=float(round(nx.portfolio_value, 0)), step=1000.0,
+            key="nx_acct",
+            help="Defaults to the model portfolio's value at the last close. "
+                 "Units and amounts scale in proportion; weights do not change.")
+        _f = _acct / nx.portfolio_value if nx.portfolio_value > 0 else 0.0
+        _t = nx.table.copy()
+        _t["Units to trade"] = _t["Units to trade"] * _f
+        _t["Units now"] = _t["Units now"] * _f
+        _t["Amount"] = _t["Amount"] * _f
+        def _pc(v):                      # no "-0.00%": a rounding dust of zero is zero
+            return f"{(0.0 if abs(v) < 5e-7 else v) * 100:.2f}%"
+
+        def _mv(v, fmt):                 # an em dash where nothing moves
+            return "—" if (pd.isna(v) or abs(v) < 0.005) else fmt(v)
+
+        _disp = pd.DataFrame({
+            "Instrument": _t["Instrument"], "Action": _t["Action"],
+            "Now": _t["Weight now"].map(_pc),
+            "Target": _t["Target weight"].map(_pc),
+            "After": _t["Weight after"].map(_pc),
+            "Change": _t["Change"].map(
+                lambda v: "—" if abs(v) < 5e-5 else f"{v*100:+.2f} pts"),
+            "Units": _t["Units to trade"].map(
+                lambda v: _mv(v, lambda x: f"{x:+,.0f}" if abs(x) >= 10
+                              else f"{x:+,.2f}")),
+            "Price": _t["Price"].map(lambda v: "" if pd.isna(v) else f"{v:,.2f}"),
+            "Amount ($)": _t["Amount"].map(
+                lambda v: "—" if abs(v) < 0.5 else f"{v:+,.0f}"),
+        })
+        st.dataframe(signed(_disp, ["Change", "Units", "Amount ($)"]),
+                     use_container_width=True, hide_index=True)
+        st.download_button("Download next trades (CSV)",
+                           _t.to_csv(index=False).encode("utf-8"),
+                           "next_trades.csv", "text/csv", key="dlnexttrades")
+        _bits = [
+            "Sized on the last close, because the price at the next "
+            f"{'open' if nx.at_open else 'close'} is not known yet: units and "
+            "amounts move a little with it. The trades follow the same rules as "
+            "the backtest's own (minimum trade size, whole units, costs, "
+            "execution lag), and assume the account holds what the model "
+            "holds.",
+            "Dates assume the market is open on each weekday; a holiday moves a "
+            "trade to the next session."]
+        if rcfg.data.adjusted:
+            _bits.append("Prices are dividend-adjusted, so units and prices are "
+                         "approximate; weights are exact.")
+        _bits += nx.notes
+        note(" ".join(_bits))
 
     eyebrow("Current position as of the last date")
     last = res.weights.iloc[-1]
