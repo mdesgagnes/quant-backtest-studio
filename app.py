@@ -4064,6 +4064,100 @@ with tabs[3]:
         _bits += nx.notes
         note(" ".join(_bits))
 
+        eyebrow("Trades for your account")
+        st.caption("Enter what you hold now and your cash. The list below is the set "
+                   "of trades that leaves your account as close as possible to the "
+                   "target above, after costs. Paste a column of units straight from "
+                   "a spreadsheet if that is quicker.")
+        _units = st.session_state.setdefault("_my_units", {})
+        _order = sorted(nx.prices.index, key=lambda a: (-abs(float(nx.target[a])), str(a)))
+        _hb = st.session_state.get("_hold_base")
+        if _hb is None or _hb[0] != run["stamp"]:
+            _hb = (run["stamp"], pd.DataFrame({
+                "Instrument": _order,
+                "Target": [f"{float(nx.target[a]) * 100:.2f}%" for a in _order],
+                "Units held": [float(_units.get(a, 0.0)) for a in _order]}))
+            st.session_state["_hold_base"] = _hb
+        ha, hb = st.columns([3, 2])
+        with ha:
+            _ed = st.data_editor(
+                _hb[1], key=f"nx_hold_{run['stamp']}", hide_index=True,
+                use_container_width=True, disabled=["Instrument", "Target"],
+                height=min(420, 38 + 35 * len(_order)),
+                column_config={"Units held": st.column_config.NumberColumn(
+                    "Units held", step=1.0,
+                    help="Number of shares or units in your account now.")})
+        with hb:
+            _cash = st.number_input(
+                "Cash in the account", value=float(st.session_state.get("_my_cash", 0.0)),
+                step=100.0, key="nx_cash",
+                help="In the same currency as the prices above.")
+            _whole = st.checkbox("Whole units only", value=True, key="nx_whole",
+                                 help="Round each position to whole shares and spend "
+                                      "the leftover cash where it helps most.")
+        st.session_state["_my_cash"] = float(_cash)
+        _units.update({a: float(u) for a, u in zip(_ed["Instrument"], _ed["Units held"])
+                       if pd.notna(u)})
+        _held = pd.Series({a: float(u) for a, u in zip(_ed["Instrument"], _ed["Units held"])
+                           if pd.notna(u)})
+        if float((_held * nx.prices.reindex(_held.index)).sum(skipna=True)) + _cash <= 0:
+            st.markdown('<div class="flag">Enter the units you hold, or your cash, '
+                        'to see the trades.</div>', unsafe_allow_html=True)
+        else:
+            try:
+                fit = NR.fit_to_holdings(nx.target, nx.prices, _held, _cash,
+                                         nx.cost_rate, _whole, nx.min_trade_weight)
+            except Exception as exc:
+                fit = None
+                st.markdown(f'<div class="flag">The trades could not be worked out: '
+                            f'{exc}</div>', unsafe_allow_html=True)
+            if fit is not None:
+                m1, m2, m3, m4 = st.columns(4)
+                with m1:
+                    dial("Trades", f"{fit.n_buys} buy / {fit.n_sells} sell",
+                         "to place" if fit.has_trades else "nothing to do")
+                with m2:
+                    dial("Account value", f"{fit.value_before:,.0f}",
+                         "holdings at the last close plus cash")
+                with m3:
+                    dial("Away from target",
+                         f"{fit.distance_before * 100:.1f}% → {fit.distance_after * 100:.1f}%",
+                         "share of the account out of place")
+                with m4:
+                    dial("Cash left", f"{fit.cash_after:,.0f}",
+                         f"after {fit.cost:,.0f} of estimated costs")
+                _m = fit.table
+                _md = pd.DataFrame({
+                    "Instrument": _m["Instrument"], "Action": _m["Action"],
+                    "Held": _m["Units held"].map(
+                        lambda v: "" if pd.isna(v) else "0" if v == 0
+                        else f"{v:,.0f}" if abs(v) >= 10 else f"{v:,.2f}"),
+                    "Units": _m["Units to trade"].map(
+                        lambda v: _mv(v, lambda x: f"{x:+,.0f}" if abs(x) >= 10
+                                      else f"{x:+,.2f}")),
+                    "Units after": _m["Units after"].map(
+                        lambda v: "" if pd.isna(v) else "0" if v == 0
+                        else f"{v:,.0f}" if abs(v) >= 10 else f"{v:,.2f}"),
+                    "Price": _m["Price"].map(lambda v: "" if pd.isna(v) else f"{v:,.2f}"),
+                    "Amount ($)": _m["Amount"].map(
+                        lambda v: "—" if abs(v) < 0.5 else f"{v:+,.0f}"),
+                    "Now": _m["Weight now"].map(_pc),
+                    "Target": _m["Target weight"].map(_pc),
+                    "After": _m["Weight after"].map(_pc),
+                })
+                st.dataframe(signed(_md, ["Units", "Amount ($)"]),
+                             use_container_width=True, hide_index=True)
+                st.download_button("Download my trades (CSV)",
+                                   _m.to_csv(index=False).encode("utf-8"),
+                                   "my_trades.csv", "text/csv", key="dlmytrades")
+                _mb = ["The trades minimise the total gap between each position and its "
+                       "target value, after commission and slippage, and never spend "
+                       "cash you do not have. Trades smaller than the backtest's "
+                       "minimum trade size are skipped. Prices are the last close; the "
+                       "fills will differ a little."]
+                _mb += fit.notes
+                note(" ".join(_mb))
+
     eyebrow("Current position as of the last date")
     last = res.weights.iloc[-1]
     cur = pd.DataFrame({

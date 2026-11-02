@@ -838,6 +838,33 @@ imported target weights only the latest row is traded, since the file's next
 date is unknown. If the latest price in the data is more than a business day
 old, the section warns that the signal is out of date.
 
+### Trades for your own account
+
+Below the model's trade list, **Trades for your account** takes what you
+actually hold: the units of each instrument (paste a column from a
+spreadsheet if you like) and your cash. It returns the trades that leave
+the account as close as possible to the target.
+
+- **Closest.** The objective is the total gap, in money, between each
+  position and its target value, after commission, slippage and any currency
+  spread. In whole units a 33.3% target on a 410 stock lands on a whole
+  number of shares, and the leftover cash goes where it closes the most gap;
+  one-unit buys, sells and swaps are tried until none helps. The result is
+  checked in the tests against an exhaustive search.
+- **Rules.** Cash never goes negative (unless the target itself is
+  levered), a position is never flipped from long to short, trades below the
+  backtest's minimum trade size are skipped, and a position the target no
+  longer wants is sold out. "Whole units only" can be switched off for
+  fractional units.
+- **Shown.** Buy/sell per instrument, units now and after, amount, weight now,
+  target and after, cash left, estimated cost, and how far the account sits
+  from the target before and after (the share of it that is out of place).
+  Download as CSV.
+
+Limits: one cash balance in the currency of the prices (no per-currency
+cash); instruments outside the backtest's universe are not listed; prices are
+the last close. Holdings are kept for the session, not saved to disk.
+
 ---
 
 ## 5. Engine assumptions
@@ -1625,7 +1652,8 @@ qbt/
   monitor.py               market monitor analytics
   stress.py                stress test periods against named historical episodes
   regimes.py               market regimes: rates, recessions, yield curve, drawdown, VIX
-  nextrade.py              the trades the latest signal calls for (engine replay)
+  nextrade.py              the trades the latest signal calls for (engine replay),
+                           and the trades that fit your own holdings to it
   tax.py                   Canadian tax friendliness: ACB gains, eligible/foreign dividends
   attribution.py           return contribution by security / asset class, and risk share
   full_report.py           detailed HTML + PDF report combining every module
