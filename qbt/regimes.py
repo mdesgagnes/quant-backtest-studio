@@ -223,9 +223,9 @@ def regime_table(returns: Dict[str, pd.Series], labels: pd.Series,
             if n:
                 growth = float((1 + x).prod())
                 row["Ann. return"] = growth ** (ppy / n) - 1 if growth > 0 else -1.0
-                row["Ann. volatility"] = float(x.std(ddof=1) * np.sqrt(ppy)) if n > 1 else np.nan
+                row["Ann. volatility"] = float(x.std(ddof=0) * np.sqrt(ppy)) if n > 1 else np.nan
                 ex = x - rfp[m]
-                ex_vol = float(ex.std(ddof=1) * np.sqrt(ppy)) if n > 1 else np.nan
+                ex_vol = float(ex.std(ddof=0) * np.sqrt(ppy)) if n > 1 else np.nan
                 row["Sharpe"] = (float(ex.mean() * ppy / ex_vol)
                                  if ex_vol and ex_vol == ex_vol and ex_vol > 0 else np.nan)
                 row["Hit rate"] = float((x > 0).mean())

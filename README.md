@@ -1518,6 +1518,50 @@ for the whole backtest, each year, quarter or month -- with no residual.
 The Excel export carries the contribution summary, the contribution by
 year and the daily ledger.
 
+## 8 bis bis. Performance standard (CIPM / GIPS)
+
+Performance figures follow the CIPM program and Carl Bacon, *Practical
+Portfolio Performance Measurement and Attribution* (3rd ed.). The rules the
+whole app applies:
+
+- **Population moments.** Volatility, skewness, kurtosis, tracking error and
+  downside risk divide by *n*, not *n*-1. "Excess kurtosis" is kurtosis minus 3.
+- **Geometric annualisation, never under a year.** CAGR, Sharpe, Sortino,
+  Calmar, alpha and the information ratio read "n/a" below one year of history.
+- **Sharpe** = (annualised geometric return - annualised geometric risk-free) /
+  annualised SD. **Sortino** uses the same numerator over downside risk (target:
+  the risk-free rate). **Calmar** nets off the risk-free rate.
+- **Jensen alpha** is annualised geometrically: r - rF - beta (b - rF).
+- **Tracking error and information ratio use geometric excess return**,
+  (1+r)/(1+b) - 1.
+- **R-squared floor.** With R-squared against the benchmark under 0.70, beta,
+  risk-adjusted alpha, Treynor and the appraisal ratio are withheld ("n/a").
+- **VaR and CVaR are positive losses**, labelled with horizon and confidence.
+
+`qbt/cipm.py` adds the rest of the toolkit: Modified Dietz, ex-post IRR and
+true time-weighted returns; adjusted and skew-adjusted Sharpe, M-squared,
+differential return, Treynor, appraisal ratio, bull and bear betas, up and down
+capture, Burke / Pain / Martin ratios, Omega, upside potential, the skill
+t-statistic; Brinson-Hood-Beebower, Brinson-Fachler and Bacon's geometric
+attribution with Carino, Menchero, GRAP and Frongello linking; a naive-geometric
+currency split; and GIPS composite helpers (beginning-value weighting,
+equal-weighted dispersion, 3-year ex-post SD). The Results tab has a **CIPM
+appraisal** section; the Attribution tab has **Benchmark-relative attribution**
+(Brinson-Fachler on asset classes, costs and fees as their own line, effects
+reconciled to the excess return). `tests/test_cipm.py` pins everything to
+Bacon's worked examples (golden values).
+
+**In the Excel report.** The Performance sheet carries the **CIPM Appraisal**
+table under Statistics (strategy beside benchmark, each row in its own number
+format), and a new formatted **Attribution & Analysis** sheet (**Performance
+Analysis** for an imported return stream) follows it, in the same style as the
+Executive Summary: what the figures show, the attribution tiles and category
+table with the proxy behind every benchmark return, each calendar year
+reconciled on its own, two charts, contribution to return and risk, the full
+appraisal, and the methodology. The Attribution sheet also holds the
+benchmark-relative tables by category, year and period. The sheet uses the
+benchmark weights, proxies, period and linking chosen on the Attribution tab.
+
 ## 8 ter. Math checks
 
 `tests/test_math.py` checks the reported figures against independent

@@ -376,7 +376,7 @@ def write_summary(wb, d: Dict[str, Any]) -> None:
                          x.get("Excess") if "Excess" in t else None])
         left_end = p.table(r, LEFT, hdr3, rows, [None, PCT, PCT, PCT],
                            [False, True, True, True])
-    risk = [("Beta", NUM), ("Alpha (ann.)", PCT), ("Risk-adjusted alpha (ann.)", PCT),
+    risk = [("Beta", NUM), ("R²", NUM), ("Alpha (ann.)", PCT), ("Risk-adjusted alpha (ann.)", PCT),
             ("Tracking Error", PCT),
             ("Information Ratio", NUM), ("VaR 95% (daily)", PCT2),
             ("CVaR 95% (daily)", PCT2), ("% Positive Months", PCT),

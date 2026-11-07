@@ -53,7 +53,7 @@ def test_metrics_match_reference_formulas():
     n = 1500
     idx = pd.bdate_range("2018-01-01", periods=n)
     b = pd.Series(rng.normal(0.0004, 0.011, n), idx)
-    r = 0.8 * b + pd.Series(rng.normal(0.0002, 0.006, n), idx)
+    r = 0.8 * b + pd.Series(rng.normal(0.0002, 0.004, n), idx)
     s = M.summary(r, M.to_equity(r, 100.0), b, None, None, 0.02, 252)
     x = r.to_numpy()
     E = np.concatenate([[1.0], np.cumprod(1 + x)])
@@ -61,23 +61,30 @@ def test_metrics_match_reference_formulas():
     dd = E / np.maximum.accumulate(E) - 1
     q = np.quantile(x, 0.05)
     beta, a0 = np.polyfit(b.to_numpy() - ((1.02) ** (1 / 252) - 1), ex, 1)
-    act = x - b.to_numpy()
-    te = np.std(act, ddof=1) * np.sqrt(252)
+    # CIPM conventions: population SD, geometric annualisation, geometric excess.
+    geo = (1 + x) / (1 + b.to_numpy()) - 1
+    te = np.std(geo) * np.sqrt(252)
+    cg_p, cg_b = E[-1] ** (252 / n) - 1, np.prod(1 + b.to_numpy()) ** (252 / n) - 1
+    sd = np.std(x) * np.sqrt(252)
+    down = np.sqrt(np.mean(np.minimum(ex, 0) ** 2)) * np.sqrt(252)
     ref = {
         "Total Return": E[-1] - 1,
-        "CAGR": E[-1] ** (252 / n) - 1,
-        "Volatility": np.std(x, ddof=1) * np.sqrt(252),
-        "Sharpe": ex.mean() / np.std(ex, ddof=1) * np.sqrt(252),
-        "Sortino": ex.mean() / np.sqrt(np.mean(np.minimum(ex, 0) ** 2)) * np.sqrt(252),
+        "CAGR": cg_p,
+        "Volatility": sd,
+        "Sharpe": (cg_p - 0.02) / sd,
+        "Sortino": (cg_p - 0.02) / down,
         "Max Drawdown": dd.min(),
         "Ulcer Index": np.sqrt(np.mean((dd * 100) ** 2)),
-        "VaR 95% (daily)": q,
-        "CVaR 95% (daily)": x[x <= q].mean(),
+        "VaR 95% (daily)": -q,                       # positive loss
+        "CVaR 95% (daily)": -x[x <= q].mean(),
+        "Skew": np.mean((x - x.mean()) ** 3) / np.std(x) ** 3,
+        "Excess Kurtosis": np.mean((x - x.mean()) ** 4) / np.std(x) ** 4 - 3,
+        "Calmar": (cg_p - 0.02) / abs(dd.min()),
         "Beta": beta,
-        "Alpha (ann.)": E[-1] ** (252 / n) - np.prod(1 + b.to_numpy()) ** (252 / n),
-        "Risk-adjusted alpha (ann.)": a0 * 252,
+        "Alpha (ann.)": cg_p - cg_b,
+        "Risk-adjusted alpha (ann.)": cg_p - 0.02 - beta * (cg_b - 0.02),
         "Tracking Error": te,
-        "Information Ratio": act.mean() * 252 / te,
+        "Information Ratio": ((1 + cg_p) / (1 + cg_b) - 1) / te,
     }
     for k, v in ref.items():
         assert np.isclose(s[k], v, rtol=1e-9, atol=1e-12), (k, s[k], v)
@@ -447,15 +454,18 @@ def test_risk_free_rate_in_sharpe_sortino_alpha():
     s = M.summary(r, None, b, None, None, rf, 12)
     ex, bx = (r - rf).to_numpy(), (b - rf).to_numpy()
     beta, a0 = np.polyfit(bx, ex, 1)
-    assert np.isclose(s["Beta"], beta) and np.isclose(s["Risk-adjusted alpha (ann.)"], a0 * 12)
+    cg_r, cg_b = (1 + r).prod() ** (12 / 360) - 1, (1 + b).prod() ** (12 / 360) - 1
+    rfa = (1 + rf).prod() ** (12 / 360) - 1
+    assert np.isclose(s["Beta"], beta)
+    assert np.isclose(s["Risk-adjusted alpha (ann.)"], cg_r - rfa - beta * (cg_b - rfa))
     # Alpha is the outperformance: CAGR minus the benchmark's CAGR, whatever
     # the risk-free rate.
     sb = M.summary(b, None, None, None, None, rf, 12)
     assert np.isclose(s["Alpha (ann.)"], s["CAGR"] - sb["CAGR"])
     assert np.isclose(M.summary(r, None, b, None, None, 0.0, 12)["Alpha (ann.)"],
                       s["Alpha (ann.)"])
-    assert np.isclose(s["Sharpe"], ex.mean() / ex.std(ddof=1) * np.sqrt(12))
-    assert np.isclose(s["Sortino"], ex.mean() / np.sqrt(np.mean(np.minimum(ex, 0) ** 2)) * np.sqrt(12))
+    assert np.isclose(s["Sharpe"], (cg_r - rfa) / (np.std(r.to_numpy()) * np.sqrt(12)))
+    assert np.isclose(s["Sortino"], (cg_r - rfa) / (np.sqrt(np.mean(np.minimum(ex, 0) ** 2)) * np.sqrt(12)))
     # A fixed rate compounds to itself, like the engine's cash.
     assert np.isclose((1 + M.rf_per_period(idx, 0.03, 12).iloc[0]) ** 12, 1.03)
     # Zero risk-free credits a low-beta portfolio with the cash yield.

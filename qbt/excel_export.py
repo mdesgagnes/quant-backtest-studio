@@ -123,8 +123,10 @@ class _Book:
             return _OWN_SHEET[title], None
         return _MODULE_SHEET.get(module, module[:31]), None
 
-    def finish(self, summary: Optional[Dict[str, Any]], style: bool) -> None:
+    def finish(self, summary: Optional[Dict[str, Any]], style: bool,
+               analysis: Optional[Dict[str, Any]] = None) -> None:
         from . import exec_summary as ES
+        from . import analysis_sheet as AS
         self.summary = bool(summary) and self.wants("Executive summary")
         wb = self.xw.book
         stacked: Dict[str, List[Dict[str, Any]]] = {}
@@ -179,6 +181,15 @@ class _Book:
                 _widths(ws, set())
             ws.freeze_panes = "B2"
 
+        if analysis and (self.wants("Attribution") or self.wants("Results")):
+            AS.write_analysis(wb, analysis)
+            sheet = AS.SHEET_ATTR if analysis.get("battr") else AS.SHEET_PERF
+            index_rows.append({"Module": "Attribution" if analysis.get("battr") else "Results",
+                               "Table": "Attribution and in-depth performance analysis"
+                               if analysis.get("battr") else "In-depth performance analysis",
+                               "Sheet": sheet, "Cell": "A1", "Rows": None,
+                               "Note": "Formatted for presenting: effects, contribution, "
+                                       "full CIPM appraisal, methodology."})
         self._about(index_rows)
         order = ["About"] + [s for s in SHEET_ORDER if s in wb.sheetnames and s != "About"]
         order += [s for s in wb.sheetnames if s not in order]
@@ -225,7 +236,7 @@ class _Book:
 
 # Where each table goes. Tables not named here are stacked on their
 # module's sheet.
-SHEET_ORDER = ["About", "Performance", "Positions", "Trades & Cash Flows",
+SHEET_ORDER = ["About", "Performance", "Attribution & Analysis", "Performance Analysis", "Positions", "Trades & Cash Flows",
                "Attribution", "Tax", "Robustness", "Stress & Regimes", "Data",
                "Daily Series", "Daily Positions", "Daily Signals", "Market Data"]
 _MODULE_SHEET = {"Results": "Performance", "Signals": "Positions",
@@ -291,11 +302,25 @@ def _style_block(ws, head_row: int, nrows: int, ncols: int, df: pd.DataFrame,
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     if nrows * ncols > max_cells:
         return
+    row_fmt = df.attrs.get("row_fmt")
+    if row_fmt:
+        # A table whose rows are different kinds of figure (a percentage, a
+        # ratio...): the format follows the row, not the column's name.
+        cols = df.attrs.get("fmt_cols") or range(2, ncols + 1)
+        for k, f in enumerate(row_fmt[:nrows]):
+            if not f:
+                continue
+            for c in cols:
+                cell = ws.cell(row=head_row + 1 + k, column=c)
+                if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
+                    cell.number_format = f
+        return
     heads = [ws.cell(row=head_row, column=c).value for c in range(1, ncols + 1)]
     whole = title.startswith(_PCT_TABLES)
     fmts = {}
+    colfmt = df.attrs.get("col_fmt") or {}
     for c in range(1, ncols + 1):
-        f = _col_format(heads[c - 1] or "")
+        f = colfmt.get(heads[c - 1]) or _col_format(heads[c - 1] or "")
         if f is None and whole and c > 1:
             f = _PCT2
         if f:
@@ -532,7 +557,9 @@ def _stats_frame(stats: Dict[str, float],
         if bench_stats:
             row[bench_label] = bench_stats.get(k, np.nan)
         rows.append(row)
-    return pd.DataFrame(rows)
+    out = pd.DataFrame(rows)
+    out.attrs["row_fmt"] = [_PCT2 if M.is_pct_metric(k) else "0.00" for k in stats]
+    return out
 
 
 def _notes_frame(cfg: RunConfig, extra: Dict[str, Any]) -> pd.DataFrame:
@@ -561,7 +588,8 @@ def workbook_from_backtest(res: BacktestResult,
                            include: Optional[Iterable[str]] = None,
                            extra_notes: Optional[Dict[str, Any]] = None,
                            summary: Optional[Dict[str, Any]] = None,
-                           style: bool = True) -> bytes:
+                           style: bool = True,
+                           analysis: Optional[Dict[str, Any]] = None) -> bytes:
     """Every table behind a simulated backtest, in one workbook.
 
     `sections` carries the other modules (signals, attribution, tax,
@@ -637,6 +665,10 @@ def workbook_from_backtest(res: BacktestResult,
         bk = _Book(xw, include, BACKTEST_MODULES)
         bk.write(notes, "Notes", module="Notes", always=True)
         bk.write(_stats_frame(stats, bench_stats, label, blabel), "Statistics")
+        if analysis and analysis.get("appraisal") is not None:
+            bk.write(analysis["appraisal"], "CIPM Appraisal",
+                     note="Population moments, geometric annualisation and excess return; "
+                          "CAPM measures withheld below R-squared 0.70.")
         bk.write(periods["trailing"], "Trailing Periods")
         bk.write(periods["calendar"], "Calendar Years")
         bk.write(M.drawdown_table(res.equity, 25, ppy), "Drawdowns")
@@ -660,6 +692,23 @@ def workbook_from_backtest(res: BacktestResult,
             bk.write(ATTR.summary(res, None, ppy), "Contribution")
             bk.write(ATTR.by_period(res, "Year"), "Contribution by Year", index=True)
             bk.write(res.contributions, "Daily Contributions", index=True)
+        if analysis and analysis.get("battr"):
+            _b = analysis["battr"]
+            bk.module = "Attribution"
+            _fx = {c: _PCT2 for c in ("Avg portfolio weight", "Benchmark weight", "Allocation",
+                                      "Selection", "Total effect", "Portfolio", "Benchmark",
+                                      "Excess", "Costs & fees")}
+            _lk = _b["linked"].reset_index().rename(columns={"index": "Category"})
+            _lk.attrs["col_fmt"] = _fx
+            _yr = _b["by_year"].copy()
+            _yr.attrs["col_fmt"] = {**_fx, "Year": "0", "Check": "0.0000%"}
+            _pr = _b["periods"].copy()
+            _pr.attrs["col_fmt"] = _fx
+            bk.write(_lk, "Benchmark-Relative Attribution",
+                     note="Brinson-Fachler, linked; costs and fees on their own line.")
+            bk.write(_yr, "Benchmark-Relative Attribution by Year",
+                     note="Each calendar year linked on its own; Check is the reconciliation error.")
+            bk.write(_pr, "Benchmark-Relative Attribution by Period", index=True)
         bk.sections(sections, "Attribution")
         for m in dict.fromkeys(s_[0] for s_ in sections if s_[0] != "Data"):
             bk.sections(sections, m)
@@ -675,7 +724,7 @@ def workbook_from_backtest(res: BacktestResult,
             bk.write(quality, "Data Quality")
         bk.sections(sections)
         bk.omit(omitted)
-        bk.finish(summary, style)
+        bk.finish(summary, style, analysis)
     return buf.getvalue()
 
 
@@ -693,7 +742,8 @@ def workbook_from_returns(returns: pd.Series, equity: pd.Series,
                           omitted: Optional[List[Omission]] = None,
                           include: Optional[Iterable[str]] = None,
                           summary: Optional[Dict[str, Any]] = None,
-                          style: bool = True) -> bytes:
+                          style: bool = True,
+                          analysis: Optional[Dict[str, Any]] = None) -> bytes:
     """The same workbook for an imported return stream.
 
     Sheets that need position data are absent, since none exists; every
@@ -727,6 +777,10 @@ def workbook_from_returns(returns: pd.Series, equity: pd.Series,
         bk = _Book(xw, include, RETURNS_MODULES)
         bk.write(notes, "Notes", module="Notes", always=True)
         bk.write(_stats_frame(stats, bench_stats, label, bench_label), "Statistics")
+        if analysis and analysis.get("appraisal") is not None:
+            bk.write(analysis["appraisal"], "CIPM Appraisal",
+                     note="Population moments, geometric annualisation and excess return; "
+                          "CAPM measures withheld below R-squared 0.70.")
         bk.write(periods["trailing"], "Trailing Periods")
         bk.write(periods["calendar"], "Calendar Years")
         bk.write(M.drawdown_table(equity, 25, ppy), "Drawdowns")
@@ -736,5 +790,5 @@ def workbook_from_returns(returns: pd.Series, equity: pd.Series,
         if all_series is not None and not all_series.empty:
             bk.write(all_series, "All Imported Series", index=True, module="Data")
         bk.omit(omitted)
-        bk.finish(summary, style)
+        bk.finish(summary, style, analysis)
     return buf.getvalue()

@@ -85,17 +85,71 @@ def to_equity(returns: pd.Series, initial: float = 1.0) -> pd.Series:
     return out
 
 
-def cagr(equity: pd.Series, ppy: int = TRADING_DAYS) -> float:
+# CIPM convention (Bacon, ch. on risk): every dispersion statistic uses the
+# POPULATION moments (divide by n, not n-1), and a return is annualised
+# geometrically -- never as an arithmetic mean times periods-per-year -- and
+# only when the track record covers a full year.
+MIN_YEAR_FRACTION = 0.95        # a "year" of daily data can hold 240-252 rows
+
+
+def pop_std(x) -> float:
+    """Population standard deviation (divide by n)."""
+    a = np.asarray(pd.Series(x).dropna(), dtype=float)
+    return float(np.sqrt(np.mean((a - a.mean()) ** 2))) if len(a) else np.nan
+
+
+def pop_skew(x) -> float:
+    """Population skewness: sum((x-m)^3) / (n * sd^3)."""
+    a = np.asarray(pd.Series(x).dropna(), dtype=float)
+    if len(a) < 3:
+        return np.nan
+    sd = pop_std(a)
+    return float(np.mean((a - a.mean()) ** 3) / sd ** 3) if sd > 0 else np.nan
+
+
+def pop_kurt(x, excess: bool = True) -> float:
+    """Population kurtosis (a normal distribution gives 3). Excess kurtosis,
+    the default, is that minus 3. Not Excel's KURT or pandas' kurtosis(),
+    which are sample-adjusted."""
+    a = np.asarray(pd.Series(x).dropna(), dtype=float)
+    if len(a) < 4:
+        return np.nan
+    sd = pop_std(a)
+    if not sd > 0:
+        return np.nan
+    k = float(np.mean((a - a.mean()) ** 4) / sd ** 4)
+    return k - 3.0 if excess else k
+
+
+def long_enough(n_periods: int, ppy: int) -> bool:
+    """True when `n_periods` of data cover (about) a full year."""
+    return n_periods >= MIN_YEAR_FRACTION * max(1, int(ppy))
+
+
+def ann_return(returns: pd.Series, ppy: int = TRADING_DAYS, strict: bool = False) -> float:
+    """Annualised geometric return, [prod(1+r)]^(ppy/n) - 1. With
+    `strict`, a record shorter than a year gives NaN: the extrapolation of
+    a short window to a year is exactly what the standard forbids."""
+    r = returns.dropna()
+    if r.empty or (strict and not long_enough(len(r), ppy)):
+        return np.nan
+    g = float((1.0 + r).prod())
+    return g ** (ppy / len(r)) - 1.0 if g > 0 else np.nan
+
+
+def cagr(equity: pd.Series, ppy: int = TRADING_DAYS, strict: bool = False) -> float:
     equity = equity.dropna()
     if len(equity) < 2 or equity.iloc[0] <= 0:
         return np.nan
     # N values span N - 1 periods of growth.
+    if strict and not long_enough(len(equity) - 1, ppy):
+        return np.nan
     years = (len(equity) - 1) / ppy
     return float((equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1) if years > 0 else np.nan
 
 
 def annual_vol(returns: pd.Series, ppy: int = TRADING_DAYS) -> float:
-    return float(returns.std(ddof=1) * np.sqrt(ppy))
+    return pop_std(returns) * float(np.sqrt(ppy))
 
 
 # Below this daily volatility, a period is effectively riskless (portfolio
@@ -147,29 +201,67 @@ def rf_from_yield(yield_pct: pd.Series, index: pd.DatetimeIndex) -> pd.Series:
     return pd.Series(out, index=idx).fillna(0.0)
 
 
-def sharpe(returns: pd.Series, rf_pa: RiskFree = 0.0, ppy: int = TRADING_DAYS) -> float:
-    ex = excess_returns(returns, rf_pa, ppy)
-    sd = ex.std(ddof=1)
-    return float(ex.mean() / sd * np.sqrt(ppy)) if sd and sd > RISKLESS_SD else np.nan
+def rf_annual(index: pd.Index, rf: RiskFree, ppy: int = TRADING_DAYS) -> float:
+    """The risk-free rate as an annualised geometric return over `index`."""
+    return ann_return(rf_per_period(index, rf, ppy), ppy)
+
+
+def sharpe(returns: pd.Series, rf_pa: RiskFree = 0.0, ppy: int = TRADING_DAYS,
+           strict: bool = False) -> float:
+    """Sharpe ratio, CIPM form: (annualised geometric return - annualised
+    geometric risk-free) / (population SD of returns x sqrt(periods)).
+
+    The same risk-free series must be used for every portfolio compared;
+    a negative rate is kept as it is. With `strict` it is NaN below a year.
+    """
+    r = returns.dropna()
+    sd = pop_std(r)
+    if not (sd and sd > RISKLESS_SD):
+        return np.nan
+    ra = ann_return(r, ppy, strict)
+    if ra != ra:
+        return np.nan
+    return float((ra - rf_annual(r.index, rf_pa, ppy)) / (sd * np.sqrt(ppy)))
+
+
+def _target_series(index: pd.Index, rf_pa: RiskFree, mar: Optional[float],
+                   ppy: int) -> pd.Series:
+    """The per-period return the downside measures compare against: a
+    minimum acceptable return when one is given, else the risk-free."""
+    if mar is not None:
+        return pd.Series(float(mar), index=index)
+    return rf_per_period(index, rf_pa, ppy)
 
 
 def downside_deviation(returns: pd.Series, rf_pa: RiskFree = 0.0,
-                       ppy: int = TRADING_DAYS) -> float:
-    """Per-period downside deviation below the risk-free target: the root
-    mean square of shortfalls, taken over ALL periods (a period above the
-    target counts as a zero shortfall). Not the standard deviation of the
-    losing periods around their own mean, which measures how much the
-    losses vary rather than how large they are."""
-    ex = excess_returns(returns, rf_pa, ppy).dropna()
-    if ex.empty:
+                       ppy: int = TRADING_DAYS, mar: Optional[float] = None) -> float:
+    """Per-period downside deviation below the target (the risk-free rate,
+    or the per-period minimum acceptable return `mar`): the root mean square
+    of shortfalls, taken over ALL periods (a period above the target counts
+    as a zero shortfall). Not the standard deviation of the losing periods
+    around their own mean, which measures how much the losses vary rather
+    than how large they are."""
+    r = returns.dropna()
+    if r.empty:
         return np.nan
+    ex = r - _target_series(r.index, rf_pa, mar, ppy)
     return float(np.sqrt((np.minimum(ex, 0.0) ** 2).mean()))
 
 
-def sortino(returns: pd.Series, rf_pa: RiskFree = 0.0, ppy: int = TRADING_DAYS) -> float:
-    ex = excess_returns(returns, rf_pa, ppy)
-    down = downside_deviation(returns, rf_pa, ppy)
-    return float(ex.mean() / down * np.sqrt(ppy)) if down and down > RISKLESS_SD else np.nan
+def sortino(returns: pd.Series, rf_pa: RiskFree = 0.0, ppy: int = TRADING_DAYS,
+            mar: Optional[float] = None, strict: bool = False) -> float:
+    """Sortino ratio: (annualised geometric return - annualised target) /
+    (downside deviation x sqrt(periods)). The target is the risk-free rate
+    unless a per-period minimum acceptable return `mar` is given."""
+    r = returns.dropna()
+    down = downside_deviation(r, rf_pa, ppy, mar)
+    if not (down and down > RISKLESS_SD):
+        return np.nan
+    ra = ann_return(r, ppy, strict)
+    if ra != ra:
+        return np.nan
+    tgt = ann_return(_target_series(r.index, rf_pa, mar, ppy), ppy)
+    return float((ra - tgt) / (down * np.sqrt(ppy)))
 
 
 def drawdown(equity: pd.Series) -> pd.Series:
@@ -235,9 +327,14 @@ def drawdown_table(equity: pd.Series, top: int = 5,
     return pd.DataFrame(rows)
 
 
-def calmar(equity: pd.Series, ppy: int = TRADING_DAYS) -> float:
+def calmar(equity: pd.Series, ppy: int = TRADING_DAYS, rf_ann: float = 0.0,
+           strict: bool = False) -> float:
+    """Calmar ratio: (annualised return - annualised risk-free) / |max
+    drawdown|. Bacon's version nets off the risk-free rate; with the default
+    `rf_ann=0` it is the classic CAGR / |max drawdown|."""
     mdd = abs(max_drawdown(equity))
-    return float(cagr(equity, ppy) / mdd) if mdd > 0 else np.nan
+    c = cagr(equity, ppy, strict)
+    return float((c - rf_ann) / mdd) if mdd > 0 and c == c else np.nan
 
 
 def ulcer_index(equity: pd.Series) -> float:
@@ -254,43 +351,57 @@ def var_cvar(returns: pd.Series, level: float = 0.05) -> Dict[str, float]:
     return {"var": v, "cvar": float(tail.mean()) if len(tail) else v}
 
 
+# Below this R-squared the regression explains too little of the portfolio
+# for alpha, beta, Treynor or the appraisal ratio to mean anything.
+R2_FLOOR = 0.70
+
+
 def beta_alpha(returns: pd.Series, bench: pd.Series,
-               rf_pa: RiskFree = 0.0, ppy: int = TRADING_DAYS) -> Dict[str, float]:
+               rf_pa: RiskFree = 0.0, ppy: int = TRADING_DAYS,
+               strict: bool = False) -> Dict[str, float]:
     """Relative statistics against a benchmark, over the dates both cover.
 
     - `outperformance`: the strategy's CAGR minus the benchmark's -- by how
       much it beat the benchmark each year. This is what the reports call
       Alpha.
-    - `alpha`: Jensen's alpha, reported as the risk-adjusted alpha: the
-      intercept of the strategy's excess returns regressed on the
-      benchmark's, both over the same risk-free rate, times the periods in
-      a year. It compares the strategy with the benchmark scaled to the
-      same beta, so a less risky strategy can trail the benchmark and still
-      show a positive risk-adjusted alpha.
+    - `alpha`: Jensen's alpha, annualised geometrically as the CIPM text
+      does: r~ - r~F - beta (b~ - r~F). It compares the strategy with the
+      benchmark scaled to the same beta, so a less risky strategy can trail
+      the benchmark and still show a positive risk-adjusted alpha.
+    - `tracking_error`: population SD of the GEOMETRIC excess return
+      (1+r)/(1+b)-1 per period, times sqrt(periods). `information_ratio`
+      is the annualised geometric excess return over that.
+    - `r2_reliable`: False when R-squared < 0.70, in which case alpha and
+      beta (and everything derived from them) should not be quoted.
     """
     df = pd.concat([returns, bench], axis=1).dropna()
     outperf = np.nan
-    if len(df):
+    if len(df) and not (strict and not long_enough(len(df), ppy)):
         g = (1.0 + df).prod()
         if (g > 0).all():
             outperf = float(g.iloc[0] ** (ppy / len(df)) - g.iloc[1] ** (ppy / len(df)))
     if len(df) < 30:
         return {"beta": np.nan, "alpha": np.nan, "r2": np.nan, "corr": np.nan,
                 "tracking_error": np.nan, "information_ratio": np.nan,
-                "outperformance": outperf}
+                "outperformance": outperf, "r2_reliable": False}
     rf = rf_per_period(df.index, rf_pa, ppy)
     y = df.iloc[:, 0] - rf
     x = df.iloc[:, 1] - rf
     var_x = x.var(ddof=1)
     b = float(np.cov(y, x, ddof=1)[0, 1] / var_x) if var_x > 0 else np.nan
-    a = float((y.mean() - b * x.mean()) * ppy)
     corr = float(np.corrcoef(y, x)[0, 1])
-    active = df.iloc[:, 0] - df.iloc[:, 1]
-    te = float(active.std(ddof=1) * np.sqrt(ppy))
+    rp = ann_return(df.iloc[:, 0], ppy, strict)
+    rb = ann_return(df.iloc[:, 1], ppy, strict)
+    rfa = ann_return(rf, ppy)
+    ok = rp == rp and rb == rb
+    a = float(rp - rfa - b * (rb - rfa)) if ok else np.nan
+    geo = (1.0 + df.iloc[:, 0]) / (1.0 + df.iloc[:, 1]) - 1.0
+    te = pop_std(geo) * float(np.sqrt(ppy))
+    ir = float(((1.0 + rp) / (1.0 + rb) - 1.0) / te) if ok and te > 0 else np.nan
     return {
         "beta": b, "alpha": a, "r2": corr ** 2, "corr": corr,
         "outperformance": outperf, "tracking_error": te,
-        "information_ratio": float(active.mean() * ppy / te) if te > 0 else np.nan,
+        "information_ratio": ir, "r2_reliable": bool(corr ** 2 >= R2_FLOOR),
     }
 
 
@@ -311,10 +422,15 @@ def monthly_returns(returns: pd.Series, ppy: int = TRADING_DAYS) -> pd.DataFrame
 
 
 def rolling_sharpe(returns: pd.Series, window: int = 252,
-                   ppy: int = TRADING_DAYS) -> pd.Series:
-    mu = returns.rolling(window).mean()
-    sd = returns.rolling(window).std(ddof=1)
-    return (mu / sd) * np.sqrt(ppy)
+                   ppy: int = TRADING_DAYS, rf_pa: RiskFree = 0.0) -> pd.Series:
+    """Rolling Sharpe, same definition as `sharpe`: geometric return in
+    excess of the (geometric) risk-free, over the population SD."""
+    lr = np.log1p(returns)
+    ann = np.expm1(lr.rolling(window).sum() * ppy / window)
+    rf = rf_per_period(returns.index, rf_pa, ppy)
+    ann_rf = np.expm1(np.log1p(rf).rolling(window).sum() * ppy / window)
+    sd = returns.rolling(window).std(ddof=0)
+    return (ann - ann_rf) / (sd * np.sqrt(ppy))
 
 
 # ----------------------------------------------------------------------
@@ -338,17 +454,21 @@ def summary(returns: pd.Series,
     adj, _, _, unit, units = freq_words(ppy)
     out: Dict[str, float] = {
         "Total Return": float(eq.iloc[-1] / eq.iloc[0] - 1) if len(eq) > 1 else np.nan,
-        "CAGR": cagr(eq, ppy),
+        # Annualised ratios need a full year of history (CIPM: never
+        # annualise a shorter record); they read "n/a" below it.
+        "CAGR": cagr(eq, ppy, strict=True),
         "Volatility": annual_vol(returns, ppy),
-        "Sharpe": sharpe(returns, rf_pa, ppy),
-        "Sortino": sortino(returns, rf_pa, ppy),
-        "Calmar": calmar(eq, ppy),
+        "Sharpe": sharpe(returns, rf_pa, ppy, strict=True),
+        "Sortino": sortino(returns, rf_pa, ppy, strict=True),
+        "Calmar": calmar(eq, ppy, rf_annual(returns.index, rf_pa, ppy), strict=True),
         "Max Drawdown": max_drawdown(eq),
         "Ulcer Index": ulcer_index(eq),
-        var_label(ppy): vc["var"],
-        cvar_label(ppy): vc["cvar"],
-        "Skew": float(returns.skew()),
-        "Excess Kurtosis": float(returns.kurtosis()),
+        # VaR / CVaR are reported as positive losses (CIPM convention);
+        # horizon and confidence are in the label.
+        var_label(ppy): -vc["var"],
+        cvar_label(ppy): -vc["cvar"],
+        "Skew": pop_skew(returns),
+        "Excess Kurtosis": pop_kurt(returns),
         f"% Positive {units}": float((monthly > 0).mean()) if len(monthly) else np.nan,
         f"Best {unit}": float(monthly.max()) if len(monthly) else np.nan,
         f"Worst {unit}": float(monthly.min()) if len(monthly) else np.nan,
@@ -358,10 +478,17 @@ def summary(returns: pd.Series,
     if exposure is not None and len(exposure):
         out["Average Exposure"] = float(exposure.mean())
     if bench_returns is not None:
-        ba = beta_alpha(returns, bench_returns, rf_pa, ppy)
+        ba = beta_alpha(returns, bench_returns, rf_pa, ppy, strict=True)
+        # CIPM: with R-squared under 0.70 the regression explains too little
+        # of the portfolio, so beta and the risk-adjusted alpha are withheld
+        # (the R-squared stays in the table, as the reason). The plain
+        # outperformance, which is not a regression result, is unaffected.
+        ok = bool(ba["r2_reliable"]) or ba["r2"] != ba["r2"]
         out.update({
-            "Beta": ba["beta"], "Alpha (ann.)": ba["outperformance"],
-            "Risk-adjusted alpha (ann.)": ba["alpha"], "R\u00b2": ba["r2"],
+            "Beta": ba["beta"] if ok else np.nan,
+            "Alpha (ann.)": ba["outperformance"],
+            "Risk-adjusted alpha (ann.)": ba["alpha"] if ok else np.nan,
+            "R\u00b2": ba["r2"],
             "Tracking Error": ba["tracking_error"],
             "Information Ratio": ba["information_ratio"],
         })
@@ -380,11 +507,15 @@ FORMATS = {
 _PCT_PREFIXES = ("VaR 95%", "CVaR 95%", "% Positive", "Best ", "Worst ")
 
 
+def is_pct_metric(key: str) -> bool:
+    """Whether a summary() statistic is a fraction shown as a percentage."""
+    return FORMATS.get(key) == "pct" or key.startswith(_PCT_PREFIXES)
+
+
 def format_metric(key: str, value: float) -> str:
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return "n/a"
-    pct = FORMATS.get(key) == "pct" or key.startswith(_PCT_PREFIXES)
-    if pct:
+    if is_pct_metric(key):
         return f"{value * 100:,.2f}%"
     return f"{value:,.2f}"
 

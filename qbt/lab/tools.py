@@ -401,7 +401,7 @@ def register_strategy(run_id: str, name: str, note: str = "") -> Dict[str, Any]:
     r = _run(run_id)
     res, ppy = r["res"], r["engine"].periods_per_year
     base = {"sharpe": S.annualised_sharpe(res.returns, ppy),
-            "vol": float(res.returns.std() * np.sqrt(ppy)), "cagr": M.cagr(res.equity, ppy),
+            "vol": float(M.annual_vol(res.returns, ppy)), "cagr": M.cagr(res.equity, ppy),
             "max_drawdown": M.max_drawdown(res.equity), "start": str(res.returns.index[0].date()),
             "end": str(res.returns.index[-1].date()), "data_source": r["ds"].source}
     spec = {"strategy_key": r["strategy"], "params": r["params"], "engine": asdict(r["engine"]),

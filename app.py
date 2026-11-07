@@ -35,6 +35,8 @@ from qbt import charts as C
 from qbt import robustness as R
 from qbt import stress as STRESS
 from qbt import attribution as ATTR
+from qbt import cipm as CIPM
+from qbt import analysis_sheet as ANALYSIS
 from qbt import regimes as RG
 from qbt import tax as TAX
 from qbt import full_report as FULLREPORT
@@ -1598,7 +1600,7 @@ if source == "Return stream":
             win = min(ppy, max(6, len(r_main) // 6))
             _u = M.freq_words(ppy)[2]
             st.plotly_chart(
-                C.rolling_metric(M.rolling_sharpe(r_main, win, ppy),
+                C.rolling_metric(M.rolling_sharpe(r_main, win, ppy, rs_rf),
                                  "Rolling Sharpe", ref=0.0,
                                  title=f"Rolling Sharpe over {win} {_u}"),
                 use_container_width=True, config={"displaylogo": False})
@@ -2036,12 +2038,26 @@ if source == "Return stream":
                         "Returns": "as supplied: net of whatever costs and fees "
                                    "the source already deducted",
                         "Risk-free rate": rf_label + " (Sharpe, Sortino, alpha)",
+                        "Performance standard": "CIPM: population SD, geometric annualisation, "
+                                                "geometric excess; alpha withheld below R² 0.70",
                     },
                     "footer": f"{_lbl} · {datetime.now():%Y-%m-%d}",
                 }
             _rpos = (r_main, eq_main, stats, r_bench, eq_bench, bstats or None,
                      ppy, str(main_col), str(bench_col or "Benchmark"))
-            _rkw = dict(all_series=pd.DataFrame(everyone),
+            try:
+                _ran = ANALYSIS.build_analysis(
+                    r_main, r_bench, rs_rf, ppy, title=str(main_col),
+                    subtitle=f"{rs_start.date()} to {rs_end.date()}"
+                             + (f" · vs {bench_col}" if bench_col else ""),
+                    footer=f"{main_col} · {datetime.now():%Y-%m-%d}",
+                    rf_label=rf_label, returns_only=True, label=str(main_col),
+                    bench_label=str(bench_col) if bench_col else None)
+            except Exception as exc:
+                _ran = None
+                _rs_miss.append(("Results", "Performance analysis sheet",
+                                 f"Could not be assembled: {exc}"))
+            _rkw = dict(analysis=_ran, all_series=pd.DataFrame(everyone),
                         report_notes={"Scale read": rrep.scale,
                                       "Risk-free rate": rf_label,
                                       "Source": rs_source,
@@ -3547,6 +3563,7 @@ if run.get("trimmed"):
     _bits.append('<span class="item">warm-up trimmed</span>')
 st.markdown(f'<div class="runbar">{"".join(_bits)}</div>', unsafe_allow_html=True)
 
+battr_cfg = None        # set by the Attribution tab; the Excel export reuses it
 tabs = st.tabs(["Results", "Compare", "Signals", "Positions", "Attribution",
                 "Tax", "Robustness", "Data", "Builder", "Export"])
 
@@ -3612,7 +3629,7 @@ with tabs[0]:
                         config={"displaylogo": False})
         win = min(252, max(63, len(res.returns) // 6))
         st.plotly_chart(
-            C.rolling_metric(M.rolling_sharpe(res.returns, win, ppy),
+            C.rolling_metric(M.rolling_sharpe(res.returns, win, ppy, rf_bt),
                              "Rolling Sharpe", ref=0.0,
                              title=f"Rolling Sharpe over {win} sessions"),
             use_container_width=True, config={"displaylogo": False})
@@ -3626,6 +3643,20 @@ with tabs[0]:
     if bstats:
         tbl[bench.label] = [M.format_metric(k, bstats.get(k, np.nan)) for k in order]
     st.dataframe(tbl, use_container_width=True, hide_index=True)
+
+    with st.expander("CIPM appraisal: risk-adjusted, relative and drawdown measures"):
+        _ap = CIPM.appraisal_table(res.returns, bench_r, rf_bt, ppy)
+        st.dataframe(CIPM.format_appraisal(_ap), use_container_width=True,
+                     hide_index=True, height=min(900, 38 + 35 * len(_ap)))
+        note("One consistent set: same dates, same risk-free, population "
+             "standard deviation, geometric annualisation and geometric excess "
+             "return. Alpha, beta, Treynor and the appraisal ratio are "
+             "withheld when R\u00b2 against the benchmark is below 0.70, since "
+             "the regression then explains too little to mean anything. "
+             "Annualised figures need a full year of history.")
+        st.caption(CIPM.methodology_block(
+            ppy, rf=rf_bt_label, benchmark=(bench.label if bench is not None else "none"),
+            n_obs=len(res.returns)))
 
     eyebrow("Trailing periods")
     ptabs = M.period_table(res.equity, res.returns,
@@ -4427,6 +4458,88 @@ with tabs[4]:
                            _bpd.to_csv(index=False).encode("utf-8"),
                            f"contribution_by_{_period.lower()}.csv", "text/csv",
                            key="attr_dl2")
+
+        # ---- Benchmark-relative (Brinson-Fachler) attribution -------------
+        eyebrow("Benchmark-relative attribution (Brinson-Fachler)")
+        note("Explains the excess return over a policy benchmark through the "
+             "two decisions of an allocator: how much to hold in each asset "
+             "class (allocation) and which holdings to use within it "
+             "(selection, interaction included). Costs and fees are shown on "
+             "their own line. Set the benchmark weight and a return proxy for "
+             "every category; a category you hold must have a proxy that "
+             "matches how the decision is made, never an implicit 0%. By "
+             "default the proxy is the equal-weight average of the class.")
+        _cls_all = (dict(_groups) if (_view == "Asset class" and _groups) else
+                    {a: ((run.get("classes") or {}).get(a) or "Unclassified")
+                     for a in _assets})
+        _w_cls = res.weights.T.groupby({a: _cls_all.get(a, "Unclassified")
+                                        for a in res.weights.columns}, sort=False).sum().T
+        _avg = _w_cls.mean()
+        _bcats = sorted(set(_cls_all.values())) + [ATTR.CASH_CLASS]
+        if len(_bcats) <= 2:
+            note("Every holding is in one asset class, so allocation can only "
+                 "show the shift between that class and cash. Choose "
+                 "<b>Group by: Asset class</b> above and assign each "
+                 "instrument its class to see allocation across classes.")
+        _dflt = [max(0.0, float(_avg.get(c, 0.0))) for c in _bcats[:-1]]
+        _dflt.append(max(0.0, 1.0 - sum(_dflt)))
+        _dtot = sum(_dflt) or 1.0
+        _bdf = pd.DataFrame({
+            "Category": _bcats,
+            "Benchmark weight (%)": [round(100 * v / _dtot, 1) for v in _dflt],
+            "Return proxy": [ATTR.EQUAL_WEIGHT] * (len(_bcats) - 1) + ["Cash rate"]})
+        _bk = "bench_attr_" + str(abs(hash(tuple(_bcats))))
+        _bed = st.data_editor(
+            _bdf, hide_index=True, use_container_width=True, key=_bk,
+            column_config={
+                "Return proxy": st.column_config.SelectboxColumn(
+                    options=[ATTR.EQUAL_WEIGHT] + _assets + ["Cash rate"], required=True),
+                "Benchmark weight (%)": st.column_config.NumberColumn(
+                    min_value=-100.0, max_value=300.0, step=0.5),
+            }, disabled=["Category"])
+        b1, b2 = st.columns(2)
+        _bper = b1.selectbox("Attribution period", ["Month", "Quarter"], key="battr_period")
+        _blink = b2.selectbox("Multi-period linking",
+                              ["Frongello", "Carino", "Menchero", "GRAP"], key="battr_link")
+        _bw = {r["Category"]: float(r["Benchmark weight (%)"]) / 100.0
+               for _, r in _bed.iterrows()}
+        _prox = {r["Category"]: r["Return proxy"] for _, r in _bed.iterrows()
+                 if r["Category"] != ATTR.CASH_CLASS}
+        battr_cfg = dict(classes=_cls_all, bench_weights=_bw, proxies=_prox,
+                         period=_bper, linking=_blink.lower())
+        try:
+            _ba = ATTR.benchmark_relative(res, _cls_all, _bw, universe.pct_change(),
+                                          rf_bt, _prox, _bper, _blink.lower())
+        except ValueError as _e:
+            st.warning(str(_e))
+        else:
+            _lk = _ba["linked"]
+            bk1, bk2, bk3 = st.columns(3)
+            with bk1:
+                dial("Portfolio", f"{_ba['R'] * 100:+.2f}%", "linked, net of costs")
+            with bk2:
+                dial("Benchmark", f"{_ba['B'] * 100:+.2f}%", "weights x proxies")
+            with bk3:
+                dial("Excess (arithmetic)", f"{_ba['excess'] * 100:+.2f}%",
+                     f"reconciliation error {_ba['reconciliation_error'] * 100:+.4f}%",
+                     "pos" if _ba["excess"] > 0 else "neg")
+            _show = _lk.copy()
+            for _c in ("Avg portfolio weight", "Benchmark weight", "Allocation",
+                       "Selection", "Total effect"):
+                _show[_c] = [("" if pd.isna(v) else
+                              (f"{v * 100:.1f}%" if "weight" in _c else f"{v * 100:+.2f}%"))
+                             for v in _show[_c]]
+            _show = _show.reset_index().rename(columns={"index": "Category"})
+            st.dataframe(signed(_show, ["Allocation", "Selection", "Total effect"]),
+                         use_container_width=True, hide_index=True)
+            if abs(_ba["reconciliation_error"]) > 1e-6:
+                st.error("The effects do not reconcile to the excess return. "
+                         "This is an error to investigate, not a rounding difference.")
+            st.caption(_ba["methodology"])
+            st.download_button("Period attribution (CSV)",
+                               _ba["periods"].to_csv().encode("utf-8"),
+                               "benchmark_attribution_periods.csv", "text/csv",
+                               key="battr_dl")
 
 
 # --------------------------- TAX ------------------------------------------
@@ -5707,6 +5820,8 @@ with tabs[9]:
             "Cash": (f"earns {rcfg.data.cash_proxy}" if rcfg.data.cash_proxy
                      else f"earns {c.cash_rate_pa * 100:.2f}% a year"),
             "Risk-free rate": rf_bt_label + " (Sharpe, Sortino, alpha)",
+            "Performance standard": "CIPM: population SD, geometric annualisation, "
+                                    "geometric excess; alpha withheld below R² 0.70",
             "Cash reinvestment": _sweep + (f", {e.cash_buffer * 100:.1f}% buffer"
                                            if getattr(e, "cash_sweep", "none") != "none"
                                            or getattr(e, "cash_sweep_threshold", 0) else ""),
@@ -5781,7 +5896,27 @@ with tabs[9]:
             except Exception as exc:
                 _xl_miss.append(("Executive summary", "Summary page",
                                  f"Could not be assembled: {exc}"))
-        _args = dict(prices=universe.loc[_xw0:_xw1],
+        _analysis = None
+        if xl_pick and ({"Results", "Attribution"} & set(xl_pick)):
+            try:
+                _acfg = None
+                if battr_cfg and "Attribution" in xl_pick and xres.contributions is not None:
+                    _acfg = dict(battr_cfg, asset_returns=universe.pct_change())
+                _analysis = ANALYSIS.build_analysis(
+                    xres, xbench, rf_bt, ppy, title=rcfg.label or xres.label,
+                    subtitle=" · ".join(x for x in [
+                        f"{_xw0.date()} to {_xw1.date()}",
+                        f"vs {xbench.label}" if xbench is not None else "",
+                        f"generated {datetime.now():%Y-%m-%d}"] if x),
+                    footer=f"{rcfg.label or xres.label} · {datetime.now():%Y-%m-%d}",
+                    rf_label=rf_bt_label, attribution=_acfg)
+                if _analysis.get("battr_error"):
+                    _xl_miss.append(("Attribution", "Benchmark-relative attribution",
+                                     _analysis["battr_error"]))
+            except Exception as exc:
+                _xl_miss.append(("Attribution", "Attribution and analysis sheet",
+                                 f"Could not be assembled: {exc}"))
+        _args = dict(analysis=_analysis, prices=universe.loc[_xw0:_xw1],
                      exog=exog_used.loc[_xw0:_xw1] if exog_used is not None else None,
                      quality=quality.per_asset if quality is not None else None,
                      sections=_xl_secs, omitted=_xl_miss, include=list(xl_pick),
