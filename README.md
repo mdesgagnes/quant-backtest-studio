@@ -727,6 +727,58 @@ needs to be found and skipped by hand.
 
 ---
 
+## 4 bis bis. Fund review: does a product earn its place?
+
+The **Fund review** tab of the Return stream workspace answers one question
+for a fund, ETF or security: does it add anything a cheap mix of index ETFs
+and cash would not, and if it is added, what should be sold to pay for it?
+The logic is in `qbt/fund_review.py` (pure functions), the documents in
+`qbt/fund_review_export.py`.
+
+**The core test is a beta-matched replica**: beta x a market factor +
+(1 - beta) x the risk-free series, rebalanced monthly. Same market
+sensitivity, two cheap ETFs. Alpha is measured against it with monthly
+regressions and Newey-West t-stats.
+
+A review contains headline statistics for the product, its beta- and
+volatility-matched replicas and the factor; the regression detail (bond
+factor, Treynor-Mazuy convexity, up/down betas, alpha before and after a
+split date); stress and recovery episodes with the share of each sell-off
+absorbed against the beta; capture on big factor days; a payoff profile by
+factor-month quintile; a rolling beta; a portfolio funding test (a slice of
+the product funded from each sleeve in turn and beta-proportionally, run
+through the backtest engine); fees; and an illustrative tax comparison from
+one year of MRFP distributions.
+
+It ends with a verdict from three checks, thresholds configurable:
+
+| Check | Passes when |
+|---|---|
+| Alpha after fees | Alpha t-stat >= 2 (borderline if positive overall and since the split date) |
+| Crash behaviour | Median share of factor sell-offs absorbed, divided by beta, <= 1.25 |
+| Portfolio improvement | Beta-proportional funding lifts the base portfolio's Sharpe by >= 0.02 |
+
+**Inputs.** A return file with the product, the market factor in the same
+currency (S&P 500 in CAD for a US equity fund held in CAD), and, for the
+funding test, the model portfolio's sleeves. Use a T-bill risk-free rate:
+the sidebar now offers **Canada 3-month T-bill (Bank of Canada)**, from the
+Bank's Valet API (`qbt/boc.py`), as well as the US ^IRX series. With a 0%
+rate the alpha would include the cash yield.
+
+**Exports.** Report (PDF), deck (PowerPoint), tables (Excel) and the review
+config (YAML). Settings can be entered in the tab or loaded from a YAML file;
+`configs/fund_review_example.yaml` documents every key. The same review runs
+without the interface:
+
+```python
+from qbt import fund_review as FR, fund_review_export as FX
+cfg = FR.config_from_yaml(open("configs/fund_review_example.yaml").read())
+review = FR.run_review(returns, risk_free, cfg, periods_per_year)
+open("review.pdf", "wb").write(FX.render_pdf(review))
+```
+
+---
+
 ## 4 ter. Period reporting
 
 The Results tab and the tearsheet both carry two standard tables.

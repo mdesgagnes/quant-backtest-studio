@@ -1,0 +1,50 @@
+# Fund review: Dynamic Premium Yield, Series F, against the S&P 500 in CAD.
+# Load it in Return stream > Fund review, or run it from Python:
+#   from qbt import fund_review as FR
+#   cfg = FR.config_from_yaml(open("configs/fund_review_example.yaml").read())
+#   review = FR.run_review(returns, risk_free, cfg, periods_per_year)
+# Column names must match the uploaded return file.
+fund_review:
+  product: Dyn Premium Yield
+  label: Dynamic Premium Yield (F)
+  factor: S&P 500 (CAD)          # where the product's equity risk comes from, same currency
+  bond: XBB                      # optional bond factor for the 2-factor regression
+  split_date: '2023-07-01'       # alpha before / after (AUM ramp, PM or mandate change)
+
+  # Portfolio funding test: base weights, and which sleeves are equity / bonds
+  base_portfolio:
+    S&P/TSX: 0.20
+    S&P 500 (CAD): 0.25
+    MSCI EAFE (CAD): 0.15
+    XBB: 0.30
+    XCB: 0.10
+  equity_sleeves: [S&P/TSX, S&P 500 (CAD), MSCI EAFE (CAD)]
+  bond_sleeves: [XBB, XCB]
+  funding_amount: 0.10
+  rebalance: Q
+
+  # Costs and an illustrative non-registered tax comparison
+  mer: 0.0112
+  replica_cost: 0.001
+  factor_dividend_yield: 0.012
+  distribution:                  # one year per unit, from the MRFP; nav 0 skips the tax panel
+    nav: 11.74
+    income: 0.29
+    dividends: 0.01
+    capital_gains: 0.49
+    return_of_capital: 0.06
+    source: MRFP FY2025, Series F
+  tax:                           # Quebec top bracket
+    income_rate: 0.5331
+    capital_gains_rate: 0.2665
+    eligible_dividend_rate: 0.4011
+
+  # Extra stress windows on top of the app's standard list
+  extra_periods:
+    - {name: COVID rebound, start: '2020-03-24', end: '2020-08-31'}
+    - {name: Tariff rebound, start: '2025-04-09', end: '2025-06-30'}
+
+  # Decision thresholds
+  alpha_t_required: 2.0
+  crash_ratio_tolerance: 1.25
+  min_sharpe_gain: 0.02

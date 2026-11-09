@@ -5,6 +5,7 @@ Deployment:    see README.md
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -57,6 +58,9 @@ from qbt import names as N
 from qbt import price_import as PI
 from qbt import fx as FX
 from qbt import nextrade as NR
+from qbt import boc as BOC
+from qbt import fund_review as FREV
+from qbt import fund_review_export as FREVX
 
 st.set_page_config(page_title="Quant Backtest Studio",
                    page_icon="\u25e7", layout="wide",
@@ -642,6 +646,16 @@ def fetch_regime_market() -> Optional[pd.DataFrame]:
     None if Yahoo Finance is unreachable, and the tab says so."""
     try:
         return RG.load_market()
+    except Exception:
+        return None
+
+
+@st.cache_data(show_spinner=False, ttl=6 * 3600)
+def fetch_boc_tbill(series: str) -> Optional[pd.Series]:
+    """Canadian 3-month T-bill yields from the Bank of Canada. Best effort:
+    None if the Valet API is unreachable, and the sidebar says so."""
+    try:
+        return BOC.fetch_series(series, "1990-01-01")
     except Exception:
         return None
 
@@ -1312,7 +1326,8 @@ if source == "Return stream":
     # Risk-free rate for Sharpe, Sortino and alpha. Zero credits a portfolio
     # with the cash yield as though it were skill: over a long history that
     # puts most of a T-bill's return into a low-beta portfolio's alpha.
-    _RF_OPTS = (["US 3-month T-bill (historical)", "Fixed annual rate", "None (0%)"]
+    _RF_OPTS = (["US 3-month T-bill (historical)", "Canada 3-month T-bill (Bank of Canada)",
+                 "Fixed annual rate", "None (0%)"]
                 + [f"Column: {c}" for c in cols])
     rf_choice = st.sidebar.selectbox(
         "Risk-free rate", _RF_OPTS, key="rs_rf",
@@ -1337,6 +1352,17 @@ if source == "Return stream":
             st.sidebar.markdown('<div class="flag">T-bill yields could not be '
                                 'downloaded: 0% is used.</div>',
                                 unsafe_allow_html=True)
+    elif rf_choice.startswith("Canada 3-month"):
+        _boc = fetch_boc_tbill(BOC.TBILL_DAILY)
+        if _boc is None or _boc.empty:
+            _boc = fetch_boc_tbill(BOC.TBILL_MONTHLY)
+        if _boc is not None and not _boc.empty:
+            rs_rf = M.rf_from_yield(_boc, rets.index)
+            rf_label = "Canada 3-month T-bill (Bank of Canada), historical"
+        else:
+            st.sidebar.markdown('<div class="flag">Bank of Canada yields could not '
+                                'be downloaded: 0% is used. A T-bill column in '
+                                'your file works too.</div>', unsafe_allow_html=True)
     elif rf_choice == "Fixed annual rate":
         _rate = st.sidebar.number_input("Annual risk-free rate (%)", -5.0, 25.0,
                                         2.0, 0.25, key="rs_rf_rate") / 100.0
@@ -1452,7 +1478,7 @@ if source == "Return stream":
         return "n/a" if pd.isna(v) else f"{v * 100:+.2f}%"
 
     rs_tabs = st.tabs(["Results", "Stress tests", "Market regimes",
-                       "Robustness", "Export"])
+                       "Robustness", "Export", "Fund review"])
 
     # ==================================================================
     # Results
@@ -2083,6 +2109,215 @@ if source == "Return stream":
              "regime; sub-period stability and Monte Carlo when run; plus a "
              "Notes sheet recording the source, frequency and scale that "
              "were read.")
+
+    # ==================================================================
+    # Fund review: the beta-matched replica test (qbt/fund_review.py)
+    # ==================================================================
+    with rs_tabs[5]:
+        eyebrow("Fund review")
+        note("Does a fund or security earn its place? It is compared with a "
+             "<b>beta-matched replica</b>: beta x a market factor + (1 - beta) "
+             "x the risk-free series, rebalanced monthly. If the product cannot "
+             "beat that mix after fees, the replica gives the same exposure for "
+             "a few basis points. The review also covers stress episodes, crash "
+             "behaviour, a portfolio funding test, fees and taxes, and ends with "
+             "a verdict from three explicit checks. Every column of the file is "
+             "available here, whatever the selection above.")
+        if rf_label.startswith("0%"):
+            st.markdown('<div class="flag">The risk-free rate is 0%: alpha will '
+                        'include the cash yield. Pick a T-bill series in the '
+                        'sidebar (the Bank of Canada option for CAD products).</div>',
+                        unsafe_allow_html=True)
+
+        _fr_up = st.file_uploader("Load a review config (YAML, optional)",
+                                  type=["yaml", "yml"], key="fr_yaml")
+        _frc: Optional[FREV.FundReviewConfig] = None
+        # A newly loaded config gets fresh widget keys, so its values replace
+        # whatever the widgets held before instead of being ignored.
+        _fk = "_" + hashlib.md5(_fr_up.getvalue()).hexdigest()[:8] if _fr_up is not None else ""
+        if _fr_up is not None:
+            try:
+                _frc = FREV.config_from_yaml(_fr_up.getvalue().decode("utf-8"))
+                for _c in [_frc.product, _frc.factor] + list(_frc.base_portfolio):
+                    if _c not in cols:
+                        st.markdown(f'<div class="flag">Config column “{_c}” is '
+                                    f'not in this file.</div>', unsafe_allow_html=True)
+            except Exception as exc:
+                st.error(f"Config not read: {exc}")
+                _frc = None
+
+        def _ix(options, value, fallback=0):
+            return options.index(value) if value in options else fallback
+
+        f1, f2, f3 = st.columns(3)
+        fr_prod = f1.selectbox("Product", cols, key=f"fr_prod{_fk}",
+                               index=_ix(cols, _frc.product if _frc else main_col))
+        _fac_opts = [c for c in cols if c != fr_prod]
+        if not _fac_opts:
+            note("The file needs at least a second column (the market factor).")
+            st.stop()
+        fr_fac = f2.selectbox(
+            "Market factor", _fac_opts, key=f"fr_fac{_fk}",
+            index=_ix(_fac_opts, _frc.factor if _frc else bench_col),
+            help="The index the product's equity risk comes from, in the same "
+                 "currency as the product: S&P 500 (CAD) for a US equity fund "
+                 "held in CAD, S&P/TSX for Canadian equity, and so on.")
+        _bond_opts = ["None"] + [c for c in cols if c not in (fr_prod, fr_fac)]
+        fr_bond = f3.selectbox("Bond factor (optional)", _bond_opts, key=f"fr_bond{_fk}",
+                               index=_ix(_bond_opts, _frc.bond if _frc else None))
+        f4, f5, f6 = st.columns(3)
+        fr_label = f4.text_input("Display name", key=f"fr_label_{fr_prod}{_fk}",
+                                 value=(_frc.label if _frc and _frc.label else fr_prod))
+        fr_split = f5.text_input(
+            "Split date (optional)", value=(_frc.split_date or "") if _frc else "",
+            key=f"fr_split{_fk}", placeholder="YYYY-MM-DD",
+            help="Alpha is also measured before and after this date: a "
+                 "manager change, a mandate change, or the start of a big "
+                 "asset ramp.")
+        fr_mer = f6.number_input("Product MER (%)", 0.0, 5.0,
+                                 float((_frc.mer or 0.0) * 100) if _frc else 0.0, 0.01,
+                                 key=f"fr_mer{_fk}", help="0 leaves fees out of the report.")
+
+        with st.expander("Portfolio funding test", expanded=bool(_frc and _frc.base_portfolio)):
+            note("A base portfolio, then the same portfolio plus a slice of the "
+                 "product paid for by each sleeve in turn, and beta-"
+                 "proportionally (beta x the slice from the equity sleeves, the "
+                 "rest from the bond sleeves). Leave the table empty to skip.")
+            _rows = []
+            if _frc:
+                for k, w in _frc.base_portfolio.items():
+                    grp = ("Equity" if k in _frc.equity_sleeves else
+                           "Bonds" if k in _frc.bond_sleeves else "Other")
+                    _rows.append({"Sleeve": k, "Weight (%)": w * 100, "Group": grp})
+            _fr_tab = st.data_editor(
+                pd.DataFrame(_rows, columns=["Sleeve", "Weight (%)", "Group"]),
+                num_rows="dynamic", key=f"fr_base{_fk}",
+                column_config={
+                    "Sleeve": st.column_config.SelectboxColumn(options=[c for c in cols if c != fr_prod]),
+                    "Weight (%)": st.column_config.NumberColumn(min_value=0.0, max_value=100.0, step=1.0),
+                    "Group": st.column_config.SelectboxColumn(options=["Equity", "Bonds", "Other"])})
+            g1, g2 = st.columns(2)
+            fr_amt = g1.number_input("Slice added (%)", 1.0, 50.0,
+                                     float(_frc.funding_amount * 100) if _frc else 10.0, 1.0,
+                                     key=f"fr_amt{_fk}") / 100.0
+            _rb = ["M", "Q", "S", "A"]
+            fr_reb = g2.selectbox("Rebalance", _rb, key=f"fr_reb{_fk}",
+                                  index=_ix(_rb, _frc.rebalance if _frc else "Q", 1),
+                                  format_func=lambda k: REBALANCE_RULES[k])
+
+        with st.expander("Distributions and tax (optional)"):
+            note("One year of distributions per unit from the fund's MRFP, for "
+                 "an illustrative non-registered tax comparison with the "
+                 "replica. Leave NAV at 0 to skip. Default rates: Quebec top "
+                 "bracket.")
+            _d = _frc.distribution if _frc else FREV.Distribution()
+            _t = _frc.tax if _frc else FREV.TaxSettings()
+            h1, h2, h3, h4, h5 = st.columns(5)
+            fr_nav = h1.number_input("NAV per unit", 0.0, 10_000.0, float(_d.nav), 0.01, key=f"fr_nav{_fk}")
+            fr_inc = h2.number_input("Income", 0.0, 1_000.0, float(_d.income), 0.01, key=f"fr_inc{_fk}")
+            fr_div = h3.number_input("Dividends", 0.0, 1_000.0, float(_d.dividends), 0.01, key=f"fr_div{_fk}")
+            fr_cg = h4.number_input("Capital gains", 0.0, 1_000.0, float(_d.capital_gains), 0.01, key=f"fr_cg{_fk}")
+            fr_roc = h5.number_input("Return of capital", 0.0, 1_000.0, float(_d.return_of_capital), 0.01,
+                                     key=f"fr_roc{_fk}")
+            k1, k2, k3, k4 = st.columns(4)
+            fr_src = k1.text_input("Source", _d.source, key=f"fr_dsrc{_fk}", placeholder="MRFP FY2025, Series F")
+            fr_ti = k2.number_input("Income tax rate (%)", 0.0, 60.0, _t.income_rate * 100, 0.01, key=f"fr_ti{_fk}")
+            fr_tc = k3.number_input("Capital gains rate (%)", 0.0, 60.0, _t.capital_gains_rate * 100, 0.01,
+                                    key=f"fr_tc{_fk}")
+            fr_td = k4.number_input("Eligible dividend rate (%)", 0.0, 60.0, _t.eligible_dividend_rate * 100,
+                                    0.01, key=f"fr_td{_fk}")
+
+        with st.expander("Extra stress windows and thresholds"):
+            _ex = "\n".join(f"{e['name']}, {e['start']}, {e['end']}"
+                            for e in (_frc.extra_periods if _frc else []))
+            fr_extra = st.text_area("One window per line: name, start, end", _ex, key=f"fr_extra{_fk}",
+                                    placeholder="Tariff rebound, 2025-04-09, 2025-06-30")
+            t1, t2, t3, t4 = st.columns(4)
+            _dc = _frc or FREV.FundReviewConfig(product="", factor="")
+            fr_t = t1.number_input("Alpha t-stat required", 0.0, 5.0, _dc.alpha_t_required, 0.1, key=f"fr_t{_fk}")
+            fr_cr = t2.number_input("Crash tolerance (x beta)", 0.5, 5.0, _dc.crash_ratio_tolerance, 0.05,
+                                    key=f"fr_cr{_fk}")
+            fr_sh = t3.number_input("Min. Sharpe gain", -1.0, 1.0, _dc.min_sharpe_gain, 0.01, key=f"fr_sh{_fk}")
+            fr_rc = t4.number_input("Replica cost (%)", 0.0, 2.0, _dc.replica_cost * 100, 0.01, key=f"fr_rc{_fk}")
+
+        def _fr_config() -> FREV.FundReviewConfig:
+            tab = _fr_tab.dropna(subset=["Sleeve"]) if len(_fr_tab) else _fr_tab
+            base = {str(r["Sleeve"]): float(r["Weight (%)"] or 0) / 100 for _, r in tab.iterrows()
+                    if r["Sleeve"]}
+            extra = []
+            for line in fr_extra.splitlines():
+                parts = [x.strip() for x in line.split(",")]
+                if len(parts) >= 3 and parts[0]:
+                    extra.append({"name": parts[0], "start": parts[1], "end": parts[2]})
+            return FREV.FundReviewConfig(
+                product=fr_prod, factor=fr_fac, label=fr_label.strip(),
+                bond=None if fr_bond == "None" else fr_bond,
+                split_date=fr_split.strip() or None,
+                base_portfolio=base,
+                equity_sleeves=[str(r["Sleeve"]) for _, r in tab.iterrows() if r["Group"] == "Equity"],
+                bond_sleeves=[str(r["Sleeve"]) for _, r in tab.iterrows() if r["Group"] == "Bonds"],
+                funding_amount=fr_amt, rebalance=fr_reb,
+                mer=fr_mer / 100 if fr_mer else None, replica_cost=fr_rc / 100,
+                distribution=FREV.Distribution(fr_nav, fr_inc, fr_div, fr_cg, fr_roc, fr_src),
+                tax=FREV.TaxSettings(fr_ti / 100, fr_tc / 100, fr_td / 100),
+                extra_periods=extra, alpha_t_required=fr_t,
+                crash_ratio_tolerance=fr_cr, min_sharpe_gain=fr_sh)
+
+        if st.button("Run fund review", type="primary", key="fr_run"):
+            try:
+                _cfg = _fr_config()
+                with st.spinner("Running the review…"):
+                    _rv = FREV.run_review(rets, rs_rf, _cfg, ppy)
+                    _im = FREVX.charts(_rv)
+                    st.session_state["fr_out"] = {
+                        "review": _rv, "images": _im, "source": rs_source,
+                        "pdf": FREVX.render_pdf(_rv, _im), "pptx": FREVX.render_pptx(_rv, _im),
+                        "xlsx": FREVX.render_excel(_rv), "yaml": FREV.config_to_yaml(_cfg)}
+            except Exception as exc:
+                st.error(f"Fund review failed: {exc}")
+                st.session_state.pop("fr_out", None)
+
+        _fo = st.session_state.get("fr_out")
+        if _fo and _fo["source"] == rs_source:
+            _rv, _im = _fo["review"], _fo["images"]
+            _v = _rv.verdict
+            st.markdown(f'<div class="runbar"><span class="lead">Verdict: {_v["verdict"]}</span>'
+                        f'<span class="item">{_v["summary"]}</span></div>', unsafe_allow_html=True)
+            st.dataframe(pd.DataFrame([(c["check"], c["status"].upper(), c["detail"])
+                                       for c in _v["checks"]], columns=["Check", "Result", "Detail"]),
+                         hide_index=True, use_container_width=True)
+            for _p in FREVX.key_points(_rv):
+                st.markdown(f"- {_p}")
+            for _n in _rv.notes:
+                st.markdown(f'<div class="flag">{_n}</div>', unsafe_allow_html=True)
+            x1, x2, x3, x4 = st.columns(4)
+            _fn = re.sub(r"[^A-Za-z0-9]+", "_", _rv.config.name).strip("_") or "fund"
+            x1.download_button("Report (PDF)", _fo["pdf"], f"fund_review_{_fn}.pdf",
+                               "application/pdf", key="fr_dl_pdf")
+            x2.download_button("Deck (PowerPoint)", _fo["pptx"], f"fund_review_{_fn}.pptx",
+                               "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                               key="fr_dl_pptx")
+            x3.download_button("Tables (Excel)", _fo["xlsx"], f"fund_review_{_fn}.xlsx",
+                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               key="fr_dl_xlsx")
+            x4.download_button("Config (YAML)", _fo["yaml"].encode("utf-8"), f"fund_review_{_fn}.yaml",
+                               "text/yaml", key="fr_dl_yaml")
+            eyebrow("Headline statistics")
+            st.dataframe(FREVX.headline_table(_rv), use_container_width=True)
+            st.image(_im["growth"], use_container_width=True)
+            st.image(_im["relative"], use_container_width=True)
+            eyebrow("Is there alpha?")
+            st.dataframe(FREVX.regression_table(_rv), hide_index=True, use_container_width=True)
+            eyebrow("Stress and recovery episodes")
+            st.dataframe(FREVX.stress_table(_rv), hide_index=True, use_container_width=True)
+            for _k in ("calendar", "drawdowns", "payoff", "rolling"):
+                if _k in _im:
+                    st.image(_im[_k], use_container_width=True)
+            _ft = FREVX.funding_table(_rv)
+            if _ft is not None:
+                eyebrow("Portfolio funding test")
+                st.dataframe(_ft, use_container_width=True)
+                st.image(_im["funding"], use_container_width=True)
     st.stop()
 
 
