@@ -154,6 +154,40 @@ def monthly_heatmap(returns: pd.Series,
     return fig
 
 
+def annual_heatmap(table: pd.DataFrame, partial: Optional[pd.DataFrame] = None,
+                   title: str = "Calendar-year returns",
+                   theme: str = "dark") -> go.Figure:
+    """Instruments by calendar year, shaded by sign and size. A partial year
+    (the first year of a series, or the year in progress) carries a star."""
+    pal, _ = _colors(theme)
+    if table is None or table.empty:
+        return _base(go.Figure(), 200, title, theme)
+    z = table.values * 100
+    text = []
+    for i in range(z.shape[0]):
+        row = []
+        for j in range(z.shape[1]):
+            v = z[i, j]
+            if v != v:
+                row.append("")
+            else:
+                star = ("*" if partial is not None and bool(partial.iat[i, j])
+                        else "")
+                row.append(f"{v:.1f}{star}")
+        text.append(row)
+    cap = float(np.nanpercentile(np.abs(z), 95)) if np.isfinite(z).any() else 1.0
+    fig = go.Figure(go.Heatmap(
+        z=z, x=[str(c) for c in table.columns], y=[str(i) for i in table.index],
+        colorscale=[[0.0, pal["rust"]], [0.5, pal["panel"]], [1.0, pal["teal"]]],
+        zmid=0, zmin=-cap, zmax=cap, showscale=False,
+        text=text, texttemplate="%{text}", textfont=dict(family=MONO, size=9),
+        hovertemplate="%{y} %{x}: %{z:.2f}%<extra></extra>", xgap=2, ygap=2))
+    _base(fig, max(220, 30 * len(table) + 90), title, theme)
+    fig.update_yaxes(autorange="reversed", showgrid=False)
+    fig.update_xaxes(side="top")
+    return fig
+
+
 def weights_area(weights: pd.DataFrame, cash: Optional[pd.Series] = None,
                  title: str = "Portfolio composition",
                  theme: str = "dark") -> go.Figure:

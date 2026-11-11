@@ -312,6 +312,41 @@ details.strat .ds{ font-size:.81rem; color:var(--muted); line-height:1.55; margi
 .stSpinner > div{ border-top-color:var(--nb-red) !important; }
 hr{ border-color:var(--rule-soft); }
 
+/* ---------------- Instrument card and pills (Markets > Snapshot) ----------
+   After the fund header on Sparkline Analytics: ticker, name, a row of
+   figures, a percentile and a small trend. Same palette, same 3px radius. */
+.hero{ display:flex; justify-content:space-between; gap:1.2rem; flex-wrap:wrap;
+  background:var(--panel-2); border:1px solid var(--rule);
+  border-top:2px solid var(--nb-red); border-radius:var(--radius);
+  padding:1rem 1.2rem; margin:.4rem 0 .6rem; }
+.hero-tkr{ font-family:var(--mono); font-size:2rem; font-weight:600;
+  color:var(--ink); line-height:1.05; letter-spacing:-.01em; }
+.hero-name{ font-size:.9rem; color:var(--muted); margin:.15rem 0 .8rem; }
+.hero-row{ display:flex; gap:1.8rem; flex-wrap:wrap; }
+.hero .kv .k{ display:block; font-family:var(--mono); font-size:.6rem;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--faint);
+  font-weight:600; margin-bottom:.15rem; }
+.hero .kv .v{ font-family:var(--mono); font-size:1.05rem; font-weight:600;
+  color:var(--ink); font-variant-numeric:tabular-nums; }
+.hero .kv .v.pos{ color:var(--gain); } .hero .kv .v.neg{ color:var(--loss); }
+.hero .rank{ display:inline-block; margin-top:.8rem; font-size:.8rem;
+  font-weight:600; color:var(--ink); border:1px solid var(--rule);
+  border-radius:var(--radius); padding:.15rem .5rem; }
+.hero .rank .vs{ font-weight:400; color:var(--muted); }
+.hero-side{ text-align:right; align-self:flex-end; }
+.hero-cap{ font-family:var(--mono); font-size:.6rem; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--faint); margin-top:.2rem; }
+/* st.pills / st.segmented_control: the same flat, square-cornered look as
+   the tabs, with red kept for the active choice only. */
+[data-testid="stPills"] button, [data-testid="stButtonGroup"] button{
+  border-radius:var(--radius) !important; font-family:var(--mono);
+  font-size:.74rem; }
+[data-testid="stPills"] button[aria-checked="true"],
+[data-testid="stButtonGroup"] button[aria-checked="true"],
+[data-testid="stPills"] button[kind="pillsActive"]{
+  background:var(--nb-red) !important; border-color:var(--nb-red) !important;
+  color:#fff !important; }
+
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{ animation-duration:.001ms !important;
     transition-duration:.001ms !important; } }
@@ -850,8 +885,28 @@ if workspace == "Markets":
         f'<span class="item">loaded {mk["stamp"]}</span></div>',
         unsafe_allow_html=True)
 
-    mtabs = st.tabs(["Chart", "Performance", "Risk", "Relationships",
-                     "Seasonality", "Data"])
+    mtabs = st.tabs(["Snapshot", "Screener", "Groups", "Chart", "Performance",
+                     "Risk", "Relationships", "Seasonality", "Data"])
+
+    # ---------------- Snapshot / Screener / Groups ------------------------
+    # (qbt/snapshot_ui.py, qbt/groups_ui.py)
+    from qbt import snapshot_ui as SNUI
+    from qbt import groups_ui as GRUI
+
+    def _group_loader(tk: tuple):
+        raw_g = fetch_market(tuple(tk), str(mk_start), str(mk_end),
+                             True, False, False, False)
+        px_g, _q = clean_prices(raw_g.close, DataConfig(
+            tickers=list(tk), start=str(mk_start), end=str(mk_end)))
+        return px_g, [t for t in tk if t not in px_g.columns]
+
+    with mtabs[0]:
+        SNUI.render_snapshot(prices, base, N.label)
+    with mtabs[1]:
+        SNUI.render_screener(prices, N.label)
+    with mtabs[2]:
+        GRUI.render_groups(_group_loader, N.label)
+    mtabs = mtabs[3:]
 
     # ---------------- Chart ----------------
     with mtabs[0]:
