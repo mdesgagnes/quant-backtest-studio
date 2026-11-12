@@ -1,0 +1,65 @@
+/* Design tokens. The only file that contains raw colour or size values.
+   See docs/DESIGN.md for what each role is for. */
+:root {
+  /* Ground: ink, cooled toward blue so brass and the sign colours sit on it. */
+  --bg: #0d1217;
+  --surface: #121920;
+  --raised: #18212a;
+  --line: #25313c;
+  --line-soft: #1a242d;
+
+  /* Text. Contrast on --bg: 15.8, 8.7, 5.3 (AA for all sizes used). */
+  --text: #e7ecf1;
+  --text-2: #a7b2bd;
+  --text-3: #7c8996;
+
+  /* The one accent: brass. Actions, selection, focus, the subject series. */
+  --accent: #d8b46a;
+  --accent-strong: #e6c682;
+  --accent-wash: rgba(216, 180, 106, 0.12);
+  --on-accent: #171207;
+
+  /* Sign. Used for gains and losses and nothing else. */
+  --gain: #45b88f;
+  --loss: #ea6f5f;
+  --gain-wash: rgba(69, 184, 143, 0.16);
+  --loss-wash: rgba(234, 111, 95, 0.16);
+
+  /* Attention that is not a loss (data warnings). */
+  --warn: #c9a45c;
+  --warn-wash: rgba(201, 164, 92, 0.1);
+
+  /* Chart series after the subject: context, never green or red. */
+  --series-2: #8493a3;
+  --series-3: #6ea3d8;
+  --series-4: #b190d4;
+  --series-5: #79c2c4;
+  --series-6: #d59a78;
+
+  /* Type: one family. Figures are tabular everywhere. */
+  --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --fs-0: 0.6875rem; /* 11 axis ticks */
+  --fs-1: 0.75rem;   /* 12 labels, table header, notes */
+  --fs-2: 0.8125rem; /* 13 body, table cells, controls */
+  --fs-3: 0.9375rem; /* 15 section headings */
+  --fs-4: 1.125rem;  /* 18 run title */
+  --fs-5: 1.5rem;    /* 24 KPI figures */
+  --lh-tight: 1.2;
+  --lh: 1.45;
+
+  /* Space: a 4px grid. */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  --radius: 3px;
+  --row: 28px;          /* table row and control height */
+  --panel-w: 328px;     /* control panel */
+  --bar-h: 44px;        /* top bar */
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  --ease: 120ms ease-out;
+}
