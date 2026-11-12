@@ -1,41 +1,53 @@
 /* Design tokens. The only file that contains raw colour or size values.
    See docs/DESIGN.md for what each role is for. */
 :root {
-  /* Ground: ink, cooled toward blue so brass and the sign colours sit on it. */
-  --bg: #0d1217;
-  --surface: #121920;
-  --raised: #18212a;
-  --line: #25313c;
-  --line-soft: #1a242d;
+  /* National Bank of Canada: black, red and gold.
+     Ground: the brand black, warmed toward sand rather than cooled. */
+  --bg: #0e0e0d;
+  --surface: #161614;
+  --raised: #1f1e1b;
+  --line: #302d28;
+  --line-soft: #232220;
 
-  /* Text. Contrast on --bg: 15.8, 8.7, 5.3 (AA for all sizes used). */
-  --text: #e7ecf1;
-  --text-2: #a7b2bd;
-  --text-3: #7c8996;
+  /* Text, sand-tinted. Contrast on --bg: 16.0, 9.1, 5.5 (AA at every size). */
+  --text: #efe9de;
+  --text-2: #b8b1a5;
+  --text-3: #8f887c;
 
-  /* The one accent: brass. Actions, selection, focus, the subject series. */
-  --accent: #d8b46a;
-  --accent-strong: #e6c682;
-  --accent-wash: rgba(216, 180, 106, 0.12);
-  --on-accent: #171207;
+  /* Brand red: what you can act on and where you are. Fills and rules
+     only, never text (4.1:1 on black is below AA for text) and never
+     inside a chart or a table, where red means a loss. */
+  --accent: #e41c23;
+  --accent-strong: #c2151b;
+  --accent-wash: rgba(228, 28, 35, 0.16);
+  --on-accent: #ffffff;
 
-  /* Sign. Used for gains and losses and nothing else. */
-  --gain: #45b88f;
-  --loss: #ea6f5f;
+  /* Brand gold: accent text (links, focus), and the subject series of
+     every chart. 9.3:1 on --bg. */
+  --gold: #d4af5a;
+  --gold-strong: #e6c67d;
+  --gold-wash: rgba(212, 175, 90, 0.14);
+
+  /* Sign. Used for gains and losses and nothing else. The loss colour is
+     a coral, deliberately not the brand red, so a loss is never mistaken
+     for a button and the brand never reads as a loss. */
+  --gain: #4fb79a;
+  --loss: #ee7a66;
   --gain-soft: #8fc7a4;  /* a weaker positive verdict (Research) */
-  --gain-wash: rgba(69, 184, 143, 0.16);
-  --loss-wash: rgba(234, 111, 95, 0.16);
+  --gain-wash: rgba(79, 183, 154, 0.16);
+  --loss-wash: rgba(238, 122, 102, 0.16);
 
   /* Attention that is not a loss (data warnings). */
   --warn: #c9a45c;
   --warn-wash: rgba(201, 164, 92, 0.1);
 
-  /* Chart series after the subject: context, never green or red. */
-  --series-2: #8493a3;
-  --series-3: #6ea3d8;
-  --series-4: #b190d4;
-  --series-5: #79c2c4;
-  --series-6: #d59a78;
+  /* Chart series after the subject: the sand and neutral family of the
+     brand. Never green, red or blue. */
+  --series-2: #9a9389;
+  --series-3: #c97b4a;
+  --series-4: #e7ddcb;
+  --series-5: #a39a4e;
+  --series-6: #b58d86;
 
   /* Type: one family. Figures are tabular everywhere. */
   --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -61,6 +73,6 @@
   --row: 28px;          /* table row and control height */
   --panel-w: 328px;     /* control panel */
   --bar-h: 44px;        /* top bar */
-  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--gold);
   --ease: 120ms ease-out;
 }

@@ -26,9 +26,9 @@ export function palette(): Palette {
   return {
     text: v("--text"), text2: v("--text-2"), text3: v("--text-3"),
     line: v("--line"), lineSoft: v("--line-soft"), surface: v("--surface"),
-    accent: v("--accent"), gain: v("--gain"), loss: v("--loss"), lossWash: v("--loss-wash"),
-    // The subject first, then context. Never the sign colours.
-    series: [v("--accent"), v("--series-2"), v("--series-3"), v("--series-4"),
+    accent: v("--gold"), gain: v("--gain"), loss: v("--loss"), lossWash: v("--loss-wash"),
+    // The subject in brand gold, then context. Never the sign colours or the brand red.
+    series: [v("--gold"), v("--series-2"), v("--series-3"), v("--series-4"),
              v("--series-5"), v("--series-6")],
     font: v("--font"),
   };

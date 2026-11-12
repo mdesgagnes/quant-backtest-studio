@@ -89,7 +89,9 @@ clears every session.
    `_apply_loaded_config` and `tests/test_server_app.py`.
 2. **Robustness tables are computed once per run** rather than on every
    interaction (U3). Same figures.
-3. **The accent is brass**, not National Bank red (U5, confirmed).
+3. **The palette is National Bank black, red and gold** (U5, set by the owner
+   on 2026-11-12). Red is used for controls and navigation, gold for accent
+   text and the subject series; a loss is coral, never the brand red.
 
 Wording is verbatim, including the stale counts noted in U2.
 

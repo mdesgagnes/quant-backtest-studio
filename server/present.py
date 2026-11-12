@@ -28,8 +28,10 @@ MAX_ROWS = 3000
 
 # The classic palette, as roles in the new one (docs/DESIGN.md).
 _COLOUR = {
-    BRAND["red"].lower(): "var(--accent)", BRAND["red_dark"].lower(): "var(--accent)",
-    BRAND["red_bright"].lower(): "var(--accent-strong)",
+    # Red inside content is text or a chart mark, where the brand red is not
+    # used: those become gold.
+    BRAND["red"].lower(): "var(--gold)", BRAND["red_dark"].lower(): "var(--gold)",
+    BRAND["red_bright"].lower(): "var(--gold-strong)",
     BRAND["gain"].lower(): "var(--gain)", BRAND["loss"].lower(): "var(--loss)",
     BRAND["muted"].lower(): "var(--text-2)", BRAND["faint"].lower(): "var(--text-3)",
     BRAND["rule"].lower(): "var(--line)", BRAND["rule_soft"].lower(): "var(--line-soft)",

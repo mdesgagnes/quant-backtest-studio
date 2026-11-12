@@ -1,9 +1,10 @@
 # Design system
 
-For the redesigned app in `web/`. Calm, dark-first, precise. Typography and
-alignment carry the design; there is one accent; green and red mean gain and
-loss and nothing else; every figure is tabular; there is one chart language;
-nothing is decorative.
+For the redesigned app in `web/`. Calm, dark-first, precise, in National
+Bank of Canada colours: black, red and gold. Typography and alignment carry
+the design; red is the accent and gold its partner; green and coral mean
+gain and loss and nothing else; every figure is tabular; there is one chart
+language; nothing is decorative.
 
 The reference implementation is the Backtest Results screen
 (`web/src/screens/Results.tsx`). When this document and that screen
@@ -16,10 +17,14 @@ disagree, fix whichever is wrong and keep them in step.
 2. **Structure is alignment and hairlines.** No cards, no shadows, no
    gradients, no filled panels behind content. A group is a heading, a
    hairline, and space.
-3. **One accent, spent on meaning.** Brass marks what you can act on, what
-   is selected, where focus is, and the subject series of a chart.
-4. **Green and red are data.** Only a gain or a loss is green or red. A
-   warning is not red; a primary button is not green.
+3. **Red is the accent, spent on meaning.** Brand red marks what you can
+   act on and where you are: the primary button, the active tab and
+   workspace. Brand gold is its partner for text accents, focus, and the
+   subject series of every chart.
+4. **Gain and loss are data.** Only a gain is green and only a loss is
+   coral. The loss colour is deliberately not the brand red, and the brand
+   red never appears inside a chart or a table, so a loss is never mistaken
+   for a control and the brand never reads as a loss.
 5. **The browser formats nothing.** Every figure arrives from the server as
    the string to display. The front end aligns and colours.
 6. **Interactions that only change the view stay in the browser** and take
@@ -32,29 +37,37 @@ colour value.
 
 | Token | Value | Role |
 |---|---|---|
-| `--bg` | `#0d1217` | Page ground: ink, cooled toward blue |
-| `--surface` | `#121920` | Control panel, table row hover, skeletons |
-| `--raised` | `#18212a` | Selected chips, disabled buttons |
-| `--line` | `#25313c` | Structural hairlines: panel edge, table header rule, input borders |
-| `--line-soft` | `#1a242d` | Row rules, chart grid lines |
-| `--text` | `#e7ecf1` | Primary text and figures (15.8:1 on `--bg`) |
-| `--text-2` | `#a7b2bd` | Labels, notes, table headers (8.7:1) |
-| `--text-3` | `#7c8996` | Tertiary: benchmark sub-values, axis ticks, help (5.3:1; 5.0:1 on `--surface`) |
-| `--accent` | `#d8b46a` | Brass. Primary action, selection, focus ring, links, subject series |
-| `--accent-strong` | `#e6c682` | Hover on accent |
-| `--accent-wash` | 12% accent | Selected segment background |
-| `--on-accent` | `#171207` | Text on an accent fill |
-| `--gain` | `#45b88f` | Positive figures, positive bars, positive heat cells (7.6:1) |
-| `--loss` | `#ea6f5f` | Negative figures, drawdown, negative bars and cells (6.2:1) |
+| `--bg` | `#0e0e0d` | Page ground: the brand black, warmed toward sand |
+| `--surface` | `#161614` | Control panel, table row hover, skeletons |
+| `--raised` | `#1f1e1b` | Selected chips, disabled buttons |
+| `--line` | `#302d28` | Structural hairlines: panel edge, table header rule, input borders |
+| `--line-soft` | `#232220` | Row rules, chart grid lines |
+| `--text` | `#efe9de` | Primary text and figures, sand-tinted (16.0:1 on `--bg`) |
+| `--text-2` | `#b8b1a5` | Labels, notes, table headers (9.1:1) |
+| `--text-3` | `#8f887c` | Tertiary: benchmark sub-values, axis ticks, help (5.5:1; 5.2:1 on `--surface`) |
+| `--accent` | `#e41c23` | Brand red. Primary button fill, active tab and workspace rule, checked boxes, progress bar. Fills and rules only |
+| `--accent-strong` | `#c2151b` | Hover on a red fill |
+| `--accent-wash` | 16% red | Selected segment background |
+| `--on-accent` | `#ffffff` | Text on a red fill (4.7:1) |
+| `--gold` | `#d4af5a` | Brand gold. Links, focus ring, the subject series of a chart (9.3:1) |
+| `--gold-strong`, `--gold-wash` | | Hover on gold text; percentile bars and positive-correlation shading |
+| `--gain` | `#4fb79a` | Positive figures, positive bars, positive heat cells (7.9:1) |
+| `--loss` | `#ee7a66` | Negative figures, drawdown, negative bars and cells (7.0:1). A coral, not the brand red |
 | `--warn` | `#c9a45c` | Flags (data and settings warnings). Never `--loss` |
-| `--series-2` … `--series-6` | slate, blue, violet, teal, clay | Chart context series. Never green or red |
+| `--series-2` … `--series-6` | grey, copper, sand, olive, rose-taupe | Chart context series, from the brand's sand and neutral family. Never green, red or blue |
 
 All text pairs meet WCAG AA (4.5:1) at every size used. `--text-3` is the
 floor: do not use anything dimmer for text.
 
-Brass replaces the earlier National Bank red, because a red accent beside a
-red loss colour makes a chart unreadable. Changing the accent is a change to
-three tokens.
+Two rules keep the palette readable:
+
+- **Brand red is never text.** Red on black is 4.1:1, below AA for text.
+  Accent text (links, "More", "Remove") is gold.
+- **Brand red is never a chart or table colour.** There, red would read as
+  a loss. The subject series is gold; losses are coral.
+
+The exact brand values are not published; red is the documented `#E41C23`
+and gold is a close reading. Correcting either is a change to one token.
 
 A light theme is not built. The tokens are roles, so a light set can be
 added under `:root[data-theme="light"]` without touching components.
@@ -152,8 +165,8 @@ Rules:
 One library (Apache ECharts, loaded on demand), one wrapper
 (`web/src/charts/core.tsx`). A chart component never names a colour.
 
-- **Series colour**: the subject is brass and 1.8 px; the benchmark is
-  slate; further series follow `--series-3` to `--series-6` at 1.2 px.
+- **Series colour**: the subject is gold and 1.8 px; the benchmark is
+  warm grey; further series follow `--series-3` to `--series-6` at 1.2 px.
   Green and red are used only where the mark itself is a gain or a loss:
   signed bars, the subject's drawdown, heat cells.
 - **Axes**: values on the right, where the latest figure is. Tick text
@@ -191,7 +204,7 @@ One library (Apache ECharts, loaded on demand), one wrapper
 - File inputs accept a drop or a click, show the file name with "Remove",
   and report what was read in a note beneath.
 - Buttons say what they do: "Run backtest", "Remove", "Try again".
-- Primary button: accent fill, one per view. Secondary: 1 px outline.
+- Primary button: red fill with white text, one per view. Secondary: 1 px outline.
 
 ## 9. States
 
@@ -231,7 +244,7 @@ Messages say what happened and what to do next. They do not apologise.
 - Keyboard: everything reachable in reading order; a "Skip to results" link;
   tabs move with the arrow keys; Escape closes the settings sheet;
   Ctrl+Enter runs.
-- Focus: a 2 px accent ring with a 2 px gap on every focusable element
+- Focus: a 2 px gold ring with a 2 px gap on every focusable element
   (`--focus`). Never removed.
 - Contrast: AA for all text (section 2). Sign is never carried by colour
   alone: figures keep their plus or minus.
@@ -253,9 +266,9 @@ kind of block, plus:
 - A control in a screen is at most 460 px wide unless it is a row of chips.
 - Stacked areas use the series colours; cash is drawn in `--text-3` because
   it is the absence of a position.
-- Correlation grids shade positive in brass and negative in blue, since a
+- Correlation grids shade positive in gold and negative in grey, since a
   correlation is neither a gain nor a loss. Return grids use the sign
-  colours. Parameter grids shade above the midpoint in brass and below in
+  colours. Parameter grids shade above the midpoint in gold and below in
   the loss colour.
 - A legend sits above its chart as a row of entries; pressing one hides or
   shows the series.

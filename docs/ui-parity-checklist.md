@@ -380,7 +380,7 @@ Golden for 225 to 238: manual; the numbers are covered by `tests/test_lab_*.py`.
 - **U2. Stale wording.** The Robustness tab says "These four tests" above seven sections, and its stress-test note says "sixteen ... episodes, 1987 through the 2024 yen carry-trade unwind" while the list holds 24 periods through the 2025 tariff tantrum. The README says 19 models; there are 21. **Open:** kept verbatim in both apps.
 - **U3. Re-running on every interaction.** The classic app re-simulates the walk-forward folds, in/out-of-sample split and cost sensitivity whenever anything changes. **Resolved in the new app:** they are computed once per run and again only when their own settings change. Same figures.
 - **U4. Assistant tab.** It prints an MCP command with a machine-specific Python path. **Open:** unchanged.
-- **U5. Brand colour.** **Decided 2026-11-12:** the new app uses brass as its single accent (`docs/DESIGN.md`). The classic app and the exported reports keep the palette in `qbt/brand.py`, which is not edited.
+- **U5. Brand colour.** **Decided 2026-11-12:** National Bank black, red and gold. Red marks controls and navigation, gold is the accent for text and the subject series of charts, and a loss is coral so it is never confused with the brand red (`docs/DESIGN.md`, section 2). The classic app and the exported reports keep the palette in `qbt/brand.py`, which is not edited.
 
 ## Status in the new app
 
