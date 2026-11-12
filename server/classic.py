@@ -178,13 +178,13 @@ _CODE = None
 
 
 def _patch_views() -> None:
-    """The view modules inside qbt import streamlit themselves; point them
-    at the recording layer too. (Only in this process: the classic app runs
-    in its own.)"""
+    """The view modules inside qbt import streamlit themselves; give them
+    a stand-in that is the recorder while this server renders and the real
+    Streamlit at any other time."""
     from qbt import groups_ui, snapshot_ui
     from qbt.lab import ui as lab_ui
     for mod in (snapshot_ui, groups_ui, lab_ui):
-        mod.st = st
+        mod.st = shim.st_when_rendering
     # The classic charts are built as Plotly figures and only their data is
     # read here (the new front end styles them itself). Plotly's built-in
     # themes cost about 0.2 s per figure to apply, so in this process they

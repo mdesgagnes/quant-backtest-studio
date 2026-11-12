@@ -58,7 +58,7 @@ export function Note({ block }: { block: NoteBlock }) {
 
 export function KpiStrip({ items }: { items: KpiBlock[] }) {
   return (
-    <dl className="kpis">
+    <dl className="kpis" style={{ "--n": Math.min(items.length, 6), "--m": Math.min(items.length, 3) } as React.CSSProperties}>
       {items.map((k) => (
         <div className="kpi" key={k.label}>
           <dt>{k.label}</dt>

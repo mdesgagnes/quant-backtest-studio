@@ -376,8 +376,23 @@ Golden for 225 to 238: manual; the numbers are covered by `tests/test_lab_*.py`.
 
 ## Open questions (UNCLEAR)
 
-- **U1. Loading a preset or YAML configuration is partial today.** Verified by applying a configuration file to a fresh session (tickers SPY and TLT, start 2015, benchmark SPY, lookback 63, top 1, quarterly, lag 2, commission 1, slippage 3, cash rate 3%, fee 1%). Applied: start date, rebalance, execution lag, commission. Not applied: symbols, investable universe, model parameters, slippage, cash rate, management fee. The benchmark was reset to None, because SPY was not among the symbols still in the box. Controls that already hold a value in the session keep it; only the rest take the file. This is an accident of how Streamlit widgets keep state, not a decision. Should the redesign load a configuration completely (recommended), or reproduce today's behaviour?
-- **U2. Stale wording.** The Robustness tab says "These four tests" above seven sections, and its stress-test note says "sixteen ... episodes, 1987 through the 2024 yen carry-trade unwind" while the list holds 24 periods through the 2025 tariff tantrum. The README says 19 models; there are 21. Keep verbatim, or correct while rebuilding?
-- **U3. Re-running on every interaction.** Today the walk-forward folds, in/out-of-sample split and cost sensitivity are re-simulated whenever anything on the page changes, and their latest values feed the Excel report. The redesign would compute them once per run (and again only when the folds slider changes). The numbers are the same; only the timing differs. Confirm this is acceptable.
-- **U4. Assistant tab.** It prints an MCP command with a machine-specific Python path (`C:/Users/marcd/miniconda3/envs/quant/python.exe`). Keep as is, or derive the path from the running interpreter?
-- **U5. Brand colour.** Decided 2026-11-12: the new app uses brass as its single accent (see `docs/DESIGN.md`). The classic app and the exported reports keep the palette in `qbt/brand.py`, which is not edited.
+- **U1. Loading a preset or YAML configuration.** In the classic app it is partial: applying a file to a fresh session (tickers SPY and TLT, start 2015, benchmark SPY, lookback 63, top 1, quarterly, lag 2, commission 1, slippage 3, cash rate 3%, fee 1%) applied the start date, rebalance, lag and commission, left the symbols, universe, model parameters, slippage, cash rate and fee as they were, and reset the benchmark to None. **Resolved in the new app:** a load replaces every control (`server/classic.py`, tested in `tests/test_server_app.py`). The classic app is unchanged.
+- **U2. Stale wording.** The Robustness tab says "These four tests" above seven sections, and its stress-test note says "sixteen ... episodes, 1987 through the 2024 yen carry-trade unwind" while the list holds 24 periods through the 2025 tariff tantrum. The README says 19 models; there are 21. **Open:** kept verbatim in both apps.
+- **U3. Re-running on every interaction.** The classic app re-simulates the walk-forward folds, in/out-of-sample split and cost sensitivity whenever anything changes. **Resolved in the new app:** they are computed once per run and again only when their own settings change. Same figures.
+- **U4. Assistant tab.** It prints an MCP command with a machine-specific Python path. **Open:** unchanged.
+- **U5. Brand colour.** **Decided 2026-11-12:** the new app uses brass as its single accent (`docs/DESIGN.md`). The classic app and the exported reports keep the palette in `qbt/brand.py`, which is not edited.
+
+## Status in the new app
+
+Every numbered item is reproduced by the new app, because it runs the classic screen logic (see `docs/HANDOFF.md`), with these exceptions:
+
+| Item | Status |
+|---|---|
+| 13, 19 | Changed on purpose: a loaded configuration replaces every control (U1) |
+| 240 | Partial: legend toggles and Ctrl + wheel zoom; no reset button |
+| 243 | Not reproduced: the parameter surface is a shaded grid, not a rotatable surface |
+| 7 | Changed: long tables scroll with a pinned header and sort on a column click; the 40-row rule is kept |
+| 5, 8, 9 | Reproduced in the new design (fold on "More", sign colours, shaded grids) |
+| 10 | Rebuilt: see `docs/DESIGN.md`, section 10 |
+
+Golden coverage of the new app: the five scenarios, replayed by `tests/golden/test_golden_app.py`. Items marked "manual" in this list are still manual.

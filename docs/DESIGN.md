@@ -239,7 +239,32 @@ Messages say what happened and what to do next. They do not apologise.
   they plot are also in a table on the same screen.
 - Motion: only the progress bar moves. `prefers-reduced-motion` stops it.
 
-## 12. What not to add
+## 12. Pages drawn from the server
+
+Every screen except Backtest > Results is drawn generically from blocks the
+server sends (`web/src/blocks/Render.tsx`). The rules above apply to each
+kind of block, plus:
+
+- Blocks stack in one column with `--s-3` between them; a heading adds
+  `--s-4` above itself. Blocks the classic code placed side by side arrive
+  as a row and sit side by side on a wide screen, stacked on a phone.
+- Consecutive KPIs form one strip, as wide as the number of figures needs
+  (up to 240 px each), three across on a phone.
+- A control in a screen is at most 460 px wide unless it is a row of chips.
+- Stacked areas use the series colours; cash is drawn in `--text-3` because
+  it is the absence of a position.
+- Correlation grids shade positive in brass and negative in blue, since a
+  correlation is neither a gain nor a loss. Return grids use the sign
+  colours. Parameter grids shade above the midpoint in brass and below in
+  the loss colour.
+- A legend sits above its chart as a row of entries; pressing one hides or
+  shows the series.
+- Long tables get their own vertical scroll (440 px, 60% of the screen on a
+  phone) with the header pinned. Clicking a column header sorts.
+- Markup the classic code wrote itself keeps its structure; its colours are
+  mapped to the tokens in `server/present.py`.
+
+## 13. What not to add
 
 Cards with shadows, coloured section backgrounds, icons used as decoration,
 all-caps labels, a monospace face for figures, a second accent, animated

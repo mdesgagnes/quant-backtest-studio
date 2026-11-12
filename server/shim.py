@@ -661,6 +661,22 @@ class _St(DG):
 st = _St()
 
 
+class _WhenRendering:
+    """What the view modules inside qbt get as `st`: the recorder while the
+    new server is rendering, the real Streamlit otherwise. So the classic
+    app, and tests that run it, behave exactly as before in the same
+    process."""
+
+    def __getattr__(self, name: str) -> Any:
+        if _current.get() is not None:
+            return getattr(st, name)
+        import streamlit
+        return getattr(streamlit, name)
+
+
+st_when_rendering = _WhenRendering()
+
+
 def render(session: Session, script: Callable[[], None], active_tab: Optional[str] = None,
            all_tabs: bool = False, tab_needs: Optional[Dict[str, List[str]]] = None,
            skip: Optional[set] = None) -> Recorder:
@@ -683,6 +699,10 @@ def render(session: Session, script: Callable[[], None], active_tab: Optional[st
         break
     session.clicked.clear()
     session.submitted.clear()
-    session.registry = rec.registry
+    # Controls of tabs drawn earlier stay known: the browser keeps those tabs
+    # and can send a change from one without it being redrawn first.
+    if len(session.registry) > 4000:
+        session.registry = {}
+    session.registry.update(rec.registry)
     session.touched = time.time()
     return rec

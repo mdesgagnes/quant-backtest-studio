@@ -1,0 +1,11 @@
+.git
+**/__pycache__
+**/*.pyc
+.venv
+web/node_modules
+web/dist
+.pytest_cache
+.qbt_lab
+.qbt_presets
+tests/golden/_actual
+docs/screenshots

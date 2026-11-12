@@ -66,6 +66,11 @@ def _models() -> List[Dict[str, Any]]:
     return out
 
 
+@app.get("/api/health")
+def health() -> Dict[str, Any]:
+    return {"ok": True}
+
+
 @app.get("/api/meta")
 def meta() -> Dict[str, Any]:
     return {

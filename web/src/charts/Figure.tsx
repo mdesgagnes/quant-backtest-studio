@@ -62,7 +62,7 @@ function HeatGrid({ t, title, xt, yt }: { t: T; title: string; xt?: string; yt?:
 function Plot({ b }: { b: Block }) {
   const traces = b.traces as T[];
   const [hidden, setHidden] = useState<Set<string>>(new Set());
-  const named = traces.filter((t) => t.name && !t.no_legend && !t.hidden_line && t.t !== "hist");
+  const named = traces.filter((t) => t.name && !t.no_legend && (!t.hidden_line || t.stack) && t.t !== "hist");
   const log = !!b.ylog;
   const ty = (v: number | null) => (v == null ? null : log ? (v > 0 ? Math.log10(v) : null) : v);
 
@@ -122,7 +122,10 @@ function Plot({ b }: { b: Block }) {
         return;
       }
       k += 1;
-      const colour = t.tone === "neg" ? p.loss : p.series[k % p.series.length];
+      // Cash is the absence of a position: it is drawn quiet and does not take a series colour.
+      const cash = t.stack && t.name === "Cash";
+      if (cash) k -= 1;
+      const colour = cash ? p.text3 : t.tone === "neg" ? p.loss : p.series[k % p.series.length];
       const first = k === 0;
       series.push({
         type: "line", name: t.name, data: pts(t, (t.y as (number | null)[]).map(ty)), showSymbol: false,
@@ -151,6 +154,9 @@ function Plot({ b }: { b: Block }) {
     const range = b.yrange as number[] | null;
     return {
       grid: { left: 8, right: 52, top: 12, bottom: b.xtitle ? 38 : 24 },
+      // Ctrl + wheel zooms a time or value axis; the page keeps the plain wheel.
+      dataZoom: !hist && !cat ? [{ type: "inside", zoomOnMouseWheel: "ctrl", moveOnMouseMove: false,
+                                  moveOnMouseWheel: false, preventDefaultMouseMove: false }] : undefined,
       tooltip: {
         trigger: traces.some((t) => t.t === "points") ? "item" : "axis",
         backgroundColor: p.surface, borderColor: p.line, borderWidth: 1, padding: [6, 8],
@@ -191,11 +197,12 @@ function Plot({ b }: { b: Block }) {
         <div className="legend">
           {traces.map((t) => {
             if (!named.includes(t)) return null;
-            li += 1;
+            const cash = t.stack && t.name === "Cash";
+            if (!cash) li += 1;
             return (
               <button key={t.name} type="button" className="legend-item" aria-pressed={!hidden.has(t.name)}
                       onClick={() => setHidden((h) => { const n = new Set(h); if (n.has(t.name)) n.delete(t.name); else n.add(t.name); return n; })}>
-                <i className={`swatch swatch-${t.tone === "neg" ? "neg" : li % 6}`} aria-hidden="true" />{t.name}
+                <i className={`swatch swatch-${cash ? "quiet" : t.tone === "neg" ? "neg" : li % 6}`} aria-hidden="true" />{t.name}
               </button>
             );
           })}

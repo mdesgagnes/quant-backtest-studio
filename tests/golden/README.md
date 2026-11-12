@@ -8,6 +8,14 @@ that is checked rather than assumed.
 pytest tests/golden -q        # about 4 minutes
 ```
 
+Three test files share the references in `expected/`:
+
+| File | What it runs |
+|---|---|
+| `test_golden_legacy.py` | The Streamlit app (`app.py`) through `AppTest`. Proves the references still describe the classic app |
+| `test_golden_app.py` | The new server's rendering of the same scenarios (`shim_driver.py`). Every control, screen and export must match |
+| `test_golden_service.py` | The programmatic run API and the dedicated Results screen |
+
 ## What is locked
 
 Five reference runs (`scenarios.py`), all on frozen files in `fixtures/`:
