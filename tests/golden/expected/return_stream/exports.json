@@ -1,0 +1,311 @@
+{
+ "preset_export": {
+  "label": "Export all presets",
+  "file_name": "qbt_presets.json",
+  "mime": "application/json",
+  "digest": "95ad98114d95c06c",
+  "text": [
+   "{",
+   " \"schema\": 1,",
+   " \"presets\": {},",
+   " \"exported\": \"<NOW>\"",
+   "}"
+  ]
+ },
+ "rscsv": {
+  "label": "Series (CSV)",
+  "file_name": "return_streams.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Date",
+   "Fund A",
+   "Benchmark",
+   "Fund A value",
+   "Benchmark value"
+  ],
+  "rows": 162,
+  "digest": "33c69c26f90fa8d2",
+  "head": [
+   "Date,Fund A,Benchmark,Fund A value,Benchmark value",
+   "2012-02-29,-0.002049,0.012036,99795.1,101203.6",
+   "2012-03-31,0.030535,0.047879,102842.343,106049.127",
+   "2012-04-30,0.003779,0.015816,103230.985,107726.4"
+  ],
+  "tail": [
+   "2025-05-31,-0.016819,-0.022676,284411.213,222423.658",
+   "2025-06-30,0.024743,-0.010744,291448.4,220033.938",
+   "2025-07-31,0.016738,0.032733,296326.663,227236.309"
+  ]
+ },
+ "rsdlstress": {
+  "label": "Download stress test results (CSV)",
+  "file_name": "stress_periods.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Period",
+   "Category",
+   "Start",
+   "End",
+   "Fund A",
+   "Benchmark"
+  ],
+  "rows": 10,
+  "digest": "1005dadb22cef936",
+  "text": [
+   "Period,Category,Start,End,Fund A,Benchmark",
+   "Taper tantrum (2013),Rate shock,2013-05-21,2013-06-24,0.044676,0.077694",
+   "China slowdown / oil crash (2015-2016),Bear market,2015-08-18,2016-02-11,0.107388044,0.209983959",
+   "Q4 2018 selloff,Bear market,2018-09-20,2018-12-24,0.152449207,0.0710176281",
+   "US-China trade war escalation (2019),Trade policy,2019-05-03,2019-06-03,0.020108,-0.011373",
+   "COVID-19 crash (2020),Crash,2020-02-19,2020-03-23,0.027248,0.021412",
+   "2022 inflation / rate-hike bear market,Bear market,2022-01-03,2022-10-12,0.261700254,0.244609695",
+   "Russia invades Ukraine (2022),Geopolitical,2022-02-09,2022-03-08,-0.00474,-0.025403",
+   "Higher-for-longer bond selloff (2023),Rate shock,2023-07-31,2023-10-27,0.018784651,-0.0350596225",
+   "Yen carry-trade unwind (August 2024),Liquidity event,2024-07-31,2024-08-09,0.028925,0.024232",
+   "Tariff tantrum (2025),Trade policy,2025-02-19,2025-04-08,-0.0155456143,-0.0332414604"
+  ]
+ },
+ "rsstat": {
+  "label": "Statistics (CSV)",
+  "file_name": "statistics.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Metric",
+   "Fund A",
+   "Benchmark"
+  ],
+  "rows": 21,
+  "digest": "db364f8f909afe7c",
+  "text": [
+   "Metric,Fund A,Benchmark",
+   "Total Return,1.96326663,1.27236309",
+   "CAGR,0.0837920976,0.0626879535",
+   "Volatility,0.11471415,0.139194385",
+   "Sharpe,0.556096152,0.306678703",
+   "Sortino,0.878922123,0.453114135",
+   "Calmar,0.369424316,0.152555533",
+   "Max Drawdown,-0.172679747,-0.279819111",
+   "Ulcer Index,6.00673074,10.9456102",
+   "VaR 95% (monthly),0.04986765,0.07219515",
+   "CVaR 95% (monthly),0.0662355556,0.0874327778",
+   "Skew,-0.181169877,-0.310680763",
+   "Excess Kurtosis,0.433024527,0.193006126",
+   "% Positive Months,0.567901235,0.549382716",
+   "Best Month,0.097282,0.098526",
+   "Worst Month,-0.087779,-0.113036",
+   "Beta,,",
+   "Alpha (ann.),0.021104144,",
+   "Risk-adjusted alpha (ann.),,",
+   "R²,0.670999986,",
+   "Tracking Error,0.0794902904,",
+   "Information Ratio,0.249831906,"
+  ]
+ },
+ "rsts": {
+  "label": "Download tearsheet report (HTML)",
+  "file_name": "tearsheet_Fund A.html",
+  "mime": "text/html",
+  "visible_text_digest": "0153974310e178ba",
+  "visible_text_chars": 2815,
+  "visible_text_head": "Tearsheet - Fund A Fund A Backtest tearsheet &middot; benchmark: Benchmark Generated Period 2012-01-31 to 2025-07-31 Key statistics CAGR 8.38% benchmark 6.27% Volatility 11.47% benchmark 13.92% Sharpe 0.56 benchmark 0.31 Sortino 0.88 benchmark 0.45 Calmar 0.37 benchmark 0.15 Max Drawdown -17.27% benchmark -27.98% Trailing periods Period Fund A Annualized From To Benchmark Excess 1M +1.67% No 2025-",
+  "figures": [],
+  "images": 4
+ },
+ "rsxl": {
+  "label": "Full report (Excel)",
+  "file_name": "return_stream_Fund A.xlsx",
+  "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "sheet_order": [
+   "Executive Summary",
+   "About",
+   "Performance",
+   "Performance Analysis",
+   "Robustness",
+   "Stress & Regimes",
+   "Daily Series",
+   "_Chart Data"
+  ],
+  "sheets": {
+   "Executive Summary": {
+    "rows": 90,
+    "cols": 10,
+    "digest": "e77728a05211201e",
+    "charts": 1,
+    "images": 0,
+    "head": [
+     "",
+     "\tFund A\t\t\t\t\t\t\tEXECUTIVE SUMMARY",
+     "\t2012-02-29 to 2025-07-31 · vs Benchmark · monthly returns · generated <TODAY>",
+     "",
+     "\tCAGR\tVOLATILITY\tSHARPE\tSORTINO\t\tMAX DRAWDOWN\tCALMAR\tBETA\tINFO RATIO",
+     "\t0.0837920976\t0.11471415\t0.556096152\t0.878922123\t\t-0.172679747\t0.369424316\tn/a\t0.249831906"
+    ]
+   },
+   "About": {
+    "rows": 43,
+    "cols": 6,
+    "digest": "89787aa8e7a272c3",
+    "charts": 0,
+    "images": 0,
+    "text": [
+     "Settings",
+     "Setting\tValue",
+     "Generated\t<NOW>",
+     "Label\tFund A",
+     "Periods per year\t12",
+     "Initial capital\t100000.0",
+     "Source\treturns_monthly.csv",
+     "Frequency\tmonthly",
+     "Period start\t2012-02-29",
+     "Period end\t2025-07-31",
+     "Observations\t162",
+     "Scale read\tpercentage",
+     "Risk-free rate\t2.00% a year",
+     "Period\t2012-02-29 to 2025-07-31",
+     "",
+     "",
+     "Contents",
+     "Module\tTable\tSheet\tCell\tRows\tNote",
+     "Executive summary\tExecutive summary\tExecutive Summary\tA1\t\tTwo-page CIO report: performance, then risk and robustness.",
+     "Results\tStatistics\tPerformance\tA1\t21",
+     "Results\tCIPM Appraisal\tPerformance\tA26\t34\tPopulation moments, geometric annualisation and excess return; CAPM measures withheld below R-squared 0.70.",
+     "Results\tTrailing Periods\tPerformance\tA64\t10",
+     "Results\tCalendar Years\tPerformance\tA78\t14",
+     "Results\tDrawdowns\tPerformance\tA96\t24",
+     "Results\tMonthly Returns\tPerformance\tA124\t14",
+     "Results\tStatistics, All Series\tPerformance\tA142\t21",
+     "Results\tTrailing, All Series\tPerformance\tA167\t10",
+     "Results\tCalendar, All Series\tPerformance\tA181\t14",
+     "Results\tCorrelation\tPerformance\tA199\t2",
+     "Robustness\tWalk-Forward\tRobustness\tA1\t5",
+     "Robustness\tWalk-Forward Summary\tRobustness\tA10\t2",
+     "Robustness\tMonte Carlo Summary\tRobustness\tA16\t3",
+     "Robustness\tMonte Carlo Percentiles\tRobustness\tA23\t5",
+     "Stress tests\tStress Returns, All Series\tStress & Regimes\tA1\t10",
+     "Stress tests\tStress Periods\tStress & Regimes\tA15\t24",
+     "Stress tests\tStress Summary\tStress & Regimes\tA43\t12",
+     "Stress tests\tBenchmark Stress Periods\tStress & Regimes\tA59\t24",
+     "Results\tSeries\tDaily Series\t\t163",
+     "Robustness\tMonte Carlo Bands\tDaily Series\t\t162\tColumns headed “Monte Carlo ...”",
+     "Data\tAll Imported Series\tDaily Series\t\t162\tColumns headed “Return ...”",
+     "Results\tIn-depth performance analysis\tPerformance Analysis\tA1\t\tFormatted for presenting: effects, contribution, full CIPM appraisal, methodology.",
+     "Market regimes\t(not included) Regime tables\t\t\t\tThe regime market data could not be downloaded.",
+     "Data\t(not included) Holdings, trades, tax, attribution\t\t\t\tA return stream carries no positions to analyse."
+    ]
+   },
+   "Performance": {
+    "rows": 202,
+    "cols": 13,
+    "digest": "28d063c29e37a6b6",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Statistics",
+     "Metric\tFund A\tBenchmark",
+     "Total Return\t1.96326663\t1.27236309",
+     "CAGR\t0.0837920976\t0.0626879535",
+     "Volatility\t0.11471415\t0.139194385",
+     "Sharpe\t0.556096152\t0.306678703"
+    ]
+   },
+   "Performance Analysis": {
+    "rows": 59,
+    "cols": 10,
+    "digest": "ce0c670150cfb36c",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "",
+     "\tFund A\t\t\t\t\t\tPERFORMANCE ANALYSIS",
+     "\t2012-02-29 to 2025-07-31 · vs Benchmark",
+     "",
+     "\tWHAT THE FIGURES SHOW",
+     "\t•  Sharpe ratio 0.56 against 0.31 for Benchmark; adjusted for skewness and kurtosis 0.54."
+    ]
+   },
+   "Robustness": {
+    "rows": 29,
+    "cols": 7,
+    "digest": "38286fdcdb334955",
+    "charts": 0,
+    "images": 0,
+    "text": [
+     "Walk-Forward",
+     "Fold\tStart\tEnd\tCAGR\tVolatility\tSharpe\tMax Drawdown",
+     "1\t2012-02-29 00:00:00\t2014-10-31 00:00:00\t0.155722246\t0.0856033848\t1.58547757\t-0.0515086738",
+     "2\t2014-11-30 00:00:00\t2017-07-31 00:00:00\t0.0878161825\t0.111889608\t0.606099027\t-0.0836859169",
+     "3\t2017-08-31 00:00:00\t2020-03-31 00:00:00\t0.108809171\t0.127714701\t0.695371557\t-0.0990055566",
+     "4\t2020-04-30 00:00:00\t2022-11-30 00:00:00\t0.0940954991\t0.130474786\t0.567891325\t-0.14248385",
+     "5\t2022-12-31 00:00:00\t2025-07-31 00:00:00\t-0.0216675377\t0.107398963\t-0.387969649\t-0.172679747",
+     "",
+     "",
+     "Walk-Forward Summary",
+     "Measure\tValue",
+     "Sharpe dispersion across folds\t0.699378233",
+     "Lowest fold Sharpe\t-0.387969649",
+     "",
+     "",
+     "Monte Carlo Summary",
+     "Measure\tValue",
+     "Simulated median CAGR\t0.0860596673",
+     "Probability of loss\t0",
+     "Probability of a drawdown > 20%\t0.354",
+     "",
+     "",
+     "Monte Carlo Percentiles",
+     "Percentile\tCAGR\tMax Drawdown\tSharpe",
+     "5th\t0.0389861418\t-0.300902292\t0.207554099",
+     "25th\t0.0674695813\t-0.219992516\t0.447203957",
+     "50th\t0.0860596673\t-0.181392971\t0.595429938",
+     "75th\t0.107478103\t-0.147698573\t0.769699657",
+     "95th\t0.135565362\t-0.112866349\t1.0348232"
+    ]
+   },
+   "Stress & Regimes": {
+    "rows": 84,
+    "cols": 12,
+    "digest": "9b677e7d5e090c20",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Stress Returns, All Series",
+     "Period\tCategory\tStart\tEnd\tFund A\tBenchmark",
+     "Taper tantrum (2013)\tRate shock\t2013-05-21 00:00:00\t2013-06-24 00:00:00\t0.044676\t0.077694",
+     "China slowdown / oil crash (2015-2016)\tBear market\t2015-08-18 00:00:00\t2016-02-11 00:00:00\t0.107388044\t0.209983959",
+     "Q4 2018 selloff\tBear market\t2018-09-20 00:00:00\t2018-12-24 00:00:00\t0.152449207\t0.0710176281",
+     "US-China trade war escalation (2019)\tTrade policy\t2019-05-03 00:00:00\t2019-06-03 00:00:00\t0.020108\t-0.011373"
+    ]
+   },
+   "Daily Series": {
+    "rows": 164,
+    "cols": 13,
+    "digest": "75b6eb959039b55a",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Date\tReturn\tValue\tBenchmark return\tBenchmark value\tDrawdown\tMonte Carlo p5\tMonte Carlo p25\tMonte Carlo p50\tMonte Carlo p75\tMonte Carlo p95\tReturn Fund A\tReturn Benchmark",
+     "2012-01-31 00:00:00\t\t100000\t\t100000\t0",
+     "2012-02-29 00:00:00\t-0.002049\t99795.1\t0.012036\t101203.6\t-0.002049\t0.95049865\t0.989717\t1.008516\t1.02929775\t1.056382\t-0.002049\t0.012036",
+     "2012-03-31 00:00:00\t0.030535\t102842.343\t0.047879\t106049.127\t0\t0.941082599\t0.992445566\t1.01884675\t1.03587981\t1.10106482\t0.030535\t0.047879",
+     "2012-04-30 00:00:00\t0.003779\t103230.985\t0.015816\t107726.4\t0\t0.922209239\t0.99531971\t1.0212035\t1.05618538\t1.10330086\t0.003779\t0.015816",
+     "2012-05-31 00:00:00\t0.016346\t104918.398\t0.035853\t111588.715\t0\t0.909050487\t0.995008246\t1.04013306\t1.06337059\t1.13332017\t0.016346\t0.035853"
+    ]
+   },
+   "_Chart Data": {
+    "rows": 164,
+    "cols": 3,
+    "digest": "8ee4941734af3897",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Date\tFund A\tBenchmark",
+     "2012-01-31 00:00:00\t100000\t100000",
+     "2012-02-29 00:00:00\t99795.1\t101203.6",
+     "2012-03-31 00:00:00\t102842.343\t106049.127",
+     "2012-04-30 00:00:00\t103230.985\t107726.4",
+     "2012-05-31 00:00:00\t104918.398\t111588.715"
+    ]
+   }
+  }
+ }
+}

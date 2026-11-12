@@ -1,0 +1,3 @@
+# Golden-test inputs are read as bytes: keep them byte-identical on every checkout.
+tests/golden/fixtures/* -text
+tests/golden/expected/** text eol=lf

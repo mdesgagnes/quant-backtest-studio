@@ -1,0 +1,2593 @@
+{
+ "page": [
+  {
+   "kind": "title",
+   "text": "Quant Backtest Studio Backtest"
+  },
+  {
+   "kind": "context",
+   "items": [
+    "Imported Factor Ranking",
+    "2012-02-01 → 2025-07-31",
+    "4 instruments",
+    "monthly (month-end)",
+    "vs XIC.TO",
+    "CAGR 10.52%",
+    "warm-up trimmed"
+   ]
+  }
+ ],
+ "tab: Results": [
+  {
+   "kind": "note",
+   "text": "Warm-up trimmed: the record starts on 2012-02-01, the first day the strategy held a position, rather than 2012-01-02. Anything held before that (a fixed core, cash) is excluded, and the benchmark is measured over the same window."
+  },
+  {
+   "kind": "note",
+   "text": "Next rebalance. The Jul 31 close is a rebalance signal: no trades to do on Friday Aug 1 at the open. The trade list is in Positions."
+  },
+  {
+   "kind": "kpi",
+   "label": "CAGR",
+   "value": "10.52%",
+   "sub": "bench. 6.05%",
+   "tone": "pos"
+  },
+  {
+   "kind": "kpi",
+   "label": "Volatility",
+   "value": "14.74%",
+   "sub": "bench. 15.56%",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Sharpe",
+   "value": "0.58",
+   "sub": "bench. 0.26",
+   "tone": "pos"
+  },
+  {
+   "kind": "kpi",
+   "label": "Max Drawdown",
+   "value": "-25.67%",
+   "sub": "bench. -30.99%",
+   "tone": "neg"
+  },
+  {
+   "kind": "kpi",
+   "label": "Calmar",
+   "value": "0.33",
+   "sub": "bench. 0.13",
+   "tone": "pos"
+  },
+  {
+   "kind": "kpi",
+   "label": "Sortino",
+   "value": "0.84",
+   "sub": "bench. 0.37",
+   "tone": "pos"
+  },
+  {
+   "kind": "toggle",
+   "label": "Log scale",
+   "value": "true"
+  },
+  {
+   "kind": "chart",
+   "title": "Portfolio value (base 100)",
+   "yaxis": "log",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "Imported Factor Ranking",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=1003795.63 abs=1003795.63"
+    },
+    {
+     "type": "scatter",
+     "name": "XIC.TO",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=693067.522 abs=693067.522"
+    }
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Drawdown from prior peak",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "Imported Factor Ranking",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=-23891.6165 abs=23891.6165"
+    },
+    {
+     "type": "scatter",
+     "name": "XIC.TO",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=-34436.2603 abs=34436.2603"
+    }
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Monthly returns",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "heatmap",
+     "name": "",
+     "x": "n=12 labels=3801937d59dc573c",
+     "y": "n=14 labels=99a9df953156807b",
+     "z": "n=168 sum=151.373348 abs=476.753731"
+    }
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Daily return distribution",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "histogram",
+     "name": "Observed",
+     "x": "n=3522 sum=154.644907 abs=2221.70213"
+    }
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Rolling Sharpe over 252 sessions",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "Rolling Sharpe",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=2475.55696 abs=3438.28595"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Full statistics"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Metric",
+    "Imported Factor Ranking",
+    "XIC.TO"
+   ],
+   "rows": 23,
+   "digest": "c511a641716fc9e2",
+   "text": [
+    ",Metric,Imported Factor Ranking,XIC.TO",
+    "0,Total Return,304.72%,127.09%",
+    "1,CAGR,10.52%,6.05%",
+    "2,Volatility,14.74%,15.56%",
+    "3,Sharpe,0.58,0.26",
+    "4,Sortino,0.84,0.37",
+    "5,Calmar,0.33,0.13",
+    "6,Max Drawdown,-25.67%,-30.99%",
+    "7,Ulcer Index,9.52,12.62",
+    "8,VaR 95% (daily),1.36%,1.41%",
+    "9,CVaR 95% (daily),2.13%,2.26%",
+    "10,Skew,0.35,0.28",
+    "11,Excess Kurtosis,15.12,14.18",
+    "12,% Positive Months,61.11%,54.94%",
+    "13,Best Month,10.60%,9.85%",
+    "14,Worst Month,-10.46%,-11.30%",
+    "15,Annual Turnover,0.53,n/a",
+    "16,Average Exposure,99.88%,n/a",
+    "17,Beta,0.90,n/a",
+    "18,Alpha (ann.),4.45%,n/a",
+    "19,Risk-adjusted alpha (ann.),4.84%,n/a",
+    "20,R²,0.91,n/a",
+    "21,Tracking Error,4.72%,n/a",
+    "22,Information Ratio,0.89,n/a"
+   ]
+  },
+  {
+   "kind": "<expander>",
+   "label": "CIPM appraisal: risk-adjusted, relative and drawdown measures"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Group",
+    "Measure",
+    "Value",
+    "Note"
+   ],
+   "rows": 34,
+   "digest": "8cf6be69659b2b05",
+   "text": [
+    ",Group,Measure,Value,Note",
+    "0,Return,Annualised return (geometric),10.49%,",
+    "1,Return,Annualised risk-free (geometric),2.00%,",
+    "2,Total risk,\"Volatility (population, annualised)\",14.74%,",
+    "3,Total risk,Skewness (population),0.35,",
+    "4,Total risk,Kurtosis (normal = 3),18.12,",
+    "5,Total risk,Sharpe,0.58,",
+    "6,Total risk,Adjusted Sharpe (Pezier-White),0.48,corrects Sharpe for skew and fat tails",
+    "7,Total risk,Skew-adjusted Sharpe,0.60,",
+    "8,Downside,Downside risk (annualised),10.01%,target 0.00% a year",
+    "9,Downside,Sortino,1.05,target 0.00% a year",
+    "10,Downside,Omega,1.15,gains over shortfalls vs target",
+    "11,Downside,Upside potential ratio,0.53,",
+    "12,Downside,Expected shortfall 95% (per period),2.13%,",
+    "13,Drawdown,Max drawdown,-25.67%,",
+    "14,Drawdown,Calmar (rf-adjusted),0.33,",
+    "15,Drawdown,Burke,0.15,",
+    "16,Drawdown,Pain ratio,1.25,",
+    "17,Drawdown,Martin (Ulcer) ratio,0.89,",
+    "18,Relative,Tracking error (geometric),4.72%,low is not good in itself",
+    "19,Relative,Information ratio (geometric),0.89,",
+    "20,Relative,Skill t-statistic (IR x sqrt years),3.33,about 2 is needed",
+    "21,Relative,Years needed for t = 2,5.1,",
+    "22,Relative,M² (return at benchmark risk),10.96%,",
+    "23,Relative,Differential return,4.66%,",
+    "24,Relative,R² vs benchmark,0.91,regression fit",
+    "25,CAPM,Beta,0.90,",
+    "26,CAPM,Jensen alpha (annualised),4.84%,",
+    "27,CAPM,Treynor,0.09,",
+    "28,CAPM,Appraisal ratio (alpha / specific risk),1.08,",
+    "29,CAPM,Bull beta,0.93,",
+    "30,CAPM,Bear beta,0.92,",
+    "31,CAPM,Timing ratio (bull / bear),1.00,above 1 is desirable",
+    "32,Capture,Up capture,0.91,",
+    "33,Capture,Down capture,0.85,below 1 is desirable"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "One consistent set: same dates, same risk-free, population standard deviation, geometric annualisation and geometric excess return. Alpha, beta, Treynor and the appraisal ratio are withheld when R² against the benchmark is below 0.70, since the regression then explains too little to mean anything. Annualised figures need a full year of history."
+  },
+  {
+   "kind": "caption",
+   "text": "Methodology: Daily valuation, time-weighted (engine NAV); dividends and fees internal | Benchmark: XIC.TO | Excess: geometric | Risk: daily, 3522 obs, population SD, annualised sqrt(252) | rf: 2.00% a year (cash rate) | Annualisation: geometric, full years only"
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "heading",
+   "text": "Trailing periods"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Period",
+    "Imported Factor Ranking",
+    "Annualized",
+    "From",
+    "To",
+    "XIC.TO",
+    "Excess"
+   ],
+   "rows": 10,
+   "digest": "8b16b0701b4959fc",
+   "text": [
+    ",Period,Imported Factor Ranking,Annualized,From,To,XIC.TO,Excess",
+    "0,1M,+3.01%,No,2025-06-30,2025-07-31,+3.27%,-0.26%",
+    "1,3M,+2.36%,No,2025-04-30,2025-07-31,-0.15%,+2.51%",
+    "2,6M,-0.52%,No,2025-01-31,2025-07-31,-1.87%,+1.35%",
+    "3,YTD,-2.00%,No,2024-12-31,2025-07-31,-2.73%,+0.73%",
+    "4,1Y,-2.83%,No,2024-07-31,2025-07-31,+0.50%,-3.34%",
+    "5,2Y,-8.52%,Yes,2023-07-31,2025-07-31,-8.23%,-0.29%",
+    "6,3Y,+0.52%,Yes,2022-07-29,2025-07-31,-1.17%,+1.68%",
+    "7,5Y,+2.67%,Yes,2020-07-31,2025-07-31,+0.15%,+2.51%",
+    "8,10Y,+9.06%,Yes,2015-07-31,2025-07-31,+3.79%,+5.27%",
+    "9,Since inception,+10.52%,Yes,2012-02-01,2025-07-31,+6.05%,+4.48%"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Periods longer than one year are annualized; shorter ones are cumulative, as the Annualized column records. A window the history does not cover is omitted rather than measured over a shorter span and labelled as though it were complete."
+  },
+  {
+   "kind": "heading",
+   "text": "Calendar years"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Year",
+    "Imported Factor Ranking",
+    "Partial",
+    "XIC.TO",
+    "Excess"
+   ],
+   "rows": 14,
+   "digest": "0f2337d43557874a",
+   "text": [
+    ",Year,Imported Factor Ranking,Partial,XIC.TO,Excess",
+    "0,2012,+15.67%,from 2012-02-01,+14.30%,+1.37%",
+    "1,2013,+32.77%,,+30.65%,+2.11%",
+    "2,2014,+16.72%,,+14.52%,+2.20%",
+    "3,2015,+8.29%,,+1.90%,+6.39%",
+    "4,2016,+23.77%,,+6.99%,+16.78%",
+    "5,2017,+9.84%,,+2.16%,+7.68%",
+    "6,2018,+17.24%,,+22.97%,-5.73%",
+    "7,2019,+6.02%,,-6.39%,+12.41%",
+    "8,2020,-2.13%,,-9.75%,+7.63%",
+    "9,2021,+7.34%,,+0.73%,+6.61%",
+    "10,2022,+29.07%,,+37.03%,-7.96%",
+    "11,2023,+3.41%,,-11.56%,+14.97%",
+    "12,2024,-10.51%,,-3.33%,-7.18%",
+    "13,2025,-2.00%,to 2025-07-31,-2.73%,+0.73%"
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Return by calendar year",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "",
+     "x": "n=14 labels=99a9df953156807b",
+     "y": "n=14 sum=155.487581 abs=184.751625"
+    }
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "A partial first or last year is flagged in the Partial column: those are not full-year figures."
+  },
+  {
+   "kind": "heading",
+   "text": "Main drawdown episodes"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Start",
+    "Trough",
+    "Recovery",
+    "Drawdown",
+    "Sessions to Trough",
+    "Total Sessions",
+    "Calendar Days"
+   ],
+   "rows": 6,
+   "digest": "05783a6d394f8845",
+   "text": [
+    ",Start,Trough,Recovery,Drawdown,Sessions to Trough,Total Sessions,Calendar Days",
+    "0,2023-07-07,2025-06-06,ongoing,-25.67%,500,539,755",
+    "1,2020-10-06,2020-12-18,2022-07-19,-21.48%,53,465,651",
+    "2,2014-11-05,2015-02-09,2015-11-26,-18.51%,68,276,386",
+    "3,2019-09-09,2019-10-08,2019-12-12,-16.02%,21,68,94",
+    "4,2019-12-12,2020-01-27,2020-08-21,-15.85%,32,181,253",
+    "5,2016-08-10,2016-09-23,2016-10-11,-13.35%,32,44,62"
+   ]
+  }
+ ],
+ "tab: Compare": [
+  {
+   "kind": "note",
+   "text": "Nothing to compare yet. Under Compare strategies in the sidebar, add up to three more models, then run the backtest again. They run on the same universe, rebalancing, execution and frictions as this one, so the differences are the models'. You can also choose Another strategy as the comparison benchmark."
+  }
+ ],
+ "tab: Signals": [
+  {
+   "kind": "heading",
+   "text": "Where each name stands as of 2025-07-31"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Instrument",
+    "Score",
+    "Rank",
+    "Target weight",
+    "Held",
+    "Status"
+   ],
+   "rows": 4,
+   "digest": "466f61bba86b9ded",
+   "text": [
+    ",Instrument,Score,Rank,Target weight,Held,Status",
+    "1,XIC.TO,1.0000,1,50.00%,50.03%,Held",
+    "3,ZLB.TO,0.7500,2,50.00%,49.97%,Held",
+    "0,XEI.TO,0.5000,3,0.00%,0.00%,Not held",
+    "2,ZEB.TO,0.2500,4,0.00%,0.00%,Not held"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Score is what the model ranks on; it is not the whole decision. Most models apply a filter as well (an absolute threshold, a trend test, a screen), so a high-scoring name can still be excluded. Read the score for the ordering and the status for the outcome. 2 of 4 names are currently out."
+  },
+  {
+   "kind": "heading",
+   "text": "Score through time"
+  },
+  {
+   "kind": "multiselect",
+   "label": "Instruments",
+   "value": "[\"XIC.TO\", \"ZLB.TO\", \"XEI.TO\", \"ZEB.TO\"]",
+   "options": [
+    "XEI.TO",
+    "XIC.TO",
+    "ZEB.TO",
+    "ZLB.TO"
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Model score",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "XIC.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=3397 abs=3397"
+    },
+    {
+     "type": "scatter",
+     "name": "ZLB.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=1834.5 abs=1834.5"
+    },
+    {
+     "type": "scatter",
+     "name": "XEI.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=2742.5 abs=2742.5"
+    },
+    {
+     "type": "scatter",
+     "name": "ZEB.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=886 abs=886"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Rank through time"
+  },
+  {
+   "kind": "chart",
+   "title": "Rank, 1 is the strongest",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "XIC.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=4132 abs=4132"
+    },
+    {
+     "type": "scatter",
+     "name": "ZLB.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=10382 abs=10382"
+    },
+    {
+     "type": "scatter",
+     "name": "XEI.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=6750 abs=6750"
+    },
+    {
+     "type": "scatter",
+     "name": "ZEB.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=14176 abs=14176"
+    }
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "A line that stays low is persistently favoured. Lines that cross often mean the model is reshuffling, which shows up as turnover."
+  },
+  {
+   "kind": "heading",
+   "text": "Score distribution now"
+  },
+  {
+   "kind": "chart",
+   "title": "Current score by instrument",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "",
+     "x": "n=4 labels=11e859a3d51e85b7",
+     "y": "n=4 sum=2.5 abs=2.5"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Download"
+  },
+  {
+   "kind": "heading",
+   "text": "Target weights through time"
+  },
+  {
+   "kind": "chart",
+   "title": "What the model asked for",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "XEI.TO",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=163650 abs=163650"
+    },
+    {
+     "type": "scatter",
+     "name": "XIC.TO",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=176100 abs=176100"
+    },
+    {
+     "type": "scatter",
+     "name": "ZEB.TO",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=0 abs=0"
+    },
+    {
+     "type": "scatter",
+     "name": "ZLB.TO",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=12450 abs=12450"
+    }
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Target weights are the signal the engine acts on, shifted by the execution lag. Positions shows what was actually held after drift and frictions."
+  }
+ ],
+ "tab: Positions": [
+  {
+   "kind": "heading",
+   "text": "Composition over time"
+  },
+  {
+   "kind": "chart",
+   "title": "Portfolio composition",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "Cash",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=413.733718 abs=413.733719"
+    },
+    {
+     "type": "scatter",
+     "name": "XEI.TO",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=164131.273 abs=164131.273"
+    },
+    {
+     "type": "scatter",
+     "name": "XIC.TO",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=175669.513 abs=175669.513"
+    },
+    {
+     "type": "scatter",
+     "name": "ZEB.TO",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=0 abs=0"
+    },
+    {
+     "type": "scatter",
+     "name": "ZLB.TO",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=11985.4798 abs=11985.4798"
+    }
+   ]
+  },
+  {
+   "kind": "kpi",
+   "label": "Annual turnover",
+   "value": "0.53x",
+   "sub": "sum of weight changes",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Average exposure",
+   "value": "99.88%",
+   "sub": "share invested outside cash",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Cumulative friction cost",
+   "value": "2.53%",
+   "sub": "each day's cost as % of value, summed",
+   "tone": "neg"
+  },
+  {
+   "kind": "heading",
+   "text": "Management fee"
+  },
+  {
+   "kind": "kpi",
+   "label": "Cumulative fee",
+   "value": "6.96%",
+   "sub": "of value, summed",
+   "tone": "neg"
+  },
+  {
+   "kind": "kpi",
+   "label": "Average per year",
+   "value": "0.50%",
+   "sub": "headline rate 0.50%",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Charges",
+   "value": "162",
+   "sub": "monthly deductions",
+   "tone": ""
+  },
+  {
+   "kind": "note",
+   "text": "Accrued daily on the value, deducted at each month-end. The average per year can differ slightly from the headline rate: each deduction is measured against the value on the day it is taken, which is not the average value it accrued on, and a partial first or last year is annualized."
+  },
+  {
+   "kind": "<expander>",
+   "label": "Every fee deduction (162), in dollars"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Date",
+    "Fee",
+    "Sessions accrued",
+    "Average value",
+    "Annual rate",
+    "Paid from cash",
+    "Raised by selling",
+    "Trading costs",
+    "Cash after"
+   ],
+   "rows": 162,
+   "digest": "3b6c9bd54936a265",
+   "head": [
+    ",Date,Fee,Sessions accrued,Average value,Annual rate,Paid from cash,Raised by selling,Trading costs,Cash after",
+    "0,2012-02-29,$41.76,21,\"$100,221.56\",0.50%,$0.00,$41.76,$0.13,$-0.00",
+    "3,2012-03-30,$44.72,22,\"$102,442.85\",0.50%,$44.72,$0.00,$0.00,$942.97",
+    "4,2012-04-30,$44.32,21,\"$106,373.75\",0.50%,$44.32,$0.00,$0.00,$197.98"
+   ],
+   "tail": [
+    "265,2025-05-30,$171.12,22,\"$392,019.20\",0.50%,$6.51,$164.61,$0.50,$-0.00",
+    "268,2025-06-30,$160.82,21,\"$385,969.55\",0.50%,$160.82,$0.00,$0.00,\"$2,365.05\"",
+    "269,2025-07-31,$182.84,23,\"$400,663.89\",0.50%,$0.00,$182.84,$0.55,$-0.00"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Each fee is the annual rate ÷ 252 × the portfolio's value on every session since the previous deduction: that is, rate × average value × sessions ÷ 252. It is paid from cash first; only a shortfall is raised by selling, and those sales appear in the trade log as “Fee liquidation”."
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "heading",
+   "text": "Dividends"
+  },
+  {
+   "kind": "kpi",
+   "label": "Cumulative dividends",
+   "value": "49.36%",
+   "sub": "of portfolio value, summed",
+   "tone": "pos"
+  },
+  {
+   "kind": "kpi",
+   "label": "Average per year",
+   "value": "3.53%",
+   "sub": "cash yield on the portfolio",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Payment days",
+   "value": "54",
+   "sub": "ex-dates with a credit",
+   "tone": ""
+  },
+  {
+   "kind": "note",
+   "text": "Dividends are credited as cash on their ex-date and stay uninvested until the next rebalance, which is what actually happens in an account. Prices are ex-dividend, so nothing is counted twice."
+  },
+  {
+   "kind": "chart",
+   "title": "Dividend income, cumulative",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "Cumulative dividends (%)",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=87929.2474 abs=87929.2474"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Average weight by instrument"
+  },
+  {
+   "kind": "chart",
+   "title": "Average weight over the period",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "",
+     "x": "n=4 labels=d8d2d546f1f7a82a",
+     "y": "n=4 sum=99.8825288 abs=99.8825288"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Next rebalance"
+  },
+  {
+   "kind": "note",
+   "text": "The Jul 31 close is a rebalance signal: no trades to do on Friday Aug 1 at the open."
+  },
+  {
+   "kind": "flag",
+   "text": "The latest price in the data is 2025-07-31, but today is <TODAY>: the signal is out of date. Run the backtest again to pull the latest prices (downloaded prices are kept for an hour)."
+  },
+  {
+   "kind": "kpi",
+   "label": "Trades",
+   "value": "0 buy / 0 sell",
+   "sub": "the book is already on target",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Trades on",
+   "value": "Fri Aug 1",
+   "sub": "at the open",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Signal from",
+   "value": "Thu Jul 31",
+   "sub": "last close in the data",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Estimated cost",
+   "value": "0.0 bps",
+   "sub": "0 on the model portfolio",
+   "tone": ""
+  },
+  {
+   "kind": "number_input",
+   "label": "Size the trades for an account of ($)",
+   "value": "403719.0"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Instrument",
+    "Action",
+    "Now",
+    "Target",
+    "After",
+    "Change",
+    "Units",
+    "Price",
+    "Amount ($)"
+   ],
+   "rows": 3,
+   "digest": "403faf307eb99f0a",
+   "text": [
+    ",Instrument,Action,Now,Target,After,Change,Units,Price,Amount ($)",
+    "0,XIC.TO,Hold,50.03%,50.00%,50.03%,—,—,49.32,—",
+    "1,ZLB.TO,Hold,49.97%,50.00%,49.97%,—,—,39.19,—",
+    "2,Cash,,0.00%,0.00%,0.00%,—,—,,—"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Sized on the last close, because the price at the next open is not known yet: units and amounts move a little with it. The trades follow the same rules as the backtest's own (minimum trade size, whole units, costs, execution lag), and assume the account holds what the model holds. Dates assume the market is open on each weekday; a holiday moves a trade to the next session."
+  },
+  {
+   "kind": "heading",
+   "text": "Trades for your account"
+  },
+  {
+   "kind": "caption",
+   "text": "Enter what you hold now and your cash. The list below is the set of trades that leaves your account as close as possible to the target above, after costs. Paste a column of units straight from a spreadsheet if that is quicker."
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Instrument",
+    "Target",
+    "Units held"
+   ],
+   "rows": 4,
+   "digest": "cfde3f115111ba4d",
+   "text": [
+    ",Instrument,Target,Units held",
+    "0,XIC.TO,50.00%,0",
+    "1,ZLB.TO,50.00%,0",
+    "2,XEI.TO,0.00%,0",
+    "3,ZEB.TO,0.00%,0"
+   ]
+  },
+  {
+   "kind": "number_input",
+   "label": "Cash in the account",
+   "value": "0.0"
+  },
+  {
+   "kind": "checkbox",
+   "label": "Whole units only",
+   "value": "true"
+  },
+  {
+   "kind": "flag",
+   "text": "Enter the units you hold, or your cash, to see the trades."
+  },
+  {
+   "kind": "heading",
+   "text": "Current position as of the last date"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Instrument",
+    "Weight",
+    "Value ($)"
+   ],
+   "rows": 5,
+   "digest": "1548c8774bc39bdf",
+   "text": [
+    ",Instrument,Weight,Value ($)",
+    "0,XEI.TO,0.00%,0",
+    "1,XIC.TO,50.03%,\"201,776\"",
+    "2,ZEB.TO,0.00%,0",
+    "3,ZLB.TO,49.97%,\"201,547\"",
+    "4,Cash,-0.00%,-0"
+   ]
+  },
+  {
+   "kind": "<expander>",
+   "label": "Cash-flow ledger: every fee, dividend and reinvestment, in dollars"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Date",
+    "Type",
+    "Instrument",
+    "Amount",
+    "Units",
+    "Per unit",
+    "Sessions accrued",
+    "Average value",
+    "Annual rate",
+    "Paid from cash",
+    "Raised by selling",
+    "Trading costs",
+    "Cash before",
+    "Cash after"
+   ],
+   "rows": 270,
+   "digest": "e87d4246a6330f60",
+   "head": [
+    ",Date,Type,Instrument,Amount,Units,Per unit,Sessions accrued,Average value,Annual rate,Paid from cash,Raised by selling,Trading costs,Cash before,Cash after",
+    "0,2012-02-29,Management fee,,-41.7589816,,,21,100221.556,0.005,0,41.7589811,0.125977799,0,-4.85994384e-07",
+    "1,2012-03-28,Dividend,XEI.TO,616.31536,2637.20736,0.2337,,,,,,,,",
+    "2,2012-03-28,Dividend,XIC.TO,371.219248,2274.62775,0.1632,,,,,,,,"
+   ],
+   "tail": [
+    "267,2025-06-26,Dividend,ZLB.TO,1183.84191,5210.5718,0.2272,,,,,,,,",
+    "268,2025-06-30,Management fee,,-160.820645,,,21,385969.549,0.005,160.820645,0,0,2525.86627,2365.04563",
+    "269,2025-07-31,Management fee,,-182.842648,,,23,400663.889,0.005,4.55534198e-13,182.842645,0.551867535,4.55534198e-13,-2.53564366e-06"
+   ]
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "heading",
+   "text": "Trade log"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Date",
+    "Instrument",
+    "Shares Before",
+    "Shares After",
+    "Change",
+    "Price",
+    "Notional",
+    "Effective Cost (bps)",
+    "Reason"
+   ],
+   "rows": 311,
+   "digest": "fff67d048338c433",
+   "head": [
+    ",Date,Instrument,Shares Before,Shares After,Change,Price,Notional,Effective Cost (bps),Reason",
+    "0,2012-02-01,XEI.TO,0,\"2,610.1089\",\"+2,610.1089\",19.12,\"49,892.75\",35.2,Rebalance",
+    "1,2012-02-01,XIC.TO,0,\"2,300.0532\",\"+2,300.0532\",21.69,\"49,892.75\",34.2,Rebalance",
+    "2,2012-02-29,XEI.TO,\"2,610.1089\",\"2,609.0158\",-1.0931,18.96,20.73,30.1,Fee liquidation"
+   ],
+   "tail": [
+    "308,2025-07-01,ZLB.TO,\"5,210.5718\",\"5,149.8453\",-60.7265,38.06,\"2,310.97\",30.6,Rebalance",
+    "309,2025-07-31,XIC.TO,\"4,097.4129\",\"4,095.5525\",-1.8605,49.32,91.75,30.1,Fee liquidation",
+    "310,2025-07-31,ZLB.TO,\"5,149.8453\",\"5,147.507\",-2.3383,39.19,91.65,30.1,Fee liquidation"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Every fill records the units traded, the price they filled at, and the realized commission-plus-slippage rate that traded size incurred, so the execution and cost assumptions can both be checked rather than taken on trust. With execution set to the open, these prices are that session's opens. In a multi-currency run Price is in the base currency, and Local Price and FX Rate show what it was converted from."
+  },
+  {
+   "kind": "flag",
+   "text": "148 of these are pro-rata sales to raise the management fee, tagged “Fee liquidation” rather than “Rebalance”: the model did not choose to sell these; the fee did."
+  }
+ ],
+ "tab: Attribution": [
+  {
+   "kind": "note",
+   "text": "Where the return came from. Each instrument's contribution is its price move plus dividends on the units actually held, day by day; cash interest and borrowing, trading costs and the management fee are shown as their own lines. Days are linked in currency, so the contributions add up to the portfolio's return exactly, for the whole backtest and for every period."
+  },
+  {
+   "kind": "radio",
+   "label": "Group by",
+   "value": "\"Security\"",
+   "options": [
+    "Security",
+    "Asset class"
+   ]
+  },
+  {
+   "kind": "selectbox",
+   "label": "Period table by",
+   "value": "\"Year\"",
+   "options": [
+    "Year",
+    "Quarter",
+    "Month"
+   ]
+  },
+  {
+   "kind": "kpi",
+   "label": "Total return",
+   "value": "+303.32%",
+   "sub": "contributions add up to +303.32%",
+   "tone": "pos"
+  },
+  {
+   "kind": "kpi",
+   "label": "Largest contributor",
+   "value": "XEI.TO",
+   "sub": "+184.40%",
+   "tone": "pos"
+  },
+  {
+   "kind": "kpi",
+   "label": "Smallest contributor",
+   "value": "ZEB.TO",
+   "sub": "+0.00%",
+   "tone": ""
+  },
+  {
+   "kind": "heading",
+   "text": "Cumulative contribution"
+  },
+  {
+   "kind": "chart",
+   "title": "Running contribution, % of starting capital",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "XEI.TO · iShares S&P/TSX Composite High Dividend Index ETF",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=410042.346 abs=410057.722"
+    },
+    {
+     "type": "scatter",
+     "name": "XIC.TO · iShares Core S&P/TSX Capped Composite Index ETF",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=262949.504 abs=262950.786"
+    },
+    {
+     "type": "scatter",
+     "name": "ZLB.TO · BMO Low Volatility Canadian Equity ETF",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=9965.64875 abs=9968.6182"
+    },
+    {
+     "type": "scatter",
+     "name": "Cash & financing",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=132.695614 abs=132.695614"
+    },
+    {
+     "type": "scatter",
+     "name": "Trading costs",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=-7815.08812 abs=7815.08812"
+    },
+    {
+     "type": "scatter",
+     "name": "Management fee",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=-27146.4832 abs=27146.4832"
+    },
+    {
+     "type": "scatter",
+     "name": "Portfolio",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=648128.623 abs=648141.851"
+    }
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Each line is what that holding has added to the portfolio since the start, in percent of starting capital. The lines add up to the Portfolio line on every date."
+  },
+  {
+   "kind": "heading",
+   "text": "Contribution and risk"
+  },
+  {
+   "kind": "chart",
+   "title": "Contribution to total return",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "",
+     "x": "n=7 labels=0f450a7e409dfc05",
+     "y": "n=7 sum=303.323287 abs=359.560897"
+    }
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Share of portfolio risk",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "",
+     "x": "n=7 labels=0f450a7e409dfc05",
+     "y": "n=7 sum=100 abs=100.00009"
+    }
+   ]
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Name",
+    "Average weight",
+    "Time held",
+    "Contribution",
+    "Share of result",
+    "Share of risk"
+   ],
+   "rows": 7,
+   "digest": "b2d5ee28d9b71ccd",
+   "text": [
+    ",Name,Average weight,Time held,Contribution,Share of result,Share of risk",
+    "0,XEI.TO · iShares S&P/TSX Composite High Dividend Index ETF,46.6%,93.2%,+184.40%,+60.79%,+48.33%",
+    "1,XIC.TO · iShares Core S&P/TSX Capped Composite Index ETF,49.9%,100.0%,+124.65%,+41.09%,+50.52%",
+    "3,ZLB.TO · BMO Low Volatility Canadian Equity ETF,3.4%,6.8%,+22.30%,+7.35%,+1.12%",
+    "6,Management fee,n/a,n/a,-19.85%,-6.54%,+0.00%",
+    "5,Trading costs,n/a,n/a,-8.27%,-2.73%,+0.03%",
+    "4,Cash & financing,n/a,n/a,+0.09%,+0.03%,-0.00%",
+    "2,ZEB.TO · BMO Equal Weight Banks Index ETF,0.0%,0.0%,+0.00%,+0.00%,+0.00%"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Contribution is in percent of starting capital. Share of result divides it by the total return, so it can exceed 100% when other lines detracted. Share of risk is each line's share of the variance of daily returns; the shares add up to 100%, and a negative share means the holding reduced the portfolio's volatility. Weights are end-of-day averages over the whole backtest, including days at zero."
+  },
+  {
+   "kind": "heading",
+   "text": "Contribution by year"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Year",
+    "XEI.TO · iShares S&P/TSX Composite High Dividend Index ETF",
+    "XIC.TO · iShares Core S&P/TSX Capped Composite Index ETF",
+    "ZLB.TO · BMO Low Volatility Canadian Equity ETF",
+    "Cash & financing",
+    "Trading costs",
+    "Management fee",
+    "Total"
+   ],
+   "rows": 14,
+   "digest": "1ff343098850bd4a",
+   "text": [
+    ",Year,XEI.TO · iShares S&P/TSX Composite High Dividend Index ETF,XIC.TO · iShares Core S&P/TSX Capped Composite Index ETF,ZLB.TO · BMO Low Volatility Canadian Equity ETF,Cash & financing,Trading costs,Management fee,Total",
+    "0,2025,-0.0306572272,-0.00681008954,0.0238958887,1.08807903e-05,-0.00353943767,-0.00290496371,-0.0200049487",
+    "1,2024,-0.0960974849,-0.00376072886,0,2.24377483e-05,-0.000417879506,-0.00480918422,-0.10506284",
+    "2,2023,0.0889614468,-0.0488972773,0,2.15737868e-05,-0.000521125741,-0.00546512995,0.0340994876",
+    "3,2022,0.0749851198,0.1974585,0.0324527936,1.23024737e-05,-0.00850099569,-0.00571295865,0.290694762",
+    "4,2021,0.0644615021,0.0181352968,0.00401103554,2.45649979e-05,-0.00781783644,-0.00542201686,0.0733925461",
+    "5,2020,0.0222488869,-0.0378050794,0,4.01271397e-05,-0.000360444194,-0.00537592151,-0.0212524311",
+    "6,2019,0.0855735009,-0.0197662883,0,2.04823629e-05,-0.000210614348,-0.00546692254,0.0601501581",
+    "7,2018,0.0533559443,0.124957546,0,2.46862761e-05,-0.000330933965,-0.00560868041,0.172398562",
+    "8,2017,0.07613788,0.0278702405,0,1.20745911e-05,-0.000407526194,-0.00526025069,0.0983524182",
+    "9,2016,0.193118465,0.0507909916,0,5.76531224e-05,-0.000399943624,-0.00589486678,0.2376723",
+    "10,2015,0.062878425,0.0251992821,0,1.68884328e-05,-0.000330008136,-0.00486750606,0.0828970813",
+    "11,2014,0.0854584258,0.0876048601,0,5.08181693e-05,-0.000241592305,-0.0057152288,0.167157283",
+    "12,2013,0.165196882,0.16868787,0,1.51059018e-05,-0.000361106478,-0.00586781038,0.327670941",
+    "13,2012,0.0799477301,0.0857307271,0,1.29703001e-05,-0.0036731701,-0.00530776962,0.156710488"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Each row adds up to that year’s return (Total), measured from the portfolio's value at the start of the year. The first and last periods may be partial."
+  },
+  {
+   "kind": "heading",
+   "text": "Benchmark-relative attribution (Brinson-Fachler)"
+  },
+  {
+   "kind": "note",
+   "text": "Explains the excess return over a policy benchmark through the two decisions of an allocator: how much to hold in each asset class (allocation) and which holdings to use within it (selection, interaction included). Costs and fees are shown on their own line. Set the benchmark weight and a return proxy for every category; a category you hold must have a proxy that matches how the decision is made, never an implicit 0%. By default the proxy is the equal-weight average of the class."
+  },
+  {
+   "kind": "note",
+   "text": "Every holding is in one asset class, so allocation can only show the shift between that class and cash. Choose Group by: Asset class above and assign each instrument its class to see allocation across classes."
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Category",
+    "Benchmark weight (%)",
+    "Return proxy"
+   ],
+   "rows": 2,
+   "digest": "d62d6e00c4d8dec8",
+   "text": [
+    ",Category,Benchmark weight (%),Return proxy",
+    "0,Unclassified,99.9,Equal-weight class",
+    "1,Cash balance,0.1,Cash rate"
+   ]
+  },
+  {
+   "kind": "selectbox",
+   "label": "Attribution period",
+   "value": "\"Month\"",
+   "options": [
+    "Month",
+    "Quarter"
+   ]
+  },
+  {
+   "kind": "selectbox",
+   "label": "Multi-period linking",
+   "value": "\"Frongello\"",
+   "options": [
+    "Frongello",
+    "Carino",
+    "Menchero",
+    "GRAP"
+   ]
+  },
+  {
+   "kind": "kpi",
+   "label": "Portfolio",
+   "value": "+303.32%",
+   "sub": "linked, net of costs",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Benchmark",
+   "value": "+192.58%",
+   "sub": "weights x proxies",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Excess (arithmetic)",
+   "value": "+110.74%",
+   "sub": "reconciliation error +0.0000%",
+   "tone": "pos"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Category",
+    "Avg portfolio weight",
+    "Benchmark weight",
+    "Allocation",
+    "Selection",
+    "Total effect"
+   ],
+   "rows": 4,
+   "digest": "8f79182894220bbc",
+   "text": [
+    ",Category,Avg portfolio weight,Benchmark weight,Allocation,Selection,Total effect",
+    "0,Unclassified,99.9%,99.9%,+0.00%,+146.39%,+146.39%",
+    "1,Cash balance,0.1%,0.1%,+0.10%,-0.02%,+0.08%",
+    "2,Costs & fees,,,+0.00%,+0.00%,-35.72%",
+    "3,Total,100.0%,100.0%,+0.10%,+146.37%,+110.74%"
+   ]
+  },
+  {
+   "kind": "caption",
+   "text": "Brinson-Fachler (interaction in selection), month periods from the daily ledger, linked with Frongello; costs and fees shown apart; benchmark = fixed class weights x class proxies, rebalanced each period"
+  }
+ ],
+ "tab: Tax": [
+  {
+   "kind": "note",
+   "text": "Tax friendliness for a Canadian non-registered account, where the fiscal year is the calendar year. Realized capital gains use the Adjusted Cost Base method Canadian tax law requires, not FIFO -- the average cost of everything held, recomputed after every trade. Capital gains and dividend income are taxed differently and are broken out separately below. This has no effect on the backtest itself: it is analysis of the trade log and dividend stream the run already produced."
+  },
+  {
+   "kind": "<expander>",
+   "label": "Tax settings"
+  },
+  {
+   "kind": "number_input",
+   "label": "Marginal tax rate (%)",
+   "value": "40.0"
+  },
+  {
+   "kind": "number_input",
+   "label": "Capital gains inclusion rate (%)",
+   "value": "50.0"
+  },
+  {
+   "kind": "checkbox",
+   "label": "US withholding fully recoverable via foreign tax credit",
+   "value": "true"
+  },
+  {
+   "kind": "number_input",
+   "label": "Eligible dividend rate override (%, optional)",
+   "value": "0.0"
+  },
+  {
+   "kind": "number_input",
+   "label": "Foreign dividend rate override (%, optional)",
+   "value": "0.0"
+  },
+  {
+   "kind": "text_area",
+   "label": "Per-ticker classification override (optional)",
+   "value": "\"\""
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "kpi",
+   "label": "Total tax",
+   "value": "$81,289",
+   "sub": "over the backtest",
+   "tone": "neg"
+  },
+  {
+   "kind": "kpi",
+   "label": "Tax Cost Ratio",
+   "value": "2.40%/yr",
+   "sub": "Moderate",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Realized gains",
+   "value": "$131,318",
+   "sub": "net of losses, before inclusion rate",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Years with tax owed",
+   "value": "14 / 14",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "heading",
+   "text": "Tax Cost Ratio, on Morningstar's scale"
+  },
+  {
+   "kind": "note",
+   "text": "Morningstar's own Tax Cost Ratio: how much of the annualized return taxes take, typically 0-5% across funds -- 0% meaning no taxable distributions at all, 5%+ meaning meaningfully tax-costly. The bands below split that published range into readable steps; they describe it; Morningstar does not publish the intermediate cutoffs."
+  },
+  {
+   "kind": "chart",
+   "title": "Tax Cost Ratio (lower is more tax-efficient)",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "",
+     "x": "n=1 labels=0b22b270a4462818",
+     "y": "n=1 sum=2.4034506 abs=2.4034506"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Pretax vs. after-tax"
+  },
+  {
+   "kind": "chart",
+   "title": "Portfolio value (base 100)",
+   "yaxis": "log",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "Imported Factor Ranking",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=1.00032862e+09 abs=1.00032862e+09"
+    },
+    {
+     "type": "scatter",
+     "name": "Imported Factor Ranking (after tax)",
+     "x": "n=3522 labels=0e07359c7942d37d",
+     "y": "n=3522 sum=863495171 abs=863495171"
+    }
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "The after-tax lines assume tax is paid once a year, at each calendar year-end, from money outside the portfolio -- not funded by selling more of the position. Within a year the line moves exactly like its own pretax series; only the level it starts the year from, and a lump-sum deduction at year-end, differ."
+  },
+  {
+   "kind": "heading",
+   "text": "Where the tax bill comes from, by year"
+  },
+  {
+   "kind": "chart",
+   "title": "Tax by source and year",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "Capital gains",
+     "x": "n=14 labels=99a9df953156807b",
+     "y": "n=14 sum=33422.7013 abs=33422.7013"
+    },
+    {
+     "type": "bar",
+     "name": "Eligible dividends",
+     "x": "n=14 labels=99a9df953156807b",
+     "y": "n=14 sum=47866.1318 abs=47866.1318"
+    },
+    {
+     "type": "bar",
+     "name": "Foreign dividends",
+     "x": "n=14 labels=99a9df953156807b",
+     "y": "n=14 sum=0 abs=0"
+    }
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "A bill dominated by capital gains points at turnover; one dominated by dividends would look the same regardless of how often the strategy trades."
+  },
+  {
+   "kind": "heading",
+   "text": "By tax year"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Year",
+    "Realized Gain/Loss",
+    "Taxable Capital Gain",
+    "Capital Gains Tax",
+    "Eligible Dividends",
+    "Eligible Dividend Tax",
+    "Foreign Dividends",
+    "Foreign Dividend Tax",
+    "Total Tax",
+    "Loss Carryforward (end of year)"
+   ],
+   "rows": 14,
+   "digest": "6f6959f48aea5528",
+   "text": [
+    ",Year,Realized Gain/Loss,Taxable Capital Gain,Capital Gains Tax,Eligible Dividends,Eligible Dividend Tax,Foreign Dividends,Foreign Dividend Tax,Total Tax,Loss Carryforward (end of year)",
+    "0,2012,$142,$142,$28,\"$4,220\",\"$1,455\",$0,$0,\"$1,483\",$0",
+    "1,2013,$988,$988,$198,\"$4,984\",\"$1,718\",$0,$0,\"$1,916\",$0",
+    "2,2014,\"$1,259\",\"$1,259\",$252,\"$6,406\",\"$2,208\",$0,$0,\"$2,460\",$0",
+    "3,2015,\"$2,113\",\"$2,113\",$423,\"$6,420\",\"$2,213\",$0,$0,\"$2,636\",$0",
+    "4,2016,\"$4,407\",\"$4,407\",$881,\"$8,275\",\"$2,852\",$0,$0,\"$3,734\",$0",
+    "5,2017,\"$5,877\",\"$5,877\",\"$1,175\",\"$9,358\",\"$3,226\",$0,$0,\"$4,402\",$0",
+    "6,2018,\"$3,892\",\"$3,892\",$778,\"$10,830\",\"$3,733\",$0,$0,\"$4,512\",$0",
+    "7,2019,\"$2,892\",\"$2,892\",$578,\"$12,128\",\"$4,181\",$0,$0,\"$4,759\",$0",
+    "8,2020,\"$7,269\",\"$7,269\",\"$1,454\",\"$12,727\",\"$4,387\",$0,$0,\"$5,841\",$0",
+    "9,2021,\"$100,049\",\"$100,049\",\"$20,010\",\"$11,529\",\"$3,974\",$0,$0,\"$23,984\",$0",
+    "10,2022,\"$27,049\",\"$27,049\",\"$5,410\",\"$13,399\",\"$4,619\",$0,$0,\"$10,029\",$0",
+    "11,2023,\"$5,651\",\"$5,651\",\"$1,130\",\"$17,921\",\"$6,178\",$0,$0,\"$7,308\",$0",
+    "12,2024,\"$5,526\",\"$5,526\",\"$1,105\",\"$15,626\",\"$5,387\",$0,$0,\"$6,492\",$0",
+    "13,2025,\"$-35,795\",$0,$0,\"$5,030\",\"$1,734\",$0,$0,\"$1,734\",\"$35,795\""
+   ]
+  },
+  {
+   "kind": "<expander>",
+   "label": "Every realized sale (ACB detail)"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Date",
+    "Instrument",
+    "Shares Sold",
+    "Proceeds",
+    "ACB of Shares Sold",
+    "Realized Gain",
+    "Year"
+   ],
+   "rows": 208,
+   "digest": "00f024466b8c75e4",
+   "head": [
+    ",Date,Instrument,Shares Sold,Proceeds,ACB of Shares Sold,Realized Gain,Year",
+    "0,2012-02-29,XEI.TO,1.09307269,$20.67,$20.97,$-0.30,2012",
+    "1,2012-02-29,XIC.TO,0.963226219,$21.09,$20.97,$0.13,2012",
+    "2,2012-03-01,XIC.TO,24.4622215,$535.57,$532.45,$3.12,2012"
+   ],
+   "tail": [
+    "205,2025-07-01,ZLB.TO,60.7265206,\"$2,303.90\",\"$2,299.98\",$3.91,2025",
+    "206,2025-07-31,XIC.TO,1.86045742,$91.47,$70.67,$20.81,2025",
+    "207,2025-07-31,ZLB.TO,2.33832129,$91.37,$88.56,$2.81,2025"
+   ]
+  },
+  {
+   "kind": "</expander>"
+  }
+ ],
+ "tab: Robustness": [
+  {
+   "kind": "note",
+   "text": "A single backtest is only one observation. These four tests probe whether the result holds up beyond the exact parameter set chosen."
+  },
+  {
+   "kind": "heading",
+   "text": "1. Stability over time"
+  },
+  {
+   "kind": "slider",
+   "label": "Number of folds",
+   "value": "5",
+   "options": []
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Fold",
+    "Start",
+    "End",
+    "CAGR",
+    "Volatility",
+    "Sharpe",
+    "Max Drawdown"
+   ],
+   "rows": 5,
+   "digest": "04303e056738165a",
+   "text": [
+    ",Fold,Start,End,CAGR,Volatility,Sharpe,Max Drawdown",
+    "0,1,2012-02-02,2014-10-15,22.08%,12.61%,1.59,-10.35%",
+    "1,2,2014-10-16,2017-06-27,14.49%,16.44%,0.76,-18.51%",
+    "2,3,2017-06-28,2020-03-09,9.61%,15.19%,0.50,-16.02%",
+    "3,4,2020-03-10,2022-11-18,10.06%,16.14%,0.50,-21.48%",
+    "4,5,2022-11-21,2025-07-31,-2.20%,12.86%,-0.33,-25.67%"
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Sharpe by fold",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "",
+     "x": "n=5 labels=814a083f6c4fed6d",
+     "y": "n=5 sum=3.02480603 abs=3.67786508"
+    }
+   ]
+  },
+  {
+   "kind": "flag",
+   "text": "High Sharpe dispersion across folds: the result depends heavily on the market regime."
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Period",
+    "Start",
+    "End",
+    "CAGR",
+    "Sharpe",
+    "Max Drawdown"
+   ],
+   "rows": 2,
+   "digest": "57a8422ff3bdf054",
+   "text": [
+    ",Period,Start,End,CAGR,Sharpe,Max Drawdown",
+    "0,In-sample,2012-02-02,2020-03-06,15.23%,0.89,-18.51%",
+    "1,Out-of-sample,2020-03-09,2025-07-31,3.82%,0.12,-25.67%"
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "2. Parameter stability"
+  },
+  {
+   "kind": "selectbox",
+   "label": "First parameter",
+   "value": "\"top_n\"",
+   "options": [
+    "Number of Positions",
+    "Blend with Price Momentum",
+    "Momentum Window",
+    "Trend Filter (0 = none)",
+    "Volatility Window",
+    "Rebalance frequency"
+   ]
+  },
+  {
+   "kind": "selectbox",
+   "label": "Second parameter",
+   "value": "\"None\"",
+   "options": [
+    "None",
+    "Blend with Price Momentum",
+    "Momentum Window",
+    "Trend Filter (0 = none)",
+    "Volatility Window",
+    "Rebalance frequency"
+   ]
+  },
+  {
+   "kind": "selectbox",
+   "label": "Metric",
+   "value": "\"Sharpe\"",
+   "options": [
+    "Sharpe",
+    "CAGR",
+    "Calmar",
+    "Max Drawdown",
+    "Annual Turnover"
+   ]
+  },
+  {
+   "kind": "button",
+   "label": "Compute parameter surface"
+  },
+  {
+   "kind": "heading",
+   "text": "3. Trading-day sensitivity"
+  },
+  {
+   "kind": "note",
+   "text": "The day a strategy rebalances is a parameter that usually goes unexamined. A monthly system tested only on month-end has been tested on one day out of twenty. Read the spread, not the best row: a tight band is evidence the edge is real, a wide one means the headline figure partly belonged to the calendar."
+  },
+  {
+   "kind": "button",
+   "label": "Sweep trading days"
+  },
+  {
+   "kind": "heading",
+   "text": "4. Cost sensitivity"
+  },
+  {
+   "kind": "note",
+   "text": "This sweep rebuilds a clean flat-rate cost for each level on the axis, independent of the impact model or overrides configured above: it answers a different question (how sensitive is the strategy to costs in general) from the headline result (what it actually costs given the configured model)."
+  },
+  {
+   "kind": "chart",
+   "title": "CAGR by level of frictions",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "",
+     "x": "n=8 sum=290 abs=290",
+     "y": "n=8 sum=0.841113613 abs=0.841113613"
+    }
+   ]
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Costs (bps per trade)",
+    "CAGR",
+    "Sharpe",
+    "Max Drawdown"
+   ],
+   "rows": 8,
+   "digest": "d2cc7f710f2efdcb",
+   "text": [
+    ",Costs (bps per trade),CAGR,Sharpe,Max Drawdown",
+    "0,0,10.70%,0.59,-25.35%",
+    "1,5,10.67%,0.59,-25.39%",
+    "2,10,10.65%,0.59,-25.44%",
+    "3,20,10.59%,0.58,-25.54%",
+    "4,30,10.54%,0.58,-25.63%",
+    "5,50,10.44%,0.57,-25.80%",
+    "6,75,10.32%,0.56,-26.03%",
+    "7,100,10.19%,0.55,-26.25%"
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "5. Stress test periods"
+  },
+  {
+   "kind": "note",
+   "text": "How the strategy's own realized returns behaved inside sixteen specific, named historical episodes -- 1987 through the 2024 yen carry-trade unwind -- rather than a statistical resample of them. Dates are cross-referenced from public sources and the trend-following “crisis alpha” literature; exact peaks and troughs vary by a session or two between sources depending on methodology, so treat these as well-sourced starting points, not settled fact."
+  },
+  {
+   "kind": "selectbox",
+   "label": "Category",
+   "value": "\"All\"",
+   "options": [
+    "All",
+    "Bear market",
+    "Crash",
+    "Geopolitical",
+    "Liquidity event",
+    "Rate shock",
+    "Trade policy"
+   ]
+  },
+  {
+   "kind": "<expander>",
+   "label": "Add custom periods"
+  },
+  {
+   "kind": "note",
+   "text": "One per line: Name, YYYY-MM-DD, YYYY-MM-DD[, Category] . Added to the built-in list below, not a replacement for it."
+  },
+  {
+   "kind": "text_area",
+   "label": "Custom periods",
+   "value": "\"\""
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "kpi",
+   "label": "Periods covered",
+   "value": "13 / 24",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Positive in",
+   "value": "10 / 13",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Worst period",
+   "value": "-2.1%",
+   "sub": "Tariff tantrum (2025)",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Deepest drawdown",
+   "value": "-8.5%",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Beat benchmark in",
+   "value": "10 / 13",
+   "sub": "median excess +0.5%",
+   "tone": ""
+  },
+  {
+   "kind": "note",
+   "text": "11 period(s) fall entirely outside the backtest's date range and are omitted from the chart below."
+  },
+  {
+   "kind": "chart",
+   "title": "Return during each period",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "Imported Factor Ranking",
+     "x": "n=13 labels=73339464dcb48fd7",
+     "y": "n=13 sum=50.8295254 abs=58.3390657"
+    },
+    {
+     "type": "bar",
+     "name": "XIC.TO",
+     "x": "n=13 labels=73339464dcb48fd7",
+     "y": "n=13 sum=43.5580545 abs=60.6078454"
+    }
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Excess return is the gap between the two bars, not a substitute for seeing both: a strategy can beat a benchmark by losing less, which looks very different from beating it by gaining."
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Period",
+    "Category",
+    "Start",
+    "End",
+    "Coverage",
+    "Sessions",
+    "Return",
+    "Max Drawdown",
+    "Best Day",
+    "Worst Day",
+    "Benchmark Return",
+    "Excess vs Benchmark"
+   ],
+   "rows": 24,
+   "digest": "e8487fa16e7a3cf2",
+   "text": [
+    ",Period,Category,Start,End,Coverage,Sessions,Return,Max Drawdown,Best Day,Worst Day,Benchmark Return,Excess vs Benchmark",
+    "0,Black Monday (1987),Crash,1987-08-25,1987-12-04,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "1,Gulf War / S&L crisis (1990),Bear market,1990-07-16,1990-10-11,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "2,Bond market massacre (1994),Rate shock,1994-02-02,1994-04-04,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "3,Asian financial crisis (1997),Liquidity event,1997-10-01,1998-01-30,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "4,Russian default / LTCM (1998),Liquidity event,1998-08-01,1998-10-08,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "5,Dot-com crash (2000-2002),Bear market,2000-03-24,2002-10-09,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "6,\"September 11, 2001\",Crash,2001-09-10,2001-09-21,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "7,Iraq war run-up (2003),Geopolitical,2003-01-14,2003-03-11,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "8,Global Financial Crisis (2007-2009),Bear market,2007-10-09,2009-03-09,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "9,Flash Crash (May 2010),Liquidity event,2010-05-03,2010-05-07,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "10,US downgrade / European debt crisis (2011),Bear market,2011-07-22,2011-10-03,No data,0,n/a,n/a,n/a,n/a,n/a,n/a",
+    "11,Taper tantrum (2013),Rate shock,2013-05-21,2013-06-24,Full,25,+1.01%,-3.55%,+2.45%,-1.15%,+2.68%,-1.68%",
+    "12,China slowdown / oil crash (2015-2016),Bear market,2015-08-18,2016-02-11,Full,128,+18.40%,-5.30%,+1.80%,-2.84%,+14.72%,+3.68%",
+    "13,Brexit vote (2016),Geopolitical,2016-06-23,2016-06-27,Full,3,-0.30%,-0.83%,+0.41%,-0.83%,-0.83%,+0.52%",
+    "14,Volmageddon (February 2018),Liquidity event,2018-02-02,2018-02-09,Full,6,+1.30%,-0.40%,+0.95%,-0.40%,+1.71%,-0.41%",
+    "15,Q4 2018 selloff,Bear market,2018-09-20,2018-12-24,Full,68,+4.03%,-4.62%,+1.72%,-1.81%,+2.69%,+1.34%",
+    "16,US-China trade war escalation (2019),Trade policy,2019-05-03,2019-06-03,Full,22,+0.51%,-2.67%,+1.07%,-1.53%,-1.35%,+1.85%",
+    "17,COVID-19 crash (2020),Crash,2020-02-19,2020-03-23,Full,24,+5.01%,-0.77%,+0.89%,-0.71%,+4.49%,+0.51%",
+    "18,2022 inflation / rate-hike bear market,Bear market,2022-01-03,2022-10-12,Full,203,+18.16%,-8.52%,+7.18%,-4.96%,+23.20%,-5.04%",
+    "19,Russia invades Ukraine (2022),Geopolitical,2022-02-09,2022-03-08,Full,20,+1.49%,-4.35%,+3.68%,-2.27%,+0.95%,+0.54%",
+    "20,SVB / regional banking crisis (2023),Liquidity event,2023-03-08,2023-03-24,Full,13,+3.36%,-1.81%,+2.07%,-0.66%,+1.32%,+2.05%",
+    "21,Higher-for-longer bond selloff (2023),Rate shock,2023-07-31,2023-10-27,Full,65,-1.30%,-3.69%,+1.54%,-1.24%,-3.68%,+2.38%",
+    "22,Yen carry-trade unwind (August 2024),Liquidity event,2024-07-31,2024-08-09,Full,8,+1.32%,-0.62%,+1.22%,-0.47%,+0.33%,+0.99%",
+    "23,Tariff tantrum (2025),Trade policy,2025-02-19,2025-04-08,Full,35,-2.15%,-4.19%,+1.29%,-1.10%,-2.67%,+0.53%"
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "5b. Around dated events"
+  },
+  {
+   "kind": "note",
+   "text": "An event study asks what a price (or a strategy) does around a specific date, compared with what it normally does given the market. Day 0 is the event. The grey baseline is learned from the ~200 days before the window, then the extra return ( abnormal return ) is added up day by day ( CAR ). Stress periods above show what happened inside a named episode; this shows what the strategy does around a date, relative to the benchmark."
+  },
+  {
+   "kind": "selectbox",
+   "label": "Events",
+   "value": "\"Start of each stress period\"",
+   "options": [
+    "Start of each stress period",
+    "The benchmark's worst days",
+    "The strategy's rebalance dates",
+    "My own dates"
+   ]
+  },
+  {
+   "kind": "number_input",
+   "label": "Days before",
+   "value": "5"
+  },
+  {
+   "kind": "number_input",
+   "label": "Days after",
+   "value": "20"
+  },
+  {
+   "kind": "kpis",
+   "items": [
+    {
+     "label": "Events used",
+     "value": "13",
+     "sub": "fewer than ~10 = anecdote, not evidence",
+     "tone": ""
+    },
+    {
+     "label": "Average CAR",
+     "value": "-0.15%",
+     "sub": "extra return over days -5 to +20",
+     "tone": "neg"
+    },
+    {
+     "label": "Median CAR",
+     "value": "-0.61%",
+     "sub": "the typical event",
+     "tone": ""
+    },
+    {
+     "label": "t-stat",
+     "value": "-0.25",
+     "sub": "about 2+ is notable",
+     "tone": ""
+    },
+    {
+     "label": "Share positive",
+     "value": "38%",
+     "sub": "events with extra return > 0",
+     "tone": ""
+    }
+   ]
+  },
+  {
+   "kind": "text",
+   "text": "On average Imported Factor Ranking earned -0.15% versus the baseline (t = -0.25, 13 events). That is within what chance produces: no reliable pattern around these dates."
+  },
+  {
+   "kind": "chart",
+   "title": "Cumulative extra return by trading day around the event (day 0 = the event)",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "",
+     "x": "n=26 sum=195 abs=225",
+     "y": "n=26 sum=0.135134697 abs=0.135134697"
+    },
+    {
+     "type": "scatter",
+     "name": "Middle half of events",
+     "x": "n=26 sum=195 abs=225",
+     "y": "n=26 sum=-0.135829535 abs=0.135829535"
+    },
+    {
+     "type": "scatter",
+     "name": "Average CAR",
+     "x": "n=26 sum=195 abs=225",
+     "y": "n=26 sum=0.0188903862 abs=0.0263552267"
+    }
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Flat near zero before day 0 means nothing was leaking ahead of the event. A step at day 0 is the immediate reaction; a slope afterwards is drift. The shaded band shows where the middle half of individual events fell, so a narrow band means the events agree."
+  },
+  {
+   "kind": "<expander>",
+   "label": "Every event (Imported Factor Ranking)"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Ticker",
+    "Event date",
+    "Day 0",
+    "Alpha (daily)",
+    "Beta",
+    "CAR",
+    "CAR t",
+    "Day-0 AR"
+   ],
+   "rows": 13,
+   "digest": "0df85628ac97998c",
+   "text": [
+    ",Ticker,Event date,Day 0,Alpha (daily),Beta,CAR,CAR t,Day-0 AR",
+    "0,Imported Factor Ranking,2013-05-21,2013-05-21,0.000228285071,0.88261057,-0.028749094,-2.30601446,0.000705185006",
+    "1,Imported Factor Ranking,2015-08-18,2015-08-18,0.000104296306,0.926031965,-0.0105333963,-0.686421365,-0.0034633439",
+    "2,Imported Factor Ranking,2016-06-23,2016-06-23,0.000556948441,0.877292891,0.0161148747,1.21498858,0.00208357489",
+    "3,Imported Factor Ranking,2018-02-02,2018-02-02,-3.68057206e-05,0.918028778,-0.00624996362,-0.428861029,-0.00330395526",
+    "4,Imported Factor Ranking,2018-09-20,2018-09-20,-0.000282171184,0.964603345,0.0223358386,1.69687198,-0.00314019401",
+    "5,Imported Factor Ranking,2019-05-03,2019-05-03,0.000247007455,0.906619181,0.00609462212,0.465435357,0.000574894509",
+    "6,Imported Factor Ranking,2020-02-19,2020-02-19,0.000393877729,0.94206354,-0.00626406098,-0.372908696,0.000802252347",
+    "7,Imported Factor Ranking,2022-01-03,2022-01-03,0.000210603096,0.785139903,-0.0237486724,-1.74224896,-0.000947129249",
+    "8,Imported Factor Ranking,2022-02-09,2022-02-09,2.42523277e-05,0.825590954,0.00359654299,0.256108125,-0.000879886583",
+    "9,Imported Factor Ranking,2023-03-08,2023-03-08,-3.02826327e-05,0.810381464,0.0484120579,3.44878152,0.00343365917",
+    "10,Imported Factor Ranking,2023-07-31,2023-07-31,0.000529595294,0.850722323,-0.00609460568,-0.393413153,8.5742168e-05",
+    "11,Imported Factor Ranking,2024-07-31,2024-07-31,-1.72835712e-05,0.918309253,-0.0305692892,-2.0702996,-0.00115784013",
+    "12,Imported Factor Ranking,2025-02-19,2025-02-19,-0.000295033582,0.892188143,-0.00401295627,-0.290898178,0.00185285147"
+   ]
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "caption",
+   "text": "11 event(s) skipped (outside the data, or too little history before them): 1987-08-25 (event window outside the data); 1990-07-16 (event window outside the data); 1994-02-02 (event window outside the data); 1997-10-01 (event window outside the data); 1998-08-01 (event window outside the data); 2000-03-24 (event window outside the data)"
+  },
+  {
+   "kind": "heading",
+   "text": "6. Sampling uncertainty"
+  },
+  {
+   "kind": "slider",
+   "label": "Simulations",
+   "value": "500",
+   "options": []
+  },
+  {
+   "kind": "slider",
+   "label": "Block size (days)",
+   "value": "21",
+   "options": []
+  },
+  {
+   "kind": "button",
+   "label": "Run Monte Carlo simulation"
+  }
+ ],
+ "tab: Data": [
+  {
+   "kind": "kpi",
+   "label": "Sessions",
+   "value": "3,544",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Start",
+   "value": "2012-01-02",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "End",
+   "value": "2025-07-31",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "heading",
+   "text": "Per-instrument diagnostic"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Instrument",
+    "Start",
+    "End",
+    "Observations",
+    "Internal Gaps",
+    "% Missing"
+   ],
+   "rows": 4,
+   "digest": "1eb99c26578f6c63",
+   "text": [
+    ",Instrument,Start,End,Observations,Internal Gaps,% Missing",
+    "0,XEI.TO,2012-01-02,2025-07-31,3544,0,0",
+    "1,XIC.TO,2012-01-02,2025-07-31,3544,0,0",
+    "2,ZEB.TO,2012-01-02,2025-07-31,3544,0,0",
+    "3,ZLB.TO,2012-01-02,2025-07-31,3544,0,0"
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Flags"
+  },
+  {
+   "kind": "flag",
+   "text": "No adjusted close for XIC.TO: the benchmark is measured on price return, which understates it. Supply an Adj Close column, or choose “Price return + dividends”."
+  },
+  {
+   "kind": "heading",
+   "text": "Exogenous series"
+  },
+  {
+   "kind": "kpi",
+   "label": "Imported series",
+   "value": "4",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Detected frequency",
+   "value": "Quarterly",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Publication lag",
+   "value": "45d",
+   "sub": "applied before any alignment",
+   "tone": ""
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Series",
+    "Observations",
+    "Start",
+    "End",
+    "Backtest Coverage",
+    "First Usable Date"
+   ],
+   "rows": 4,
+   "digest": "9e4370aa36278303",
+   "text": [
+    ",Series,Observations,Start,End,Backtest Coverage,First Usable Date",
+    "0,XIC.TO,61,2010-03-31,2025-03-31,100,2012-01-02",
+    "1,ZEB.TO,61,2010-03-31,2025-03-31,100,2012-01-02",
+    "2,XEI.TO,61,2010-03-31,2025-03-31,100,2012-01-02",
+    "3,ZLB.TO,61,2010-03-31,2025-03-31,100,2012-01-02"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Columns recognized as a cross-sectional factor (matches a universe symbol): XEI.TO, XIC.TO, ZEB.TO, ZLB.TO"
+  },
+  {
+   "kind": "multiselect",
+   "label": "Plot one or more series",
+   "value": "[\"XIC.TO\", \"ZEB.TO\"]",
+   "options": [
+    "XIC.TO",
+    "ZEB.TO",
+    "XEI.TO",
+    "ZLB.TO"
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Exogenous series, after publication lag",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "XIC.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=30974.11 abs=30974.11"
+    },
+    {
+     "type": "scatter",
+     "name": "ZEB.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=71795.08 abs=71795.08"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Correlation of daily returns"
+  },
+  {
+   "kind": "chart",
+   "title": "Correlation of daily returns",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "heatmap",
+     "name": "",
+     "x": "n=4 labels=df89b2d1753997e0",
+     "y": "n=4 labels=df89b2d1753997e0",
+     "z": "n=16 sum=13.369022 abs=13.369022"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Normalized prices (base 100)"
+  },
+  {
+   "kind": "chart",
+   "title": "Adjusted prices, base 100",
+   "yaxis": "log",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "XEI.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=870443.246 abs=870443.246"
+    },
+    {
+     "type": "scatter",
+     "name": "XIC.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=704817.916 abs=704817.916"
+    },
+    {
+     "type": "scatter",
+     "name": "ZEB.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=821606.411 abs=821606.411"
+    },
+    {
+     "type": "scatter",
+     "name": "ZLB.TO",
+     "x": "n=3544 labels=96d7097897cd168f",
+     "y": "n=3544 sum=682220.434 abs=682220.434"
+    }
+   ]
+  }
+ ],
+ "tab: Builder": [
+  {
+   "kind": "note",
+   "text": "Build a strategy from criteria. Each rule is an indicator, a comparison and a value; rules combine into a filter that decides what is eligible and a score that ranks it. The result compiles to the same expression language the engine already runs, so nothing here can do anything a typed formula could not."
+  },
+  {
+   "kind": "button",
+   "label": "Add filter rule"
+  },
+  {
+   "kind": "button",
+   "label": "Add score rule"
+  },
+  {
+   "kind": "radio",
+   "label": "Combine filters with",
+   "value": "\"AND\"",
+   "options": [
+    "AND",
+    "OR"
+   ]
+  },
+  {
+   "kind": "rule",
+   "text": "Filter 1 Price is above Moving average (200)"
+  },
+  {
+   "kind": "selectbox",
+   "label": "Indicator",
+   "value": "\"Price\"",
+   "options": [
+    "Price",
+    "Moving average",
+    "Exponential average",
+    "Momentum (total return)",
+    "Volatility",
+    "Downside volatility",
+    "RSI",
+    "Trend efficiency",
+    "Z-score of price",
+    "Distance from average",
+    "Rolling high",
+    "Rolling low"
+   ]
+  },
+  {
+   "kind": "selectbox",
+   "label": "Test",
+   "value": "\"is above\"",
+   "options": [
+    "is above",
+    "is below",
+    "is at least",
+    "is at most"
+   ]
+  },
+  {
+   "kind": "selectbox",
+   "label": "Against",
+   "value": "\"another indicator\"",
+   "options": [
+    "a number",
+    "another indicator"
+   ]
+  },
+  {
+   "kind": "checkbox",
+   "label": "On",
+   "value": "true"
+  },
+  {
+   "kind": "button",
+   "label": "↑"
+  },
+  {
+   "kind": "button",
+   "label": "↓"
+  },
+  {
+   "kind": "selectbox",
+   "label": "Compared with",
+   "value": "\"Moving average\"",
+   "options": [
+    "Price",
+    "Moving average",
+    "Exponential average",
+    "Momentum (total return)",
+    "Volatility",
+    "Downside volatility",
+    "RSI",
+    "Trend efficiency",
+    "Z-score of price",
+    "Distance from average",
+    "Rolling high",
+    "Rolling low"
+   ]
+  },
+  {
+   "kind": "number_input",
+   "label": "Window ",
+   "value": "200"
+  },
+  {
+   "kind": "button",
+   "label": "Remove"
+  },
+  {
+   "kind": "rule",
+   "text": "Score 2 Rank across universe (high is good): Momentum (total return) (126) · weight 1"
+  },
+  {
+   "kind": "selectbox",
+   "label": "Indicator",
+   "value": "\"Momentum (total return)\"",
+   "options": [
+    "Price",
+    "Moving average",
+    "Exponential average",
+    "Momentum (total return)",
+    "Volatility",
+    "Downside volatility",
+    "RSI",
+    "Trend efficiency",
+    "Z-score of price",
+    "Distance from average",
+    "Rolling high",
+    "Rolling low"
+   ]
+  },
+  {
+   "kind": "number_input",
+   "label": "Window",
+   "value": "126"
+  },
+  {
+   "kind": "selectbox",
+   "label": "Treatment",
+   "value": "\"Rank across universe (high is good)\"",
+   "options": [
+    "Rank across universe (high is good)",
+    "Rank across universe (low is good)",
+    "Raw value",
+    "Negative of value"
+   ]
+  },
+  {
+   "kind": "number_input",
+   "label": "Weight",
+   "value": "1.0"
+  },
+  {
+   "kind": "checkbox",
+   "label": "On",
+   "value": "true"
+  },
+  {
+   "kind": "button",
+   "label": "↑"
+  },
+  {
+   "kind": "button",
+   "label": "↓"
+  },
+  {
+   "kind": "button",
+   "label": "Remove"
+  },
+  {
+   "kind": "heading",
+   "text": "Compiled expressions"
+  },
+  {
+   "kind": "text",
+   "text": "**Filter**"
+  },
+  {
+   "kind": "code",
+   "text": "(price > sma(price, 200))"
+  },
+  {
+   "kind": "text",
+   "text": "**Score**"
+  },
+  {
+   "kind": "code",
+   "text": "pctrank(mom(price, 126))"
+  },
+  {
+   "kind": "heading",
+   "text": "Preview against the loaded universe"
+  },
+  {
+   "kind": "kpi",
+   "label": "Type",
+   "value": "Continuous",
+   "sub": "score to rank",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Coverage",
+   "value": "96%",
+   "sub": "of the price grid",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "First value",
+   "value": "2012-06-26",
+   "sub": "warm-up needed",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Median",
+   "value": "0.625",
+   "sub": "range 0.25 to 1.00",
+   "tone": ""
+  },
+  {
+   "kind": "multiselect",
+   "label": "Instruments",
+   "value": "[\"XEI.TO\", \"XIC.TO\", \"ZEB.TO\"]",
+   "options": [
+    "XEI.TO",
+    "XIC.TO",
+    "ZEB.TO",
+    "ZLB.TO"
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Score value",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "XEI.TO",
+     "x": "n=3418 labels=00c116f4bd595c97",
+     "y": "n=3418 sum=2171.75 abs=2171.75"
+    },
+    {
+     "type": "scatter",
+     "name": "XIC.TO",
+     "x": "n=3418 labels=00c116f4bd595c97",
+     "y": "n=3418 sum=1936 abs=1936"
+    },
+    {
+     "type": "scatter",
+     "name": "ZEB.TO",
+     "x": "n=3418 labels=00c116f4bd595c97",
+     "y": "n=3418 sum=2264.25 abs=2264.25"
+    }
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Share of the last month each name passed the filter",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "XEI.TO",
+     "x": "n=3524 labels=18f966a9661d122c",
+     "y": "n=3524 sum=2159.71429 abs=2159.71429"
+    },
+    {
+     "type": "scatter",
+     "name": "XIC.TO",
+     "x": "n=3524 labels=18f966a9661d122c",
+     "y": "n=3524 sum=1856 abs=1856"
+    },
+    {
+     "type": "scatter",
+     "name": "ZEB.TO",
+     "x": "n=3524 labels=18f966a9661d122c",
+     "y": "n=3524 sum=2249.7619 abs=2249.7619"
+    },
+    {
+     "type": "scatter",
+     "name": "ZLB.TO",
+     "x": "n=3524 labels=18f966a9661d122c",
+     "y": "n=3524 sum=2336.80952 abs=2336.80952"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Use these rules"
+  },
+  {
+   "kind": "note",
+   "text": "Select Custom Formula as the model in the sidebar, then paste the two expressions above into Score expression and Filter expression . Saving a preset from the Export tab stores these rules alongside the configuration."
+  },
+  {
+   "kind": "button",
+   "label": "Send to the Custom Formula model"
+  },
+  {
+   "kind": "<expander>",
+   "label": "Indicator reference"
+  },
+  {
+   "kind": "text",
+   "text": "Price The adjusted price itself."
+  },
+  {
+   "kind": "text",
+   "text": "Moving average Simple moving average over n sessions."
+  },
+  {
+   "kind": "text",
+   "text": "Exponential average Exponentially weighted average."
+  },
+  {
+   "kind": "text",
+   "text": "Momentum (total return) Return over the past n sessions."
+  },
+  {
+   "kind": "text",
+   "text": "Volatility Annualized realized volatility."
+  },
+  {
+   "kind": "text",
+   "text": "Downside volatility Volatility of losses only."
+  },
+  {
+   "kind": "text",
+   "text": "RSI Relative strength index, 0 to 100."
+  },
+  {
+   "kind": "text",
+   "text": "Trend efficiency How direct the path was, 0 to 1."
+  },
+  {
+   "kind": "text",
+   "text": "Z-score of price Standard deviations from the mean."
+  },
+  {
+   "kind": "text",
+   "text": "Distance from average Percentage above or below the average."
+  },
+  {
+   "kind": "text",
+   "text": "Rolling high Highest prior close over n sessions."
+  },
+  {
+   "kind": "text",
+   "text": "Rolling low Lowest prior close over n sessions."
+  },
+  {
+   "kind": "</expander>"
+  }
+ ],
+ "tab: Export": [
+  {
+   "kind": "note",
+   "text": "Every export below reproduces the backtest currently on screen. The tearsheet is the fastest way to share a result; the workbook and CSVs are for further analysis elsewhere."
+  },
+  {
+   "kind": "heading",
+   "text": "Tearsheet report"
+  },
+  {
+   "kind": "note",
+   "text": "A single printable HTML page: key statistics, equity curve, drawdown, monthly returns, return distribution, full stats table, top drawdown episodes, and current holdings. Open it in a browser and use Print → Save as PDF for a shareable PDF."
+  },
+  {
+   "kind": "heading",
+   "text": "Detailed report"
+  },
+  {
+   "kind": "note",
+   "text": "Every module in one document: Results, Signals, Positions, Robustness, Stress test periods and Tax, all pulled from the backtest already on screen. Walk-forward, in/out-of-sample and cost sensitivity are recomputed fresh (they are cheap); the parameter surface, trading-day sweep and Monte Carlo are only included if already run from the Robustness tab in this session, since forcing those to recompute here would be slow for a document nobody may have asked for yet."
+  },
+  {
+   "kind": "button",
+   "label": "Generate detailed report"
+  },
+  {
+   "kind": "heading",
+   "text": "Holdings"
+  },
+  {
+   "kind": "heading",
+   "text": "Save as a preset"
+  },
+  {
+   "kind": "note",
+   "text": "Recall this setup by name from the sidebar, instead of exporting and re-uploading a YAML file."
+  },
+  {
+   "kind": "text_input",
+   "label": "Preset name",
+   "value": "\"Imported Factor Ranking\""
+  },
+  {
+   "kind": "text_input",
+   "label": "Note (optional)",
+   "value": "\"\""
+  },
+  {
+   "kind": "button",
+   "label": "Save preset"
+  },
+  {
+   "kind": "heading",
+   "text": "Configuration"
+  },
+  {
+   "kind": "note",
+   "text": "This configuration exactly reproduces the backtest shown. Keep it with the result; re-import it to replay the test. Imported files are not included: the YAML retains their name, settings, and publication lag, but the files themselves must be re-uploaded."
+  },
+  {
+   "kind": "code",
+   "text": "label: Imported Factor Ranking data: source: upload tickers: - XEI.TO - XIC.TO - ZEB.TO - ZLB.TO start: '1990-01-01' end: null benchmark: XIC.TO cash_proxy: null price_field: Close fill_limit: 5 min_history: 60 adjusted: false use_dividends: true base_currency: '' currencies: {} exog: enabled: true publication_lag_days: 45 ffill_limit: null columns: - XIC.TO - ZEB.TO - XEI.TO - ZLB.TO note: fundamental_factor.csv strategy: mode: builtin name: factor_rank params: direction: Low value = favorable top_n: 2 blend_momentum: 0.0 mom_window: 126 trend_filter: 0 sizing: Equal Weight vol_window: 60 hold_cash: true weights_normalize: None weights_calendar: File dates weights_source: '' engine: initial_capital: 100000.0 rebalance: M execution_lag: 1 max_leverage: 1.0 min_trade_weight: 0.005 periods_per_year: 252 execute_at_open: true trim_warmup: true whole_shares: false day_rule: last day_of_month: 15 weekday: 4 nth: 1 anchor_month: 12 cash_sweep: none cash_sweep_threshold: 0.0 cash_buffer: 0.01 fx_cash: net costs: commission_bps: 5.0 slippage_bps: 25.0 impact_model: sqrt_vol impact_bps_at_10pct_adv: 25.0 impact_coef: 1.0 slippage_overrides: {} apply_frictions_to_fee_liquidation: true cash_rate_pa: 0.02 borrow_rate_pa: 0.0 management_fee_pa: 0.005 fx_spread_bps: 25.0 foreign_cash_rate_pa: 0.0"
+  },
+  {
+   "kind": "heading",
+   "text": "Other downloads"
+  },
+  {
+   "kind": "multiselect",
+   "label": "Modules in the Excel report",
+   "value": "[\"Executive summary\", \"Results\", \"Signals\", \"Positions\", \"Attribution\", \"Tax\", \"Robustness\", \"Stress tests\", \"Market regimes\", \"Configuration\", \"Data\"]",
+   "options": [
+    "Executive summary",
+    "Results",
+    "Signals",
+    "Positions",
+    "Attribution",
+    "Tax",
+    "Robustness",
+    "Stress tests",
+    "Market regimes",
+    "Configuration",
+    "Data"
+   ]
+  },
+  {
+   "kind": "text_area",
+   "label": "Comments for the CIO (optional)",
+   "value": "\"\""
+  },
+  {
+   "kind": "date_input",
+   "label": "Excel report from",
+   "value": "\"2012-02-01\""
+  },
+  {
+   "kind": "date_input",
+   "label": "to",
+   "value": "\"2025-07-31\""
+  },
+  {
+   "kind": "note",
+   "text": "The workbook is built when you click, so the page stays quick. It opens on a two-page executive summary for the CIO, printable as is, then an About sheet indexing every table, then about a dozen sheets grouped by module -- small tables stacked under a title, daily series side by side on their dates: statistics, trailing periods, calendar years, drawdowns, monthly returns and the daily series; current and historical holdings, target weights, the trade log and share counts; signals; attribution by security, class and period; the full tax analysis; walk-forward, in/out-of-sample, cost sensitivity and stress test periods; returns in every market regime; the parameter surface, trading-day sweep and Monte Carlo when run; and prices, imported series and data diagnostics, plus the settings these figures depend on."
+  },
+  {
+   "kind": "note",
+   "text": "Run on <NOW> · execution lag 1d · monthly (month-end) · 30 bps of costs per trade."
+  }
+ ]
+}

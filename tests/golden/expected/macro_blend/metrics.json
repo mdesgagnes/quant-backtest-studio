@@ -1,0 +1,60 @@
+{
+ "label": "Macro Gate",
+ "start": "2013-07-01",
+ "end": "2025-07-31",
+ "sessions": 3154,
+ "final_value": 149319.40439039766,
+ "strategy": {
+  "Total Return": 0.49767362603568843,
+  "CAGR": 0.032809019962175334,
+  "Volatility": 0.10619235604311676,
+  "Sharpe": 0.306531401797913,
+  "Sortino": 0.42935498318207743,
+  "Calmar": 0.14554019817094693,
+  "Max Drawdown": -0.22542926541599795,
+  "Ulcer Index": 9.727294871972477,
+  "VaR 95% (daily)": 0.008837397865454533,
+  "CVaR 95% (daily)": 0.016757794840070984,
+  "Skew": -0.5096595563410222,
+  "Excess Kurtosis": 31.673960120167635,
+  "% Positive Months": 0.31724137931034485,
+  "Best Month": 0.06506630576564976,
+  "Worst Month": -0.09735291521223466,
+  "Annual Turnover": 0.5904092182293604,
+  "Average Exposure": 0.5019362477632668,
+  "Beta": null,
+  "Alpha (ann.)": -0.024258306101800686,
+  "Risk-adjusted alpha (ann.)": null,
+  "R²": 0.5099291686150048,
+  "Tracking Error": 0.09281058166621795,
+  "Information Ratio": -0.2473239810521799
+ },
+ "n_trades": 66,
+ "n_rebalances": 49,
+ "total_costs": 0.022203340295713473,
+ "total_turnover": 7.389486802759535,
+ "benchmark_label": "XIC.TO 60% / ZLB.TO 40%",
+ "benchmark": {
+  "Total Return": 0.9968261774031149,
+  "CAGR": 0.05682811801753718,
+  "Volatility": 0.13276826136031267,
+  "Sharpe": 0.42788537921535197,
+  "Sortino": 0.6196539563016367,
+  "Calmar": 0.24682611526225848,
+  "Max Drawdown": -0.2302354350031235,
+  "Ulcer Index": 10.178041688507953,
+  "VaR 95% (daily)": 0.01200509975501786,
+  "CVaR 95% (daily)": 0.019389715648031262,
+  "Skew": 0.28059228618127485,
+  "Excess Kurtosis": 14.713359866418362,
+  "% Positive Months": 0.5103448275862069,
+  "Best Month": 0.0785828383662941,
+  "Worst Month": -0.09827127534217284
+ },
+ "compare": {
+  "Accelerating Dual Momentum": {
+   "final_value": 333261.00882256473,
+   "sessions": 3154
+  }
+ }
+}

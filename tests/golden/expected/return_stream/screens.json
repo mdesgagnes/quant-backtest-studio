@@ -1,0 +1,1022 @@
+{
+ "page": [
+  {
+   "kind": "title",
+   "text": "Quant Backtest Studio Return streams"
+  },
+  {
+   "kind": "multiselect",
+   "label": "Series analysed",
+   "value": "[\"Fund A\"]",
+   "options": [
+    "Fund A",
+    "Fund B",
+    "Benchmark"
+   ]
+  },
+  {
+   "kind": "selectbox",
+   "label": "Compare against",
+   "value": "\"Benchmark\"",
+   "options": [
+    "None",
+    "Fund B",
+    "Benchmark"
+   ]
+  },
+  {
+   "kind": "date_input",
+   "label": "From",
+   "value": "\"2012-02-29\""
+  },
+  {
+   "kind": "date_input",
+   "label": "To",
+   "value": "\"2025-07-31\""
+  },
+  {
+   "kind": "toggle",
+   "label": "Common period only",
+   "value": "false"
+  },
+  {
+   "kind": "kpi",
+   "label": "Frequency",
+   "value": "Monthly",
+   "sub": "12 periods/year",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Observations",
+   "value": "162",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Period",
+   "value": "2012-02-29",
+   "sub": "to 2025-07-31",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Scale read",
+   "value": "Percentage",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "note",
+   "text": "Dates read from “Date”, month-first. If the period above looks shifted by a month from what you expect, set “Date order in file” in the sidebar."
+  },
+  {
+   "kind": "flag",
+   "text": "Values read as percentages (median magnitude 2.17) and divided by 100."
+  },
+  {
+   "kind": "flag",
+   "text": "Dates read from “Date”."
+  },
+  {
+   "kind": "context",
+   "items": [
+    "Fund A",
+    "2012-02-29 → 2025-07-31",
+    "162 monthly periods",
+    "vs Benchmark",
+    "CAGR 8.38%"
+   ]
+  }
+ ],
+ "tab: Results": [
+  {
+   "kind": "kpi",
+   "label": "CAGR",
+   "value": "8.38%",
+   "sub": "bench. 6.27%",
+   "tone": "pos"
+  },
+  {
+   "kind": "kpi",
+   "label": "Volatility",
+   "value": "11.47%",
+   "sub": "bench. 13.92%",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Sharpe",
+   "value": "0.56",
+   "sub": "bench. 0.31",
+   "tone": "pos"
+  },
+  {
+   "kind": "kpi",
+   "label": "Max Drawdown",
+   "value": "-17.27%",
+   "sub": "bench. -27.98%",
+   "tone": "neg"
+  },
+  {
+   "kind": "kpi",
+   "label": "Calmar",
+   "value": "0.37",
+   "sub": "bench. 0.15",
+   "tone": "pos"
+  },
+  {
+   "kind": "kpi",
+   "label": "Sortino",
+   "value": "0.88",
+   "sub": "bench. 0.45",
+   "tone": "pos"
+  },
+  {
+   "kind": "toggle",
+   "label": "Log scale",
+   "value": "true"
+  },
+  {
+   "kind": "chart",
+   "title": "Portfolio value (base 100)",
+   "yaxis": "log",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "Fund A",
+     "x": "n=163 labels=26d51b8c1432fb5d",
+     "y": "n=163 sum=33728.4083 abs=33728.4083"
+    },
+    {
+     "type": "scatter",
+     "name": "Benchmark",
+     "x": "n=163 labels=26d51b8c1432fb5d",
+     "y": "n=163 sum=32043.4645 abs=32043.4645"
+    }
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Drawdown from prior peak",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "Fund A",
+     "x": "n=163 labels=26d51b8c1432fb5d",
+     "y": "n=163 sum=-639.111989 abs=639.111989"
+    },
+    {
+     "type": "scatter",
+     "name": "Benchmark",
+     "x": "n=163 labels=26d51b8c1432fb5d",
+     "y": "n=163 sum=-1269.26532 abs=1269.26532"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Correlation"
+  },
+  {
+   "kind": "chart",
+   "title": "Correlation of monthly returns, 162 observations (2012-02-29 to 2025-07-31)",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "heatmap",
+     "name": "",
+     "x": "n=2 labels=8bc5c05bb5f32542",
+     "y": "n=2 labels=8bc5c05bb5f32542",
+     "z": "n=4 sum=3.63829178 abs=3.63829178"
+    }
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Measured only over the dates every series has data. Fewer observations make each correlation less precise: with 36 monthly returns, a correlation of 0.5 could plausibly be anywhere from about 0.2 to 0.7."
+  },
+  {
+   "kind": "heading",
+   "text": "Trailing periods"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Period",
+    "Annualized",
+    "Fund A",
+    "Benchmark",
+    "Excess"
+   ],
+   "rows": 10,
+   "digest": "f2d905fa66bbed13",
+   "text": [
+    ",Period,Annualized,Fund A,Benchmark,Excess",
+    "0,1M,No,+1.67%,+3.27%,-1.60%",
+    "1,3M,No,+2.44%,-0.15%,+2.59%",
+    "2,6M,No,+1.32%,-1.87%,+3.19%",
+    "3,YTD,No,+0.56%,-2.73%,+3.30%",
+    "4,1Y,No,+3.63%,+0.50%,+3.13%",
+    "5,2Y,Yes,-5.11%,-8.52%,+3.42%",
+    "6,3Y,Yes,+0.83%,-1.21%,+2.04%",
+    "7,5Y,Yes,+4.29%,+0.16%,+4.13%",
+    "8,10Y,Yes,+7.59%,+3.93%,+3.66%",
+    "9,Since inception,Yes,+8.38%,+6.27%,+2.11%"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Periods longer than one year are annualized; shorter ones are cumulative. A blank means that series' history does not cover the whole window."
+  },
+  {
+   "kind": "heading",
+   "text": "Calendar years"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Year",
+    "Fund A",
+    "Benchmark",
+    "Excess"
+   ],
+   "rows": 14,
+   "digest": "4dd7424ed683d10f",
+   "text": [
+    ",Year,Fund A,Benchmark,Excess",
+    "0,2012,+8.31%,+14.37%,-6.07%",
+    "1,2013,+11.49%,+30.65%,-19.16%",
+    "2,2014,+17.65%,+14.52%,+3.13%",
+    "3,2015,+6.08%,+1.90%,+4.18%",
+    "4,2016,+17.55%,+6.99%,+10.56%",
+    "5,2017,+5.61%,+2.16%,+3.46%",
+    "6,2018,+22.41%,+22.97%,-0.56%",
+    "7,2019,+2.72%,-6.39%,+9.12%",
+    "8,2020,-8.47%,-9.75%,+1.28%",
+    "9,2021,+7.60%,+0.73%,+6.87%",
+    "10,2022,+32.04%,+37.03%,-4.99%",
+    "11,2023,-0.16%,-11.56%,+11.40%",
+    "12,2024,-3.52%,-3.33%,-0.19%",
+    "13,2025,+0.56%,-2.73%,+3.30%"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "The first and last years are partial when a series starts or ends mid-year."
+  },
+  {
+   "kind": "chart",
+   "title": "Return by calendar year",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "Fund A",
+     "x": "n=14 labels=99a9df953156807b",
+     "y": "n=14 sum=119.867061 abs=144.17077"
+    },
+    {
+     "type": "bar",
+     "name": "Benchmark",
+     "x": "n=14 labels=99a9df953156807b",
+     "y": "n=14 sum=97.5405635 abs=165.080973"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Detail"
+  },
+  {
+   "kind": "chart",
+   "title": "Monthly returns",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "heatmap",
+     "name": "",
+     "x": "n=12 labels=3801937d59dc573c",
+     "y": "n=14 labels=99a9df953156807b",
+     "z": "n=168 sum=117.8619 abs=425.8751"
+    }
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Monthly return distribution",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "histogram",
+     "name": "Observed",
+     "x": "n=162 sum=117.8619 abs=425.8751"
+    }
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Rolling Sharpe over 12 months",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "Rolling Sharpe",
+     "x": "n=162 labels=a2ea4b5178be2ace",
+     "y": "n=162 sum=113.866307 abs=155.821127"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Full statistics"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Metric",
+    "Fund A",
+    "Benchmark"
+   ],
+   "rows": 21,
+   "digest": "46e8b543f7a18f8a",
+   "text": [
+    ",Metric,Fund A,Benchmark",
+    "0,Total Return,196.33%,127.24%",
+    "1,CAGR,8.38%,6.27%",
+    "2,Volatility,11.47%,13.92%",
+    "3,Sharpe,0.56,0.31",
+    "4,Sortino,0.88,0.45",
+    "5,Calmar,0.37,0.15",
+    "6,Max Drawdown,-17.27%,-27.98%",
+    "7,Ulcer Index,6.01,10.95",
+    "8,VaR 95% (monthly),4.99%,7.22%",
+    "9,CVaR 95% (monthly),6.62%,8.74%",
+    "10,Skew,-0.18,-0.31",
+    "11,Excess Kurtosis,0.43,0.19",
+    "12,% Positive Months,56.79%,54.94%",
+    "13,Best Month,9.73%,9.85%",
+    "14,Worst Month,-8.78%,-11.30%",
+    "15,Beta,n/a,n/a",
+    "16,Alpha (ann.),2.11%,n/a",
+    "17,Risk-adjusted alpha (ann.),n/a,n/a",
+    "18,R²,0.67,n/a",
+    "19,Tracking Error,7.95%,n/a",
+    "20,Information Ratio,0.25,n/a"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Beta, alpha, tracking error and information ratio are measured against “Benchmark”."
+  },
+  {
+   "kind": "heading",
+   "text": "Main drawdown episodes · Fund A"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Start",
+    "Trough",
+    "Recovery",
+    "Drawdown",
+    "Months to Trough",
+    "Total Months",
+    "Calendar Days"
+   ],
+   "rows": 6,
+   "digest": "914b962b40068e34",
+   "text": [
+    ",Start,Trough,Recovery,Drawdown,Months to Trough,Total Months,Calendar Days",
+    "0,2023-07-31,2024-03-31,ongoing,-17.27%,8,24,731",
+    "1,2019-11-30,2020-12-31,2022-04-30,-15.44%,13,29,882",
+    "2,2019-07-31,2019-09-30,2019-11-30,-9.90%,2,4,122",
+    "3,2014-11-30,2015-02-28,2015-11-30,-8.37%,3,12,365",
+    "4,2016-07-31,2016-09-30,2016-10-31,-5.33%,2,3,92",
+    "5,2012-11-30,2013-03-31,2013-06-30,-5.15%,4,7,212"
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Period returns · Fund A"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12"
+   ],
+   "rows": 14,
+   "digest": "e51c42304ee12e50",
+   "text": [
+    "Year,1,2,3,4,5,6,7,8,9,10,11,12",
+    "2012,,-0.2,3.05,0.38,1.63,0.75,-1.09,4.98,-1.72,1.16,2.24,-2.94",
+    "2013,2.53,-0.63,-4.09,0.87,4.47,0.23,5.34,2.75,-0.73,-1.94,4.26,-1.66",
+    "2014,4.23,5.64,2.24,-1.56,1.52,2.02,-0.41,2.62,0.69,4.39,0.22,-4.79",
+    "2015,2.47,-6.08,0.2,0.06,0.84,3.91,-0.7,-1.03,2.28,0.3,3.16,0.88",
+    "2016,4.8,-2.85,2.16,-0.24,5.1,-2.48,5.48,-0.2,-5.15,9.73,-0.55,1.44",
+    "2017,-0.15,-1.29,-0.31,-1.29,0.45,3.41,5.15,-2.81,-1.46,2.14,-0.12,2.04",
+    "2018,1.84,1.76,2.94,-0.41,-1.93,-1.03,2.36,4.29,2.82,8.81,3,-3.5",
+    "2019,0.21,1.67,-1.55,-0.56,2.01,3.98,1.11,-1.53,-8.5,7.91,6.9,-7.61",
+    "2020,-1.43,2.72,3.77,-2.84,0.38,-5.44,5.39,4.52,-1.09,-3.99,-8.78,-1.01",
+    "2021,4.64,4.14,-1.48,-1.01,-0.16,-0.44,3.17,-4.77,1.92,-1.55,0.62,2.7",
+    "2022,2.4,-0.47,2.74,8.49,6.26,-0.89,4.3,-3.15,4.42,5.1,2.26,-2.63",
+    "2023,0.13,-0.04,2.93,4.19,-1.56,-0.26,2.07,-1.35,1.18,-0.74,-4.99,-1.41",
+    "2024,1.89,-7.95,-4.95,1.44,1.5,-0.86,2.89,6.36,5.78,-5.12,-3.46,-0.01",
+    "2025,-0.74,-2.66,1.13,0.47,-1.68,2.47,1.67,,,,,"
+   ]
+  }
+ ],
+ "tab: Stress tests": [
+  {
+   "kind": "note",
+   "text": "What each series' own realized returns did inside 24 named historical episodes, from 1987 to the 2025 tariff tantrum: crashes, bear markets, liquidity events, rate shocks, geopolitical events and trade policy shocks. For a track record this is often the most direct question of all: what did it actually do in 2008, in 2020, in 2022?"
+  },
+  {
+   "kind": "selectbox",
+   "label": "Category",
+   "value": "\"All\"",
+   "options": [
+    "All",
+    "Bear market",
+    "Crash",
+    "Geopolitical",
+    "Liquidity event",
+    "Rate shock",
+    "Trade policy"
+   ]
+  },
+  {
+   "kind": "<expander>",
+   "label": "Add custom periods"
+  },
+  {
+   "kind": "note",
+   "text": "One per line: Name, YYYY-MM-DD, YYYY-MM-DD[, Category] ."
+  },
+  {
+   "kind": "text_area",
+   "label": "Custom periods",
+   "value": "\"\""
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Series",
+    "Periods covered",
+    "Positive in",
+    "Median return",
+    "Worst period",
+    "Worst return",
+    "Deepest drawdown",
+    "Beat benchmark in"
+   ],
+   "rows": 1,
+   "digest": "5c7ac48c7870da05",
+   "text": [
+    ",Series,Periods covered,Positive in,Median return,Worst period,Worst return,Deepest drawdown,Beat benchmark in",
+    "0,Fund A,10 / 24,8,+2.81%,Tariff tantrum (2025),-1.55%,-3.15%,8 / 10"
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Return in each period"
+  },
+  {
+   "kind": "chart",
+   "title": "Return during each period",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "Fund A",
+     "x": "n=10 labels=f71d456f89ee16c0",
+     "y": "n=10 sum=64.0993541 abs=68.156477"
+    },
+    {
+     "type": "bar",
+     "name": "Benchmark",
+     "x": "n=10 labels=f71d456f89ee16c0",
+     "y": "n=10 sum=54.3872199 abs=75.4026364"
+    }
+   ]
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Period",
+    "Category",
+    "Start",
+    "End",
+    "Fund A",
+    "Benchmark"
+   ],
+   "rows": 10,
+   "digest": "3e4015aeffe53f22",
+   "text": [
+    ",Period,Category,Start,End,Fund A,Benchmark",
+    "11,Taper tantrum (2013),Rate shock,2013-05-21,2013-06-24,+4.47%,+7.77%",
+    "12,China slowdown / oil crash (2015-2016),Bear market,2015-08-18,2016-02-11,+10.74%,+21.00%",
+    "15,Q4 2018 selloff,Bear market,2018-09-20,2018-12-24,+15.24%,+7.10%",
+    "16,US-China trade war escalation (2019),Trade policy,2019-05-03,2019-06-03,+2.01%,-1.14%",
+    "17,COVID-19 crash (2020),Crash,2020-02-19,2020-03-23,+2.72%,+2.14%",
+    "18,2022 inflation / rate-hike bear market,Bear market,2022-01-03,2022-10-12,+26.17%,+24.46%",
+    "19,Russia invades Ukraine (2022),Geopolitical,2022-02-09,2022-03-08,-0.47%,-2.54%",
+    "21,Higher-for-longer bond selloff (2023),Rate shock,2023-07-31,2023-10-27,+1.88%,-3.51%",
+    "22,Yen carry-trade unwind (August 2024),Liquidity event,2024-07-31,2024-08-09,+2.89%,+2.42%",
+    "23,Tariff tantrum (2025),Trade policy,2025-02-19,2025-04-08,-1.55%,-3.32%"
+   ]
+  },
+  {
+   "kind": "<expander>",
+   "label": "Full detail · Fund A"
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Period",
+    "Category",
+    "Start",
+    "End",
+    "Coverage",
+    "Sessions",
+    "Return",
+    "Max Drawdown",
+    "Best Day",
+    "Worst Day",
+    "Benchmark Return",
+    "Excess vs Benchmark"
+   ],
+   "rows": 10,
+   "digest": "546b5014e5f30ba6",
+   "text": [
+    ",Period,Category,Start,End,Coverage,Sessions,Return,Max Drawdown,Best Day,Worst Day,Benchmark Return,Excess vs Benchmark",
+    "11,Taper tantrum (2013),Rate shock,2013-05-21,2013-06-24,Full,1,+4.47%,+0.00%,+4.47%,+4.47%,+7.77%,-3.30%",
+    "12,China slowdown / oil crash (2015-2016),Bear market,2015-08-18,2016-02-11,Full,6,+10.74%,-1.03%,+4.80%,-1.03%,+21.00%,-10.26%",
+    "15,Q4 2018 selloff,Bear market,2018-09-20,2018-12-24,Full,3,+15.24%,+0.00%,+8.81%,+2.82%,+7.10%,+8.14%",
+    "16,US-China trade war escalation (2019),Trade policy,2019-05-03,2019-06-03,Full,1,+2.01%,+0.00%,+2.01%,+2.01%,-1.14%,+3.15%",
+    "17,COVID-19 crash (2020),Crash,2020-02-19,2020-03-23,Full,1,+2.72%,+0.00%,+2.72%,+2.72%,+2.14%,+0.58%",
+    "18,2022 inflation / rate-hike bear market,Bear market,2022-01-03,2022-10-12,Full,9,+26.17%,-3.15%,+8.49%,-3.15%,+24.46%,+1.71%",
+    "19,Russia invades Ukraine (2022),Geopolitical,2022-02-09,2022-03-08,Full,1,-0.47%,-0.47%,-0.47%,-0.47%,-2.54%,+2.07%",
+    "21,Higher-for-longer bond selloff (2023),Rate shock,2023-07-31,2023-10-27,Full,3,+1.88%,-1.35%,+2.07%,-1.35%,-3.51%,+5.38%",
+    "22,Yen carry-trade unwind (August 2024),Liquidity event,2024-07-31,2024-08-09,Full,1,+2.89%,+0.00%,+2.89%,+2.89%,+2.42%,+0.47%",
+    "23,Tariff tantrum (2025),Trade policy,2025-02-19,2025-04-08,Full,2,-1.55%,-2.66%,+1.13%,-2.66%,-3.32%,+1.77%"
+   ]
+  },
+  {
+   "kind": "note",
+   "text": "Taper tantrum (2013) : Bernanke's hint that the Fed would slow its bond purchases sent the 10-year yield up about 0.6 points in a month; the S&P 500 fell about 6% and emerging markets were hit harder."
+  },
+  {
+   "kind": "note",
+   "text": "China slowdown / oil crash (2015-2016) : A Chinese growth scare and the August 24, 2015 intraday break, compounded by crude oil falling below $30, produced a shallow but sustained ~15% decline into early 2016."
+  },
+  {
+   "kind": "note",
+   "text": "Q4 2018 selloff : A Fed-tightening and trade-war-driven decline of almost 20%, concentrated in the final quarter and bottoming on Christmas Eve."
+  },
+  {
+   "kind": "note",
+   "text": "US-China trade war escalation (2019) : Tariffs on $200bn of Chinese imports were raised from 10% to 25% and talks broke down; the S&P 500 fell about 7% in a month until the Fed signalled cuts."
+  },
+  {
+   "kind": "note",
+   "text": "COVID-19 crash (2020) : The fastest 30%+ drawdown in S&P 500 history: about 34% in 33 calendar days, followed by the fastest recovery of any bear market on record."
+  },
+  {
+   "kind": "note",
+   "text": "2022 inflation / rate-hike bear market : The fastest Fed hiking cycle since Volcker drove a ~25% decline over nine months; unusually, government bonds fell alongside equities rather than cushioning the drawdown."
+  },
+  {
+   "kind": "note",
+   "text": "Russia invades Ukraine (2022) : The build-up to and outbreak of war on February 24, with an energy and commodity price shock; the S&P 500 fell about 9%, inside the broader 2022 bear market."
+  },
+  {
+   "kind": "note",
+   "text": "Higher-for-longer bond selloff (2023) : The 10-year yield climbed about 0.9 points to 5% on expectations of rates staying high, compounded by the outbreak of the Israel-Hamas war on October 7; the S&P 500 fell about 10%."
+  },
+  {
+   "kind": "note",
+   "text": "Yen carry-trade unwind (August 2024) : A Bank of Japan rate rise triggered a rapid unwind of yen-funded carry positioning; the VIX spiked from the mid-teens to 65 intraday on August 5 and normalized within about a week."
+  },
+  {
+   "kind": "note",
+   "text": "Tariff tantrum (2025) : From the S&P 500's record close on February 19 (6,144) to its trough on April 8 (4,983), down 18.9%: escalating US tariffs culminated in the April 2 'Liberation Day' announcement, and the VIX closed at 52 on April 8. The 90-day tariff pause announced April 9 set off a 9.5% one-day rally; the prior high was regained on June 27."
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "heading",
+   "text": "Around dated events"
+  },
+  {
+   "kind": "note",
+   "text": "An event study asks what a price (or a strategy) does around a specific date, compared with what it normally does given the market. Day 0 is the event. The grey baseline is learned from the ~200 days before the window, then the extra return ( abnormal return ) is added up day by day ( CAR ). Stress periods above show what happened inside a named episode; this shows what the strategy does around a date, relative to the benchmark."
+  },
+  {
+   "kind": "selectbox",
+   "label": "Events",
+   "value": "\"Start of each stress period\"",
+   "options": [
+    "Start of each stress period",
+    "The benchmark's worst days",
+    "My own dates"
+   ]
+  },
+  {
+   "kind": "number_input",
+   "label": "Days before",
+   "value": "5"
+  },
+  {
+   "kind": "number_input",
+   "label": "Days after",
+   "value": "20"
+  },
+  {
+   "kind": "warning",
+   "text": "No usable events. Fund A 1987-08-25: event window outside the data; Fund A 1990-07-16: event window outside the data; Fund A 1994-02-02: event window outside the data; Fund A 1997-10-01: event window outside the data; Fund A 1998-08-01: event window outside the data"
+  }
+ ],
+ "tab: Market regimes": [
+  {
+   "kind": "note",
+   "text": "Stress tests look at a handful of dramatic episodes. This looks at every period in the sample, grouped by the state of the world at the time: rising or falling rates, recession or expansion, calm or panicked markets. Each return is assigned the regime that prevailed over most of the period it covers."
+  },
+  {
+   "kind": "flag",
+   "text": "The market data behind the regimes (S&P 500, VIX, Treasury yields from Yahoo Finance) could not be downloaded. Try again in a moment."
+  }
+ ],
+ "tab: Robustness": [
+  {
+   "kind": "note",
+   "text": "A track record is one sample. These tests ask how much of “Fund A” survives being cut up or reshuffled. Parameter and cost tests do not apply: there is no model here to re-run, only the realized stream."
+  },
+  {
+   "kind": "heading",
+   "text": "Stability over sub-periods"
+  },
+  {
+   "kind": "slider",
+   "label": "Number of folds",
+   "value": "5",
+   "options": []
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Fold",
+    "Start",
+    "End",
+    "CAGR",
+    "Volatility",
+    "Sharpe",
+    "Max Drawdown"
+   ],
+   "rows": 5,
+   "digest": "58b176f3608349f0",
+   "text": [
+    ",Fold,Start,End,CAGR,Volatility,Sharpe,Max Drawdown",
+    "0,1,2012-02-29,2014-10-31,15.57%,8.56%,1.59,-5.15%",
+    "1,2,2014-11-30,2017-07-31,8.78%,11.19%,0.61,-8.37%",
+    "2,3,2017-08-31,2020-03-31,10.88%,12.77%,0.70,-9.90%",
+    "3,4,2020-04-30,2022-11-30,9.41%,13.05%,0.57,-14.25%",
+    "4,5,2022-12-31,2025-07-31,-2.17%,10.74%,-0.39,-17.27%"
+   ]
+  },
+  {
+   "kind": "chart",
+   "title": "Sharpe by fold",
+   "yaxis": "linear",
+   "traces": [
+    {
+     "type": "bar",
+     "name": "",
+     "x": "n=5 labels=814a083f6c4fed6d",
+     "y": "n=5 sum=3.06686983 abs=3.84280913"
+    }
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Sampling uncertainty"
+  },
+  {
+   "kind": "slider",
+   "label": "Simulations",
+   "value": "500",
+   "options": []
+  },
+  {
+   "kind": "slider",
+   "label": "Block size (periods)",
+   "value": "8",
+   "options": []
+  },
+  {
+   "kind": "button",
+   "label": "Run Monte Carlo simulation"
+  },
+  {
+   "kind": "chart",
+   "title": "Simulated paths (block resampling)",
+   "yaxis": "log",
+   "traces": [
+    {
+     "type": "scatter",
+     "name": "95th percentile",
+     "x": "n=162 labels=a2ea4b5178be2ace",
+     "y": "n=162 sum=467.799982 abs=467.799982"
+    },
+    {
+     "type": "scatter",
+     "name": "5th-95th percentile",
+     "x": "n=162 labels=a2ea4b5178be2ace",
+     "y": "n=162 sum=191.724417 abs=191.724417"
+    },
+    {
+     "type": "scatter",
+     "name": "Simulated median",
+     "x": "n=162 labels=a2ea4b5178be2ace",
+     "y": "n=162 sum=299.213251 abs=299.213251"
+    },
+    {
+     "type": "scatter",
+     "name": "Realized path",
+     "x": "n=163 labels=26d51b8c1432fb5d",
+     "y": "n=163 sum=337.284083 abs=337.284083"
+    }
+   ]
+  },
+  {
+   "kind": "kpi",
+   "label": "Simulated median CAGR",
+   "value": "8.61%",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Probability of loss",
+   "value": "0.0%",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "kpi",
+   "label": "Probability of a drawdown > 20%",
+   "value": "35.4%",
+   "sub": "",
+   "tone": ""
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Percentile",
+    "CAGR",
+    "Max Drawdown",
+    "Sharpe"
+   ],
+   "rows": 5,
+   "digest": "eb2a137a74c9b0e4",
+   "text": [
+    ",Percentile,CAGR,Max Drawdown,Sharpe",
+    "0,5th,3.90%,-30.09%,0.21",
+    "1,25th,6.75%,-22.00%,0.45",
+    "2,50th,8.61%,-18.14%,0.60",
+    "3,75th,10.75%,-14.77%,0.77",
+    "4,95th,13.56%,-11.29%,1.03"
+   ]
+  }
+ ],
+ "tab: Export": [
+  {
+   "kind": "note",
+   "text": "The tearsheet and the Excel report cover “Fund A” against Benchmark. The CSV files cover every series analysed."
+  },
+  {
+   "kind": "multiselect",
+   "label": "Modules in the Excel report",
+   "value": "[\"Executive summary\", \"Results\", \"Stress tests\", \"Market regimes\", \"Robustness\", \"Data\"]",
+   "options": [
+    "Executive summary",
+    "Results",
+    "Stress tests",
+    "Market regimes",
+    "Robustness",
+    "Data"
+   ]
+  },
+  {
+   "kind": "text_area",
+   "label": "Comments for the CIO (optional)",
+   "value": "\"\""
+  },
+  {
+   "kind": "note",
+   "text": "The workbook is built when you click. It opens on a two-page executive summary for the CIO, then an About sheet indexing every table, then a few sheets grouped by module -- small tables stacked, daily series side by side: statistics, trailing periods, calendar years, drawdown episodes, monthly returns and the full series; the same tables across every series analysed, with their correlation; stress test periods; returns in every market regime; sub-period stability and Monte Carlo when run; plus a Notes sheet recording the source, frequency and scale that were read."
+  }
+ ],
+ "tab: Fund review": [
+  {
+   "kind": "heading",
+   "text": "Fund review"
+  },
+  {
+   "kind": "note",
+   "text": "Does a fund or security earn its place? It is compared with a beta-matched replica : beta x a market factor + (1 - beta) x the risk-free series, rebalanced monthly. If the product cannot beat that mix after fees, the replica gives the same exposure for a few basis points. The review also covers stress episodes, crash behaviour, a portfolio funding test, fees and taxes, and ends with a verdict from three explicit checks. Every column of the file is available here, whatever the selection above."
+  },
+  {
+   "kind": "selectbox",
+   "label": "Product",
+   "value": "\"Fund A\"",
+   "options": [
+    "Fund A",
+    "Fund B",
+    "Benchmark"
+   ]
+  },
+  {
+   "kind": "selectbox",
+   "label": "Market factor",
+   "value": "\"Fund B\"",
+   "options": [
+    "Fund B",
+    "Benchmark"
+   ]
+  },
+  {
+   "kind": "selectbox",
+   "label": "Bond factor (optional)",
+   "value": "\"None\"",
+   "options": [
+    "None",
+    "Benchmark"
+   ]
+  },
+  {
+   "kind": "text_input",
+   "label": "Display name",
+   "value": "\"Fund A\""
+  },
+  {
+   "kind": "text_input",
+   "label": "Split date (optional)",
+   "value": "\"\""
+  },
+  {
+   "kind": "number_input",
+   "label": "Product MER (%)",
+   "value": "0.0"
+  },
+  {
+   "kind": "<expander>",
+   "label": "Portfolio funding test"
+  },
+  {
+   "kind": "note",
+   "text": "A base portfolio, then the same portfolio plus a slice of the product paid for by each sleeve in turn, and beta-proportionally (beta x the slice from the equity sleeves, the rest from the bond sleeves). Leave the table empty to skip."
+  },
+  {
+   "kind": "table",
+   "columns": [
+    "Sleeve",
+    "Weight (%)",
+    "Group"
+   ],
+   "rows": 0,
+   "digest": "390afc90a0bfbdd0",
+   "text": [
+    ",Sleeve,Weight (%),Group"
+   ]
+  },
+  {
+   "kind": "number_input",
+   "label": "Slice added (%)",
+   "value": "10.0"
+  },
+  {
+   "kind": "selectbox",
+   "label": "Rebalance",
+   "value": "\"Q\"",
+   "options": [
+    "Monthly (month-end)",
+    "Quarterly (quarter-end)",
+    "Semi-annual (twice a year)",
+    "Annual"
+   ]
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "<expander>",
+   "label": "Distributions and tax (optional)"
+  },
+  {
+   "kind": "note",
+   "text": "One year of distributions per unit from the fund's MRFP, for an illustrative non-registered tax comparison with the replica. Leave NAV at 0 to skip. Default rates: Quebec top bracket."
+  },
+  {
+   "kind": "number_input",
+   "label": "NAV per unit",
+   "value": "0.0"
+  },
+  {
+   "kind": "number_input",
+   "label": "Income",
+   "value": "0.0"
+  },
+  {
+   "kind": "number_input",
+   "label": "Dividends",
+   "value": "0.0"
+  },
+  {
+   "kind": "number_input",
+   "label": "Capital gains",
+   "value": "0.0"
+  },
+  {
+   "kind": "number_input",
+   "label": "Return of capital",
+   "value": "0.0"
+  },
+  {
+   "kind": "text_input",
+   "label": "Source",
+   "value": "\"\""
+  },
+  {
+   "kind": "number_input",
+   "label": "Income tax rate (%)",
+   "value": "53.31"
+  },
+  {
+   "kind": "number_input",
+   "label": "Capital gains rate (%)",
+   "value": "26.650000000000002"
+  },
+  {
+   "kind": "number_input",
+   "label": "Eligible dividend rate (%)",
+   "value": "40.11"
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "<expander>",
+   "label": "Extra stress windows and thresholds"
+  },
+  {
+   "kind": "text_area",
+   "label": "One window per line: name, start, end",
+   "value": "\"\""
+  },
+  {
+   "kind": "number_input",
+   "label": "Alpha t-stat required",
+   "value": "2.0"
+  },
+  {
+   "kind": "number_input",
+   "label": "Crash tolerance (x beta)",
+   "value": "1.25"
+  },
+  {
+   "kind": "number_input",
+   "label": "Min. Sharpe gain",
+   "value": "0.02"
+  },
+  {
+   "kind": "number_input",
+   "label": "Replica cost (%)",
+   "value": "0.1"
+  },
+  {
+   "kind": "</expander>"
+  },
+  {
+   "kind": "button",
+   "label": "Run fund review"
+  }
+ ]
+}

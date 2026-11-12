@@ -1,0 +1,434 @@
+[
+ {
+  "kind": "radio",
+  "label": "Workspace",
+  "value": "\"Backtest\"",
+  "options": [
+   "Backtest",
+   "Markets",
+   "Research"
+  ]
+ },
+ {
+  "kind": "heading",
+  "text": "Settings"
+ },
+ {
+  "kind": "<expander>",
+  "label": "Presets"
+ },
+ {
+  "kind": "note",
+  "text": "No presets saved yet. Run a backtest, then save it from the Export tab."
+ },
+ {
+  "kind": "</expander>"
+ },
+ {
+  "kind": "<expander>",
+  "label": "Import a configuration file"
+ },
+ {
+  "kind": "</expander>"
+ },
+ {
+  "kind": "heading",
+  "text": "Data"
+ },
+ {
+  "kind": "radio",
+  "label": "Source",
+  "value": "\"File (CSV / Excel)\"",
+  "options": [
+   "Yahoo Finance",
+   "File (CSV / Excel)",
+   "Return stream"
+  ]
+ },
+ {
+  "kind": "note",
+  "text": "4 instrument(s) from 1 source(s): Close, Open, High, Low, Volume, Dividends."
+ },
+ {
+  "kind": "<expander>",
+  "label": "What was read"
+ },
+ {
+  "kind": "table",
+  "columns": [
+   "Instrument",
+   "From",
+   "To",
+   "Sessions",
+   "Close",
+   "Adj close",
+   "Open",
+   "High",
+   "Low",
+   "Volume",
+   "Dividends"
+  ],
+  "rows": 4,
+  "digest": "429ee2018ab8a0f2",
+  "text": [
+   ",Instrument,From,To,Sessions,Close,Adj close,Open,High,Low,Volume,Dividends",
+   "0,XEI.TO,2012-01-02,2025-07-31,3544,yes,,yes,yes,yes,yes,54",
+   "1,XIC.TO,2012-01-02,2025-07-31,3544,yes,,yes,yes,yes,yes,54",
+   "2,ZEB.TO,2012-01-02,2025-07-31,3544,yes,,yes,yes,yes,yes,54",
+   "3,ZLB.TO,2012-01-02,2025-07-31,3544,yes,,yes,yes,yes,yes,54"
+  ]
+ },
+ {
+  "kind": "</expander>"
+ },
+ {
+  "kind": "multiselect",
+  "label": "Investable universe",
+  "value": "[\"XEI.TO\", \"XIC.TO\", \"ZEB.TO\", \"ZLB.TO\"]",
+  "options": [
+   "XEI.TO",
+   "XIC.TO",
+   "ZEB.TO",
+   "ZLB.TO"
+  ]
+ },
+ {
+  "kind": "selectbox",
+  "label": "Comparison benchmark",
+  "value": "\"XIC.TO\"",
+  "options": [
+   "None",
+   "XEI.TO",
+   "XIC.TO",
+   "ZEB.TO",
+   "ZLB.TO",
+   "Blend of several",
+   "Another strategy"
+  ]
+ },
+ {
+  "kind": "selectbox",
+  "label": "Benchmark convention",
+  "value": "\"Total return (adjusted close)\"",
+  "options": [
+   "Total return (adjusted close)",
+   "Price return + dividends reinvested at rebalance",
+   "Price return only"
+  ]
+ },
+ {
+  "kind": "multiselect",
+  "label": "Charge the benchmark these frictions",
+  "value": "[]",
+  "options": [
+   "Commission",
+   "Slippage and market impact",
+   "Management fee"
+  ]
+ },
+ {
+  "kind": "selectbox",
+  "label": "Prices in the file are",
+  "value": "\"auto\"",
+  "options": [
+   "Detect from the file",
+   "Total return (dividends already in the prices)",
+   "Price return (dividends paid as cash)"
+  ]
+ },
+ {
+  "kind": "note",
+  "text": "Read as price return (dividends paid as cash)."
+ },
+ {
+  "kind": "selectbox",
+  "label": "Cash remuneration",
+  "value": "\"Fixed rate\"",
+  "options": [
+   "Fixed rate",
+   "XEI.TO",
+   "XIC.TO",
+   "ZEB.TO",
+   "ZLB.TO"
+  ]
+ },
+ {
+  "kind": "heading",
+  "text": "Currency"
+ },
+ {
+  "kind": "selectbox",
+  "label": "Base currency",
+  "value": "\"Off (all prices in one currency)\"",
+  "options": [
+   "Off (all prices in one currency)",
+   "CAD",
+   "USD",
+   "EUR",
+   "GBP",
+   "CHF",
+   "JPY",
+   "AUD"
+  ]
+ },
+ {
+  "kind": "heading",
+  "text": "Exogenous series"
+ },
+ {
+  "kind": "heading",
+  "text": "Signal"
+ },
+ {
+  "kind": "radio",
+  "label": "Signal origin",
+  "value": "\"Built-in model\"",
+  "options": [
+   "Built-in model",
+   "Imported target weights"
+  ]
+ },
+ {
+  "kind": "selectbox",
+  "label": "Model",
+  "value": "\"dual_momentum\"",
+  "options": [
+   "Accelerating Dual Momentum",
+   "Buy & Hold",
+   "Cross-Sectional Momentum",
+   "Custom Formula",
+   "Dual Momentum (Relative + Absolute)",
+   "Factor Zoo (single factor, top N)",
+   "Fixed Weights",
+   "Imported Factor Ranking",
+   "Imported Signals",
+   "Macro Gate",
+   "Mean Reversion (RSI)",
+   "MomentumOG",
+   "Quantitative Momentum (Gray & Vogel)",
+   "Risk Parity (Inverse Volatility)",
+   "Time-Series Momentum (Moskowitz, Ooi & Pedersen)",
+   "Trend Filter (Moving Average)",
+   "Trend Quality (Composite)",
+   "Trend-Gated Target Weights (HIDE-style)",
+   "Turtle Breakout (Donchian)",
+   "VIX-Adaptive Momentum",
+   "Volatility Target"
+  ]
+ },
+ {
+  "kind": "note",
+  "text": "Cross-sectional momentum combined with an absolute filter: a position is only taken if its past return exceeds the threshold. The rest stays in cash."
+ },
+ {
+  "kind": "selectbox",
+  "label": "Portfolio construction",
+  "value": "\"Single strategy\"",
+  "options": [
+   "Single strategy",
+   "By asset class",
+   "Core + strategy",
+   "Blend of strategies"
+  ]
+ },
+ {
+  "kind": "number_input",
+  "label": "Momentum Window (days)",
+  "value": "126"
+ },
+ {
+  "kind": "number_input",
+  "label": "Skip Days",
+  "value": "21"
+ },
+ {
+  "kind": "number_input",
+  "label": "Number of Positions",
+  "value": "3"
+ },
+ {
+  "kind": "number_input",
+  "label": "Absolute Threshold (%)",
+  "value": "0.0"
+ },
+ {
+  "kind": "number_input",
+  "label": "Trend Filter (0 = none)",
+  "value": "200"
+ },
+ {
+  "kind": "selectbox",
+  "label": "Sizing",
+  "value": "\"Equal Weight\"",
+  "options": [
+   "Equal Weight",
+   "Inverse Volatility",
+   "Inverse Downside Volatility"
+  ]
+ },
+ {
+  "kind": "number_input",
+  "label": "Volatility Window",
+  "value": "60"
+ },
+ {
+  "kind": "<expander>",
+  "label": "Execution"
+ },
+ {
+  "kind": "selectbox",
+  "label": "Rebalance",
+  "value": "\"M\"",
+  "options": [
+   "Daily",
+   "Weekly (Friday)",
+   "Monthly (month-end)",
+   "Quarterly (quarter-end)",
+   "Semi-annual (twice a year)",
+   "Annual"
+  ]
+ },
+ {
+  "kind": "selectbox",
+  "label": "Trading day",
+  "value": "\"last\"",
+  "options": [
+   "Last trading day",
+   "First trading day",
+   "A day of the month",
+   "Nth weekday",
+   "Last weekday"
+  ]
+ },
+ {
+  "kind": "note",
+  "text": "Monthly, last trading day"
+ },
+ {
+  "kind": "slider",
+  "label": "Execution lag (days)",
+  "value": "1",
+  "options": []
+ },
+ {
+  "kind": "selectbox",
+  "label": "Execution price",
+  "value": "\"Close\"",
+  "options": [
+   "Close",
+   "Open (marked at the close)"
+  ]
+ },
+ {
+  "kind": "checkbox",
+  "label": "Trim the warm-up period",
+  "value": "true"
+ },
+ {
+  "kind": "number_input",
+  "label": "Initial capital ($)",
+  "value": "100000"
+ },
+ {
+  "kind": "slider",
+  "label": "Max leverage",
+  "value": "1.0",
+  "options": []
+ },
+ {
+  "kind": "checkbox",
+  "label": "Trade whole units only",
+  "value": "false"
+ },
+ {
+  "kind": "selectbox",
+  "label": "Reinvest cash between rebalances",
+  "value": "\"none\"",
+  "options": [
+   "Only at rebalances",
+   "Weekly",
+   "Monthly",
+   "Quarterly"
+  ]
+ },
+ {
+  "kind": "number_input",
+  "label": "Cash buffer (%)",
+  "value": "1.0"
+ },
+ {
+  "kind": "number_input",
+  "label": "Or when cash exceeds (%)",
+  "value": "0.0"
+ },
+ {
+  "kind": "</expander>"
+ },
+ {
+  "kind": "<expander>",
+  "label": "Compare strategies"
+ },
+ {
+  "kind": "note",
+  "text": "Add up to three more models to set against this one on the Compare tab, or pick one as the benchmark above. Same universe, rebalancing, execution and frictions; every strategy is measured from the latest date any of them first holds a position."
+ },
+ {
+  "kind": "number_input",
+  "label": "Extra strategies",
+  "value": "0"
+ },
+ {
+  "kind": "</expander>"
+ },
+ {
+  "kind": "<expander>",
+  "label": "Frictions"
+ },
+ {
+  "kind": "number_input",
+  "label": "Commission (bps)",
+  "value": "5.0"
+ },
+ {
+  "kind": "number_input",
+  "label": "Slippage, half-spread (bps)",
+  "value": "25.0"
+ },
+ {
+  "kind": "selectbox",
+  "label": "Market impact",
+  "value": "\"None\"",
+  "options": [
+   "None",
+   "Square-root law, scaled by volatility (recommended)",
+   "Square-root, fixed cost at 10% of volume"
+  ]
+ },
+ {
+  "kind": "text_area",
+  "label": "Per-instrument slippage multiplier (optional)",
+  "value": "\"\""
+ },
+ {
+  "kind": "number_input",
+  "label": "Cash rate (annual %)",
+  "value": "0.0"
+ },
+ {
+  "kind": "number_input",
+  "label": "Management fee (annual %)",
+  "value": "0.0"
+ },
+ {
+  "kind": "checkbox",
+  "label": "Fee liquidation pays the same commission and slippage",
+  "value": "true"
+ },
+ {
+  "kind": "</expander>"
+ },
+ {
+  "kind": "button",
+  "label": "Run backtest"
+ }
+]

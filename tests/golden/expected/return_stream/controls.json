@@ -1,0 +1,105 @@
+[
+ {
+  "kind": "radio",
+  "label": "Workspace",
+  "value": "\"Backtest\"",
+  "options": [
+   "Backtest",
+   "Markets",
+   "Research"
+  ]
+ },
+ {
+  "kind": "heading",
+  "text": "Settings"
+ },
+ {
+  "kind": "<expander>",
+  "label": "Presets"
+ },
+ {
+  "kind": "note",
+  "text": "No presets saved yet. Run a backtest, then save it from the Export tab."
+ },
+ {
+  "kind": "</expander>"
+ },
+ {
+  "kind": "<expander>",
+  "label": "Import a configuration file"
+ },
+ {
+  "kind": "</expander>"
+ },
+ {
+  "kind": "heading",
+  "text": "Data"
+ },
+ {
+  "kind": "radio",
+  "label": "Source",
+  "value": "\"Return stream\"",
+  "options": [
+   "Yahoo Finance",
+   "File (CSV / Excel)",
+   "Return stream"
+  ]
+ },
+ {
+  "kind": "heading",
+  "text": "Return stream"
+ },
+ {
+  "kind": "radio",
+  "label": "Returns from",
+  "value": "\"Upload a file\"",
+  "options": [
+   "Upload a file",
+   "Yahoo Finance"
+  ]
+ },
+ {
+  "kind": "selectbox",
+  "label": "Value scale",
+  "value": "\"Detect automatically\"",
+  "options": [
+   "Detect automatically",
+   "Decimals (0.0213)",
+   "Percentages (2.13)"
+  ]
+ },
+ {
+  "kind": "selectbox",
+  "label": "Date order in file",
+  "value": "\"Auto-detect\"",
+  "options": [
+   "Auto-detect",
+   "Day first (31/12/2024)",
+   "Month first (12/31/2024)"
+  ]
+ },
+ {
+  "kind": "number_input",
+  "label": "Base value ($)",
+  "value": "100000"
+ },
+ {
+  "kind": "selectbox",
+  "label": "Risk-free rate",
+  "value": "\"Fixed annual rate\"",
+  "options": [
+   "US 3-month T-bill (historical)",
+   "Canada 3-month T-bill (Bank of Canada)",
+   "Fixed annual rate",
+   "None (0%)",
+   "Column: Fund A",
+   "Column: Fund B",
+   "Column: Benchmark"
+  ]
+ },
+ {
+  "kind": "number_input",
+  "label": "Annual risk-free rate (%)",
+  "value": "2.0"
+ }
+]

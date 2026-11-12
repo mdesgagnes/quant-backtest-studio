@@ -1,0 +1,211 @@
+{
+ "equity_month_end": {
+  "columns": [
+   "value"
+  ],
+  "rows": 153,
+  "digest": "c429e355286cdbc1",
+  "head": [
+   "d,value",
+   "2012-11,102455.75",
+   "2012-12,99407.2559",
+   "2013-01,101610.218"
+  ],
+  "tail": [
+   "2025-05,201263.944",
+   "2025-06,201263.944",
+   "2025-07,201263.944"
+  ]
+ },
+ "equity_daily": {
+  "columns": [
+   "value"
+  ],
+  "rows": 3326,
+  "digest": "723ea8ae69a75e76",
+  "head": [
+   "d,value",
+   "2012-11-01,99700.8973",
+   "2012-11-02,99211.52",
+   "2012-11-05,97452.9858"
+  ],
+  "tail": [
+   "2025-07-29,201263.944",
+   "2025-07-30,201263.944",
+   "2025-07-31,201263.944"
+  ]
+ },
+ "returns_daily": {
+  "columns": [
+   "return"
+  ],
+  "rows": 3326,
+  "digest": "0868892d3f0271ad",
+  "head": [
+   "d,return",
+   "2012-11-01,-0.00299102692",
+   "2012-11-02,-0.00490845399",
+   "2012-11-05,-0.0177251009"
+  ],
+  "tail": [
+   "2025-07-29,0",
+   "2025-07-30,0",
+   "2025-07-31,0"
+  ]
+ },
+ "weights_daily": {
+  "columns": [
+   "XEI.TO",
+   "XIC.TO",
+   "ZEB.TO",
+   "ZLB.TO"
+  ],
+  "rows": 3326,
+  "digest": "eac47bf729b0ef38",
+  "head": [
+   "d,XEI.TO,XIC.TO,ZEB.TO,ZLB.TO",
+   "2012-11-01,0.333333333,0.333333333,0.333333333,0",
+   "2012-11-02,0.334293101,0.333197403,0.332509496,0",
+   "2012-11-05,0.335634238,0.332869635,0.331496127,0"
+  ],
+  "tail": [
+   "2025-07-29,0,0,0,0",
+   "2025-07-30,0,0,0,0",
+   "2025-07-31,0,0,0,0"
+  ]
+ },
+ "target_weights_daily": {
+  "columns": [
+   "XEI.TO",
+   "XIC.TO",
+   "ZEB.TO",
+   "ZLB.TO"
+  ],
+  "rows": 3326,
+  "digest": "1fdbefe5f4a785c2",
+  "head": [
+   "d,XEI.TO,XIC.TO,ZEB.TO,ZLB.TO",
+   "2012-11-01,0.333333333,0.333333333,0.333333333,0",
+   "2012-11-02,0.333333333,0.333333333,0.333333333,0",
+   "2012-11-05,0.333333333,0.333333333,0.333333333,0"
+  ],
+  "tail": [
+   "2025-07-29,0,0,0,0",
+   "2025-07-30,0,0,0,0",
+   "2025-07-31,0,0,0,0"
+  ]
+ },
+ "holdings_last": {
+  "columns": [
+   "Instrument",
+   "Weight"
+  ],
+  "rows": 5,
+  "digest": "af798ad947568844",
+  "text": [
+   "Instrument,Weight",
+   "XEI.TO,0",
+   "XIC.TO,0",
+   "ZEB.TO,0",
+   "ZLB.TO,0",
+   "Cash,1"
+  ]
+ },
+ "trades": {
+  "columns": [
+   "Date",
+   "Instrument",
+   "Shares Before",
+   "Shares After",
+   "Change",
+   "Price",
+   "Notional",
+   "Effective Cost (bps)",
+   "Reason"
+  ],
+  "rows": 208,
+  "digest": "72e2ec21826f0c01",
+  "head": [
+   "Date,Instrument,Shares Before,Shares After,Change,Price,Notional,Effective Cost (bps),Reason",
+   "2012-11-01,XEI.TO,0,1594.03095,1594.03095,20.8488,33233.6324,30,Rebalance",
+   "2012-11-01,XIC.TO,0,1298.61488,1298.61488,25.5916,33233.6324,30,Rebalance",
+   "2012-11-01,ZEB.TO,0,1516.16053,1516.16053,21.9196,33233.6324,30,Rebalance"
+  ],
+  "tail": [
+   "2025-02-03,XIC.TO,1329.4146,0,-1329.4146,49.6646,66024.8445,30,Rebalance",
+   "2025-02-03,ZEB.TO,959.200236,987.94346,28.7432238,68.6615,1973.55286,30,Rebalance",
+   "2025-03-03,ZEB.TO,987.94346,0,-987.94346,66.804,65998.5749,30,Rebalance"
+  ]
+ },
+ "rebalance_dates": "7f1d03a95e130839",
+ "shares_daily": {
+  "columns": [
+   "XEI.TO",
+   "XIC.TO",
+   "ZEB.TO",
+   "ZLB.TO"
+  ],
+  "rows": 3326,
+  "digest": "477b80dd46ddfe79",
+  "head": [
+   "d,XEI.TO,XIC.TO,ZEB.TO,ZLB.TO",
+   "2012-11-01,1594.03095,1298.61488,1516.16053,0",
+   "2012-11-02,1594.03095,1298.61488,1516.16053,0",
+   "2012-11-05,1594.03095,1298.61488,1516.16053,0"
+  ],
+  "tail": [
+   "2025-07-29,0,0,0,0",
+   "2025-07-30,0,0,0,0",
+   "2025-07-31,0,0,0,0"
+  ]
+ },
+ "cash_flows": {
+  "columns": [
+   "Date",
+   "Type",
+   "Instrument",
+   "Amount",
+   "Units",
+   "Per unit",
+   "Sessions accrued",
+   "Average value",
+   "Annual rate",
+   "Paid from cash",
+   "Raised by selling",
+   "Trading costs",
+   "Cash before",
+   "Cash after"
+  ],
+  "rows": 95,
+  "digest": "05dfb7951cec8e54",
+  "head": [
+   "Date,Type,Instrument,Amount,Units,Per unit,Sessions accrued,Average value,Annual rate,Paid from cash,Raised by selling,Trading costs,Cash before,Cash after",
+   "2012-12-27,Dividend,XEI.TO,392.291016,1594.03095,0.2461,,,,,,,,",
+   "2012-12-27,Dividend,XIC.TO,230.374279,1298.61488,0.1774,,,,,,,,",
+   "2012-12-27,Dividend,ZEB.TO,338.558647,1516.16053,0.2233,,,,,,,,"
+  ],
+  "tail": [
+   "2023-09-27,Dividend,ZEB.TO,808.313136,1023.95887,0.7894,,,,,,,,",
+   "2024-12-27,Dividend,XIC.TO,482.178677,1329.4146,0.3627,,,,,,,,",
+   "2024-12-27,Dividend,ZEB.TO,715.817977,985.160993,0.7266,,,,,,,,"
+  ]
+ },
+ "benchmark_equity_daily": {
+  "columns": [
+   "value"
+  ],
+  "rows": 3326,
+  "digest": "67ec4d0b1deca365",
+  "head": [
+   "d,value",
+   "2012-11-01,100000",
+   "2012-11-02,99468.5756",
+   "2012-11-05,97609.3718"
+  ],
+  "tail": [
+   "2025-07-29,193745.604",
+   "2025-07-30,192765.986",
+   "2025-07-31,192701.902"
+  ]
+ }
+}

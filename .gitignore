@@ -8,3 +8,5 @@ __pycache__/
 .DS_Store
 
 .qbt_lab/
+
+tests/golden/_actual/

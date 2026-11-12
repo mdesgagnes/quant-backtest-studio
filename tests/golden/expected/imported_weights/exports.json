@@ -1,0 +1,881 @@
+{
+ "Configuration (YAML)": {
+  "label": "Configuration (YAML)",
+  "file_name": "config_external_weights.yaml",
+  "mime": "text/yaml",
+  "digest": "c10a47aa3048a07c",
+  "text": [
+   "label: 'Imported weights: target_weights.csv'",
+   "data:",
+   "  source: upload",
+   "  tickers:",
+   "  - XEI.TO",
+   "  - XIC.TO",
+   "  - ZEB.TO",
+   "  - ZLB.TO",
+   "  start: '1990-01-01'",
+   "  end: null",
+   "  benchmark: XIC.TO",
+   "  cash_proxy: null",
+   "  price_field: Close",
+   "  fill_limit: 5",
+   "  min_history: 60",
+   "  adjusted: false",
+   "  use_dividends: true",
+   "  base_currency: ''",
+   "  currencies: {}",
+   "exog:",
+   "  enabled: false",
+   "  publication_lag_days: 1",
+   "  ffill_limit: null",
+   "  columns: []",
+   "  note: ''",
+   "strategy:",
+   "  mode: external_weights",
+   "  name: external_weights",
+   "  params: {}",
+   "  weights_normalize: None",
+   "  weights_calendar: File dates",
+   "  weights_source: target_weights.csv",
+   "engine:",
+   "  initial_capital: 100000.0",
+   "  rebalance: M",
+   "  execution_lag: 1",
+   "  max_leverage: 1.0",
+   "  min_trade_weight: 0.005",
+   "  periods_per_year: 252",
+   "  execute_at_open: false",
+   "  trim_warmup: true",
+   "  whole_shares: false",
+   "  day_rule: last",
+   "  day_of_month: 15",
+   "  weekday: 4",
+   "  nth: 1",
+   "  anchor_month: 12",
+   "  cash_sweep: none",
+   "  cash_sweep_threshold: 0.0",
+   "  cash_buffer: 0.01",
+   "  fx_cash: net",
+   "costs:",
+   "  commission_bps: 5.0",
+   "  slippage_bps: 25.0",
+   "  impact_model: flat",
+   "  impact_bps_at_10pct_adv: 25.0",
+   "  impact_coef: 1.0",
+   "  slippage_overrides: {}",
+   "  apply_frictions_to_fee_liquidation: true",
+   "  cash_rate_pa: 0.0",
+   "  borrow_rate_pa: 0.0",
+   "  management_fee_pa: 0.0",
+   "  fx_spread_bps: 25.0",
+   "  foreign_cash_rate_pa: 0.0"
+  ]
+ },
+ "Daily series (CSV)": {
+  "label": "Daily series (CSV)",
+  "file_name": "series.csv",
+  "mime": "text/csv",
+  "columns": [
+   "d",
+   "value",
+   "return",
+   "exposure",
+   "cash",
+   "turnover",
+   "costs",
+   "benchmark"
+  ],
+  "rows": 2739,
+  "digest": "af38e59968c6a661",
+  "head": [
+   "d,value,return,exposure,cash,turnover,costs,benchmark",
+   "2015-02-02,99700.8973,-0.00299102692,1,0,0.997008973,0.00299102692,100000",
+   "2015-02-03,100009.555,0.00309583444,1,0,0,0,100476.746",
+   "2015-02-04,90422.6086,-0.0958603024,1,0,0,0,90011.2906"
+  ],
+  "tail": [
+   "2025-07-29,234781.005,0.003841971,1,-2.1305901e-17,0,0,133928.118",
+   "2025-07-30,234019.203,-0.00324473427,1,-2.1375258e-17,0,0,133250.949",
+   "2025-07-31,234345.804,0.00139561588,1,-2.1345468e-17,0,0,133206.651"
+  ]
+ },
+ "Download full trade log (CSV)": {
+  "label": "Download full trade log (CSV)",
+  "file_name": "trades.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Date",
+   "Instrument",
+   "Shares Before",
+   "Shares After",
+   "Change",
+   "Price",
+   "Notional",
+   "Effective Cost (bps)",
+   "Reason"
+  ],
+  "rows": 486,
+  "digest": "0b08397fd2413d47",
+  "head": [
+   "Date,Instrument,Shares Before,Shares After,Change,Price,Notional,Effective Cost (bps),Reason",
+   "2015-02-02,XEI.TO,0,1191.52591,1191.52591,29.8887,35613.1605,30,Rebalance",
+   "2015-02-02,XIC.TO,0,865.271227,865.271227,37.0218,32033.8983,30,Rebalance",
+   "2015-02-02,ZEB.TO,0,473.393689,473.393689,30.9595,14656.0319,30,Rebalance"
+  ],
+  "tail": [
+   "2025-07-01,XIC.TO,642.777717,1327.46399,684.686268,47.7734,32709.791,30,Rebalance",
+   "2025-07-01,ZEB.TO,1216.69552,711.699766,-504.995753,70.1828,35442.0159,30,Rebalance",
+   "2025-07-01,ZLB.TO,1756.11113,1954.65578,198.544656,38.0339,7551.4276,30,Rebalance"
+  ]
+ },
+ "Download prices used (CSV)": {
+  "label": "Download prices used (CSV)",
+  "file_name": "prices.csv",
+  "mime": "text/csv",
+  "columns": [
+   "d",
+   "XEI.TO",
+   "XIC.TO",
+   "ZEB.TO",
+   "ZLB.TO"
+  ],
+  "rows": 3544,
+  "digest": "4aaafc54515404ed",
+  "head": [
+   "d,XEI.TO,XIC.TO,ZEB.TO,ZLB.TO",
+   "2012-01-02,19.1449,21.4225,17.8049,16.3571",
+   "2012-01-03,19.1552,21.4134,17.8763,16.2735",
+   "2012-01-04,18.9347,21.4812,17.893,16.2298"
+  ],
+  "tail": [
+   "2025-07-29,59.4119,49.5826,70.5678,39.2715",
+   "2025-07-30,59.1981,49.3319,70.4151,39.1849",
+   "2025-07-31,59.8774,49.3155,70.2088,39.1927"
+  ]
+ },
+ "attr_dl1": {
+  "label": "Daily contributions (CSV)",
+  "file_name": "daily_contributions.csv",
+  "mime": "text/csv",
+  "columns": [
+   "d",
+   "XEI.TO",
+   "XIC.TO",
+   "ZEB.TO",
+   "ZLB.TO",
+   "Cash & financing",
+   "Trading costs",
+   "Management fee",
+   "Portfolio return"
+  ],
+  "rows": 2739,
+  "digest": "c3100e54ba18e616",
+  "head": [
+   "d,XEI.TO,XIC.TO,ZEB.TO,ZLB.TO,Cash & financing,Trading costs,Management fee,Portfolio return",
+   "2015-02-02,0,0,0,0,0,-0.00299102692,0,-0.00299102692",
+   "2015-02-03,0.000357335046,0.00153178533,-3.03880877e-05,0.00123710215,0,-0,-0,0.00309583444",
+   "2015-02-04,-0.033767001,-0.0335217308,-0.0174107031,-0.0111608675,0,-0,-0,-0.0958603024"
+  ],
+  "tail": [
+   "2025-07-29,-0.000300579012,0.000711174555,0.00192285958,0.00150851588,-0,-0,-0,0.003841971",
+   "2025-07-30,-0.000643395357,-0.00141747081,-0.000462884781,-0.000720983328,-0,-0,-0,-0.00324473427",
+   "2025-07-31,0.00205089439,-9.3028303e-05,-0.000627400057,6.51498461e-05,-0,-0,-0,0.00139561588"
+  ]
+ },
+ "attr_dl2": {
+  "label": "Contribution by year (CSV)",
+  "file_name": "contribution_by_year.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Year",
+   "XEI.TO · iShares S&P/TSX Composite High Dividend Index ETF",
+   "XIC.TO · iShares Core S&P/TSX Capped Composite Index ETF",
+   "ZEB.TO · BMO Equal Weight Banks Index ETF",
+   "ZLB.TO · BMO Low Volatility Canadian Equity ETF",
+   "Trading costs",
+   "Total"
+  ],
+  "rows": 11,
+  "digest": "6576cdbcefae368e",
+  "text": [
+   "Year,XEI.TO · iShares S&P/TSX Composite High Dividend Index ETF,XIC.TO · iShares Core S&P/TSX Capped Composite Index ETF,ZEB.TO · BMO Equal Weight Banks Index ETF,ZLB.TO · BMO Low Volatility Canadian Equity ETF,Trading costs,Total",
+   "2025,-0.00304102547,-0.00515893224,-0.00631156098,0.0164733309,-0.00708598199,-0.00512416977",
+   "2024,-0.0589846205,-0.00261387002,-0.00592436889,-0.00139837087,-0.0121372924,-0.0810585227",
+   "2023,0.0484078741,-0.0196819546,0.0543057627,-0.0312246724,-0.0144660013,0.0373410085",
+   "2022,0.065261662,0.120556304,0.14902124,0.0235620811,-0.0164910642,0.341910223",
+   "2021,0.0107722709,0.0238285032,0.0132766351,0.0433155332,-0.0148189276,0.0763740149",
+   "2020,0.0158521571,0.00780238243,-0.0528453997,-0.0162551338,-0.0128248112,-0.058270805",
+   "2019,0.0383052504,-0.00118468032,0.0504053285,0.00478938699,-0.0138372919,0.0784779937",
+   "2018,0.0226006123,0.065144935,0.0796569053,0.0511410119,-0.0115254083,0.207018056",
+   "2017,0.048656932,0.0182537602,0.0251025617,0.0219884479,-0.0103259242,0.103675778",
+   "2016,0.0888671029,0.0218021471,0.037870603,0.0657468512,-0.0153497017,0.198937003",
+   "2015,0.0311457166,0.00115035578,0.0112976234,0.0265964779,-0.0155525254,0.0546376483"
+  ]
+ },
+ "battr_dl": {
+  "label": "Period attribution (CSV)",
+  "file_name": "benchmark_attribution_periods.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Period",
+   "Portfolio",
+   "Benchmark",
+   "Excess",
+   "Allocation",
+   "Selection",
+   "Costs & fees"
+  ],
+  "rows": 126,
+  "digest": "2407a8b45438a78b",
+  "head": [
+   "Period,Portfolio,Benchmark,Excess,Allocation,Selection,Costs & fees",
+   "2015-02-28,-0.102339027,-0.0777466859,-0.024592341,0.00381340101,-0.025414715,-0.00299102692",
+   "2015-03-31,0.0263771462,0.0145682269,0.0118089193,1.9013162e-06,0.0130385956,-0.00123157763",
+   "2015-04-30,-0.0151989098,-0.00816625477,-0.00703265501,-5.14200171e-06,-0.00539720084,-0.00163031217"
+  ],
+  "tail": [
+   "2025-05-31,-0.0106292344,-0.0122169816,0.00158774715,-1.22292108e-05,0.00232399967,-0.000724023312",
+   "2025-06-30,0.0186336534,0.0071302362,0.0115034172,-3.05912125e-05,0.0117130945,-0.000179086124",
+   "2025-07-31,0.0246815538,0.0260706422,-0.00138908836,1.09548386e-05,-0.000380762935,-0.00101928026"
+  ]
+ },
+ "dlcashflows": {
+  "label": "Download cash-flow ledger (CSV)",
+  "file_name": "cash_flows.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Date",
+   "Type",
+   "Instrument",
+   "Amount",
+   "Units",
+   "Per unit",
+   "Sessions accrued",
+   "Average value",
+   "Annual rate",
+   "Paid from cash",
+   "Raised by selling",
+   "Trading costs",
+   "Cash before",
+   "Cash after"
+  ],
+  "rows": 168,
+  "digest": "230348030ece66f5",
+  "head": [
+   "Date,Type,Instrument,Amount,Units,Per unit,Sessions accrued,Average value,Annual rate,Paid from cash,Raised by selling,Trading costs,Cash before,Cash after",
+   "2015-03-27,Dividend,XEI.TO,257.567542,838.163168,0.3073,,,,,,,,",
+   "2015-03-27,Dividend,XIC.TO,142.709606,590.685456,0.2416,,,,,,,,",
+   "2015-03-27,Dividend,ZEB.TO,128.052993,473.393689,0.2705,,,,,,,,"
+  ],
+  "tail": [
+   "2025-06-26,Dividend,XIC.TO,215.587646,642.777717,0.3354,,,,,,,,",
+   "2025-06-26,Dividend,ZEB.TO,876.629121,1216.69552,0.7205,,,,,,,,",
+   "2025-06-26,Dividend,ZLB.TO,398.988448,1756.11113,0.2272,,,,,,,,"
+  ]
+ },
+ "dlholdings": {
+  "label": "Download current holdings (CSV)",
+  "file_name": "current_holdings.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Instrument",
+   "Weight",
+   "Value ($)"
+  ],
+  "rows": 5,
+  "digest": "3f98c3cbf198cf32",
+  "text": [
+   "Instrument,Weight,Value ($)",
+   "XEI.TO,18.05%,\"42,305\"",
+   "XIC.TO,27.94%,\"65,465\"",
+   "ZEB.TO,21.32%,\"49,968\"",
+   "ZLB.TO,32.69%,\"76,608\"",
+   "Cash,-0.00%,-0"
+  ]
+ },
+ "dlholdings2": {
+  "label": "Current holdings (CSV)",
+  "file_name": "current_holdings.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Instrument",
+   "Weight",
+   "Value ($)"
+  ],
+  "rows": 5,
+  "digest": "3f98c3cbf198cf32",
+  "text": [
+   "Instrument,Weight,Value ($)",
+   "XEI.TO,18.05%,\"42,305\"",
+   "XIC.TO,27.94%,\"65,465\"",
+   "ZEB.TO,21.32%,\"49,968\"",
+   "ZLB.TO,32.69%,\"76,608\"",
+   "Cash,-0.00%,-0"
+  ]
+ },
+ "dlnexttrades": {
+  "label": "Download next trades (CSV)",
+  "file_name": "next_trades.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Instrument",
+   "Action",
+   "Weight now",
+   "Target weight",
+   "Weight after",
+   "Change",
+   "Units now",
+   "Units to trade",
+   "Price",
+   "Amount"
+  ],
+  "rows": 5,
+  "digest": "c431d973fdf497e9",
+  "text": [
+   "Instrument,Action,Weight now,Target weight,Weight after,Change,Units now,Units to trade,Price,Amount",
+   "XEI.TO,Hold,0.180525656,0.1771,0.180525656,0,706.534775,0,59.8774,0",
+   "XIC.TO,Hold,0.279350212,0.2785,0.279350212,0,1327.46509,0,49.3155,0",
+   "ZEB.TO,Hold,0.213221596,0.2187,0.213221596,0,711.70036,0,70.2088,0",
+   "ZLB.TO,Hold,0.326902536,0.3257,0.326902536,0,1954.65741,0,39.1927,0",
+   "Cash,,-2.1345468e-17,0,-2.1345468e-17,0,,,,0"
+  ]
+ },
+ "dlstress": {
+  "label": "Download stress test results (CSV)",
+  "file_name": "stress_periods.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Period",
+   "Category",
+   "Start",
+   "End",
+   "Coverage",
+   "Sessions",
+   "Return",
+   "Max Drawdown",
+   "Best Day",
+   "Worst Day",
+   "Benchmark Return",
+   "Excess vs Benchmark"
+  ],
+  "rows": 24,
+  "digest": "598f2b4943646f6f",
+  "text": [
+   "Period,Category,Start,End,Coverage,Sessions,Return,Max Drawdown,Best Day,Worst Day,Benchmark Return,Excess vs Benchmark",
+   "Black Monday (1987),Crash,1987-08-25,1987-12-04,No data,0,,,,,,",
+   "Gulf War / S&L crisis (1990),Bear market,1990-07-16,1990-10-11,No data,0,,,,,,",
+   "Bond market massacre (1994),Rate shock,1994-02-02,1994-04-04,No data,0,,,,,,",
+   "Asian financial crisis (1997),Liquidity event,1997-10-01,1998-01-30,No data,0,,,,,,",
+   "Russian default / LTCM (1998),Liquidity event,1998-08-01,1998-10-08,No data,0,,,,,,",
+   "Dot-com crash (2000-2002),Bear market,2000-03-24,2002-10-09,No data,0,,,,,,",
+   "\"September 11, 2001\",Crash,2001-09-10,2001-09-21,No data,0,,,,,,",
+   "Iraq war run-up (2003),Geopolitical,2003-01-14,2003-03-11,No data,0,,,,,,",
+   "Global Financial Crisis (2007-2009),Bear market,2007-10-09,2009-03-09,No data,0,,,,,,",
+   "Flash Crash (May 2010),Liquidity event,2010-05-03,2010-05-07,No data,0,,,,,,",
+   "US downgrade / European debt crisis (2011),Bear market,2011-07-22,2011-10-03,No data,0,,,,,,",
+   "Taper tantrum (2013),Rate shock,2013-05-21,2013-06-24,No data,0,,,,,,",
+   "China slowdown / oil crash (2015-2016),Bear market,2015-08-18,2016-02-11,Full,128,0.119548011,-0.0554077574,0.0190812744,-0.0270984519,0.147173413,-0.0276254029",
+   "Brexit vote (2016),Geopolitical,2016-06-23,2016-06-27,Full,3,-0.00326337031,-0.0118858723,0.00538244264,-0.0118858723,-0.0082501942,0.00498682389",
+   "Volmageddon (February 2018),Liquidity event,2018-02-02,2018-02-09,Full,6,0.0256963655,-0.00484092248,0.0149694759,-0.00484092248,0.0170695974,0.00862676806",
+   "Q4 2018 selloff,Bear market,2018-09-20,2018-12-24,Full,68,0.0627007396,-0.0499012867,0.0222905907,-0.0172106334,0.0269025446,0.0357981951",
+   "US-China trade war escalation (2019),Trade policy,2019-05-03,2019-06-03,Full,22,0.0130958245,-0.012612111,0.0146173971,-0.0107164094,-0.0134645858,0.0265604103",
+   "COVID-19 crash (2020),Crash,2020-02-19,2020-03-23,Full,24,0.0500426388,-0.00676646714,0.00874735654,-0.00539638562,0.0449042488,0.00513839001",
+   "2022 inflation / rate-hike bear market,Bear market,2022-01-03,2022-10-12,Full,203,0.24184214,-0.0803703475,0.0814063566,-0.0487995727,0.231977522,0.00986461799",
+   "Russia invades Ukraine (2022),Geopolitical,2022-02-09,2022-03-08,Full,20,0.0312328046,-0.0423646027,0.0346712098,-0.0236588284,0.00947358441,0.0217592202",
+   "SVB / regional banking crisis (2023),Liquidity event,2023-03-08,2023-03-24,Full,13,0.0338220527,-0.0116665873,0.0169698151,-0.00561015682,0.0131951152,0.0206269375",
+   "Higher-for-longer bond selloff (2023),Rate shock,2023-07-31,2023-10-27,Full,65,-0.00352236383,-0.0341575859,0.0144805152,-0.0126865966,-0.0367953705,0.0332730067",
+   "Yen carry-trade unwind (August 2024),Liquidity event,2024-07-31,2024-08-09,Full,8,0.0126150825,-0.00663505341,0.0108666359,-0.00370253349,0.0032838708,0.00933121169",
+   "Tariff tantrum (2025),Trade policy,2025-02-19,2025-04-08,Full,35,-0.00395155219,-0.0380136002,0.0164404566,-0.0108367976,-0.0267388036,0.0227872514"
+  ]
+ },
+ "dltaxsales": {
+  "label": "Download realized sales detail (CSV)",
+  "file_name": "tax_realized_sales.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Date",
+   "Instrument",
+   "Shares Sold",
+   "Proceeds",
+   "ACB of Shares Sold",
+   "Realized Gain",
+   "Year"
+  ],
+  "rows": 249,
+  "digest": "a3ae9bcfa15da6ad",
+  "head": [
+   "Date,Instrument,Shares Sold,Proceeds,ACB of Shares Sold,Realized Gain,Year",
+   "2015-03-02,XEI.TO,353.362743,9261.79019,10593.2377,-1331.44749,2015",
+   "2015-03-02,XIC.TO,274.585771,9169.8229,10196.1565,-1026.33357,2015",
+   "2015-04-01,XEI.TO,190.165328,5096.76412,5700.84583,-604.081711,2015"
+  ],
+  "tail": [
+   "2025-06-02,XIC.TO,115.297413,5557.77957,5769.22837,-211.448805,2025",
+   "2025-07-01,XEI.TO,34.9401816,1994.27217,2161.34237,-167.070201,2025",
+   "2025-07-01,ZEB.TO,504.995753,35335.6899,36020.241,-684.551151,2025"
+  ]
+ },
+ "dltaxyear": {
+  "label": "Download annual tax summary (CSV)",
+  "file_name": "tax_by_year.csv",
+  "mime": "text/csv",
+  "columns": [
+   "Year",
+   "Realized Gain/Loss",
+   "Taxable Capital Gain",
+   "Capital Gains Tax",
+   "Eligible Dividends",
+   "Eligible Dividend Tax",
+   "Foreign Dividends",
+   "Foreign Dividend Tax",
+   "Total Tax",
+   "Loss Carryforward (end of year)"
+  ],
+  "rows": 11,
+  "digest": "662fff73fa5836e9",
+  "text": [
+   "Year,Realized Gain/Loss,Taxable Capital Gain,Capital Gains Tax,Eligible Dividends,Eligible Dividend Tax,Foreign Dividends,Foreign Dividend Tax,Total Tax,Loss Carryforward (end of year)",
+   "2015,-5395.012,0,0,3158.82179,1088.9304,0,0,1088.9304,5395.012",
+   "2016,14608.7813,9213.76931,1842.75386,4032.39923,1390.07592,0,0,3232.82978,0",
+   "2017,11231.0006,11231.0006,2246.20012,4520.93444,1558.48708,0,0,3804.6872,0",
+   "2018,21170.7867,21170.7867,4234.15735,5409.99854,1864.97127,0,0,6099.12862,0",
+   "2019,16726.7318,16726.7318,3345.34636,6015.65971,2073.75888,0,0,5419.10524,0",
+   "2020,-2218.36056,0,0,6594.41737,2273.27213,0,0,2273.27213,2218.36056",
+   "2021,-10261.6731,0,0,6261.70274,2158.5765,0,0,2158.5765,12480.0337",
+   "2022,38262.0318,25781.9981,5156.39962,7459.34818,2571.43693,0,0,7727.83655,0",
+   "2023,26193.8065,26193.8065,5238.7613,9550.7179,3292.38804,0,0,8531.14934,0",
+   "2024,-26608.5021,0,0,7994.8412,2756.0357,0,0,2756.0357,26608.5021",
+   "2025,-12459.9862,0,0,3876.58167,1336.36144,0,0,1336.36144,39068.4882"
+  ]
+ },
+ "dltearsheet": {
+  "label": "Download tearsheet report (HTML)",
+  "file_name": "tearsheet_external_weights.html",
+  "mime": "text/html",
+  "visible_text_digest": "4582f97df2346ea3",
+  "visible_text_chars": 3235,
+  "visible_text_head": "Tearsheet - Imported weights: target_weights.csv Imported weights: target_weights.csv Backtest tearsheet &middot; benchmark: XIC.TO Generated Period 2015-02-02 to 2025-07-31 Key statistics CAGR 8.18% benchmark 2.67% Volatility 14.49% benchmark 15.79% Sharpe 0.56 benchmark 0.17 Sortino 0.83 benchmark 0.24 Calmar 0.37 benchmark 0.09 Max Drawdown -22.01% benchmark -30.99% Trailing periods Period Impo",
+  "figures": [],
+  "images": 5
+ },
+ "dlw": {
+  "label": "Holdings history (CSV)",
+  "file_name": "holdings_history.csv",
+  "mime": "text/csv",
+  "columns": [
+   "d",
+   "XEI.TO",
+   "XIC.TO",
+   "ZEB.TO",
+   "ZLB.TO"
+  ],
+  "rows": 2739,
+  "digest": "6415f694482da5d2",
+  "head": [
+   "d,XEI.TO,XIC.TO,ZEB.TO,ZLB.TO",
+   "2015-02-02,0.3572,0.3213,0.147,0.1745",
+   "2015-02-03,0.356453813,0.321835436,0.146516023,0.175194728",
+   "2015-02-04,0.356899285,0.318881812,0.142793553,0.18142535"
+  ],
+  "tail": [
+   "2025-07-29,0.178790181,0.280342593,0.213914608,0.326952619",
+   "2025-07-30,0.178726706,0.279833106,0.214146572,0.327293616",
+   "2025-07-31,0.180525656,0.279350212,0.213221596,0.326902536"
+  ]
+ },
+ "dlxl": {
+  "label": "Full report (Excel)",
+  "file_name": "backtest_external_weights.xlsx",
+  "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "sheet_order": [
+   "Executive Summary",
+   "About",
+   "Performance",
+   "Attribution & Analysis",
+   "Positions",
+   "Trades & Cash Flows",
+   "Attribution",
+   "Tax",
+   "Robustness",
+   "Stress & Regimes",
+   "Data",
+   "Daily Series",
+   "Daily Positions",
+   "Market Data",
+   "_Analysis Data",
+   "_Chart Data"
+  ],
+  "sheets": {
+   "Executive Summary": {
+    "rows": 114,
+    "cols": 10,
+    "digest": "6b6ed5269781b4d4",
+    "charts": 1,
+    "images": 0,
+    "head": [
+     "",
+     "\tImported weights: target_weights.csv\t\t\t\t\t\t\tEXECUTIVE SUMMARY",
+     "\t2015-02-02 to 2025-07-31 · vs XIC.TO · monthly (month-end) rebalance · generated <TODAY>",
+     "",
+     "\tCAGR\tVOLATILITY\tSHARPE\tSORTINO\t\tMAX DRAWDOWN\tCALMAR\tBETA\tINFO RATIO",
+     "\t0.0818340456\t0.14494898\t0.562300436\t0.827235862\t\t-0.220146314\t0.371725714\t0.861153299\t0.972451386"
+    ]
+   },
+   "About": {
+    "rows": 73,
+    "cols": 6,
+    "digest": "49e3bac11785c61e",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Settings",
+     "Setting\tValue",
+     "Generated\t<NOW>",
+     "Label\tImported weights: target_weights.csv",
+     "Periods per year\t252",
+     "Initial capital\t100000.0"
+    ]
+   },
+   "Performance": {
+    "rows": 136,
+    "cols": 13,
+    "digest": "2874e21b78e0c12d",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Statistics",
+     "Metric\tImported weights: target_weights.csv\tXIC.TO",
+     "Total Return\t1.35048842\t0.332066512",
+     "CAGR\t0.0818340456\t0.0267414942",
+     "Volatility\t0.14494898\t0.157927069",
+     "Sharpe\t0.562300436\t0.169265484"
+    ]
+   },
+   "Attribution & Analysis": {
+    "rows": 117,
+    "cols": 10,
+    "digest": "0d8fd366e97ac9f2",
+    "charts": 2,
+    "images": 0,
+    "head": [
+     "",
+     "\tImported weights: target_weights.csv\t\t\t\t\t\tATTRIBUTION & PERFORMANCE ANALYSIS",
+     "\t2015-02-02 to 2025-07-31 · vs XIC.TO · generated <TODAY>",
+     "",
+     "\tWHAT THE FIGURES SHOW",
+     "\t•  The portfolio returned 134.3% against 89.2% for XIC.TO, +45.1 pts of excess return: allocation +0.9 pts, selection +73.7 pts, costs and fees -29.5 pts."
+    ]
+   },
+   "Positions": {
+    "rows": 43,
+    "cols": 4,
+    "digest": "3d67f370e6ed54c6",
+    "charts": 0,
+    "images": 0,
+    "text": [
+     "Current Holdings",
+     "Instrument\tWeight\tValue",
+     "XEI.TO\t0.180525656\t42305.43",
+     "XIC.TO\t0.279350212\t65464.5502",
+     "ZEB.TO\t0.213221596\t49967.5865",
+     "ZLB.TO\t0.326902536\t76608.2377",
+     "Cash\t-2.1345468e-17\t-5.00222086e-12",
+     "",
+     "",
+     "Weights File Check",
+     "Measure\tValue",
+     "Rebalance dates\t126",
+     "Weighted instruments\t4",
+     "Average exposure\t0.999996032",
+     "Maximum exposure\t1.0001",
+     "Detected scale\tfraction",
+     "Short positions\tNo",
+     "Unknown instruments",
+     "Instruments absent",
+     "Dropped dates\t0",
+     "",
+     "",
+     "Average Weight",
+     "Instrument\tAverage weight",
+     "XEI.TO\t0.256189394",
+     "ZLB.TO\t0.255137437",
+     "XIC.TO\t0.246270764",
+     "ZEB.TO\t0.241878232",
+     "",
+     "",
+     "Income and Costs by Year",
+     "Year\tDividend income\tTrading cost\tTurnover",
+     "2015\t0.0331323564\t0.0164330201\t5.47366614",
+     "2016\t0.0345826994\t0.014233963\t4.74180661",
+     "2017\t0.0344525518\t0.0100299635\t3.35769155",
+     "2018\t0.0350517445\t0.0105028919\t3.4986804",
+     "2019\t0.0341108602\t0.0133276002\t4.42567801",
+     "2020\t0.0359281178\t0.0127044484\t4.25149332",
+     "2021\t0.0347086301\t0.0141303402\t4.72367392",
+     "2022\t0.0344644025\t0.0142425065\t4.74925682",
+     "2023\t0.0360176388\t0.0136355906\t4.54344205",
+     "2024\t0.0338720131\t0.0128460556\t4.28180539",
+     "2025\t0.017235919\t0.0072987588\t2.41910544"
+    ]
+   },
+   "Trades & Cash Flows": {
+    "rows": 790,
+    "cols": 9,
+    "digest": "b9fdfd1703a7347f",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Trades",
+     "Date\tInstrument\tShares Before\tShares After\tChange\tPrice\tNotional\tEffective Cost (bps)\tReason",
+     "2015-02-02 00:00:00\tXEI.TO\t0\t1191.52591\t1191.52591\t29.8887\t35613.1605\t30\tRebalance",
+     "2015-02-02 00:00:00\tXIC.TO\t0\t865.271227\t865.271227\t37.0218\t32033.8983\t30\tRebalance",
+     "2015-02-02 00:00:00\tZEB.TO\t0\t473.393689\t473.393689\t30.9595\t14656.0319\t30\tRebalance",
+     "2015-02-02 00:00:00\tZLB.TO\t0\t786.107041\t786.107041\t22.1316\t17397.8066\t30\tRebalance"
+    ]
+   },
+   "Attribution": {
+    "rows": 377,
+    "cols": 9,
+    "digest": "6fc563ffd4dc46f3",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Contribution",
+     "Name\tAverage weight\tTime held\tContribution\tShare of result\tShare of risk",
+     "XEI.TO\t0.256189394\t1\t0.411114992\t0.306012528\t0.256152915",
+     "XIC.TO\t0.246270764\t1\t0.345589515\t0.257238785\t0.268140841",
+     "ZEB.TO\t0.241878232\t1\t0.584310467\t0.434930193\t0.310160746",
+     "ZLB.TO\t0.255137437\t1\t0.249198412\t0.185490283\t0.16450461"
+    ]
+   },
+   "Tax": {
+    "rows": 276,
+    "cols": 10,
+    "digest": "0b84a1fa924a049d",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Tax Summary",
+     "Measure\tImported weights: target_weights.csv",
+     "Total tax\t44427.9129",
+     "Tax Cost Ratio (per year)\t0.0267529764",
+     "Tax efficiency\tModerate",
+     "Realized gains, net of losses\t71249.6048"
+    ]
+   },
+   "Robustness": {
+    "rows": 31,
+    "cols": 7,
+    "digest": "9d4d4dfe5dc2d574",
+    "charts": 0,
+    "images": 0,
+    "text": [
+     "Walk-Forward",
+     "Fold\tStart\tEnd\tCAGR\tVolatility\tSharpe\tMax Drawdown",
+     "1\t2015-02-03 00:00:00\t2017-03-09 00:00:00\t0.122093805\t0.155763051\t0.78384318\t-0.16728835",
+     "2\t2017-03-10 00:00:00\t2019-04-16 00:00:00\t0.13244023\t0.131704696\t1.00558472\t-0.0995859742",
+     "3\t2019-04-17 00:00:00\t2021-05-21 00:00:00\t0.046367034\t0.154651865\t0.29981555\t-0.200176069",
+     "4\t2021-05-24 00:00:00\t2023-06-27 00:00:00\t0.182321912\t0.148519185\t1.22759839\t-0.0803703475",
+     "5\t2023-06-28 00:00:00\t2025-07-31 00:00:00\t-0.0574592405\t0.131794552\t-0.43597584\t-0.220146314",
+     "",
+     "",
+     "Walk-Forward Summary",
+     "Measure\tValue",
+     "Sharpe dispersion across folds\t0.661946955",
+     "Lowest fold Sharpe\t-0.43597584",
+     "",
+     "",
+     "In-Out of Sample",
+     "Period\tStart\tEnd\tCAGR\tSharpe\tMax Drawdown",
+     "In-sample\t2015-02-03 00:00:00\t2021-05-19 00:00:00\t0.100646735\t0.680575037\t-0.200176069",
+     "Out-of-sample\t2021-05-20 00:00:00\t2025-07-31 00:00:00\t0.0542493708\t0.38617615\t-0.220146314",
+     "",
+     "",
+     "Cost Sensitivity",
+     "Costs (bps per trade)\tCAGR\tSharpe\tMax Drawdown",
+     "0\t0.0955135503\t0.659139584\t-0.202823915",
+     "5\t0.0932185901\t0.642907451\t-0.205590354",
+     "10\t0.0909276427\t0.626704519\t-0.208465186",
+     "20\t0.086366741\t0.594418759\t-0.214333498",
+     "30\t0.0818340456\t0.562300436\t-0.220146314",
+     "50\t0.0728511153\t0.498584894\t-0.23160792",
+     "75\t0.061775731\t0.419987116\t-0.245581135",
+     "100\t0.0508900779\t0.342808782\t-0.259804706"
+    ]
+   },
+   "Stress & Regimes": {
+    "rows": 42,
+    "cols": 12,
+    "digest": "36f81a9ae22dde16",
+    "charts": 0,
+    "images": 0,
+    "text": [
+     "Stress Periods",
+     "Period\tCategory\tStart\tEnd\tCoverage\tSessions\tReturn\tMax Drawdown\tBest Day\tWorst Day\tBenchmark Return\tExcess vs Benchmark",
+     "Black Monday (1987)\tCrash\t1987-08-25 00:00:00\t1987-12-04 00:00:00\tNo data\t0",
+     "Gulf War / S&L crisis (1990)\tBear market\t1990-07-16 00:00:00\t1990-10-11 00:00:00\tNo data\t0",
+     "Bond market massacre (1994)\tRate shock\t1994-02-02 00:00:00\t1994-04-04 00:00:00\tNo data\t0",
+     "Asian financial crisis (1997)\tLiquidity event\t1997-10-01 00:00:00\t1998-01-30 00:00:00\tNo data\t0",
+     "Russian default / LTCM (1998)\tLiquidity event\t1998-08-01 00:00:00\t1998-10-08 00:00:00\tNo data\t0",
+     "Dot-com crash (2000-2002)\tBear market\t2000-03-24 00:00:00\t2002-10-09 00:00:00\tNo data\t0",
+     "September 11, 2001\tCrash\t2001-09-10 00:00:00\t2001-09-21 00:00:00\tNo data\t0",
+     "Iraq war run-up (2003)\tGeopolitical\t2003-01-14 00:00:00\t2003-03-11 00:00:00\tNo data\t0",
+     "Global Financial Crisis (2007-2009)\tBear market\t2007-10-09 00:00:00\t2009-03-09 00:00:00\tNo data\t0",
+     "Flash Crash (May 2010)\tLiquidity event\t2010-05-03 00:00:00\t2010-05-07 00:00:00\tNo data\t0",
+     "US downgrade / European debt crisis (2011)\tBear market\t2011-07-22 00:00:00\t2011-10-03 00:00:00\tNo data\t0",
+     "Taper tantrum (2013)\tRate shock\t2013-05-21 00:00:00\t2013-06-24 00:00:00\tNo data\t0",
+     "China slowdown / oil crash (2015-2016)\tBear market\t2015-08-18 00:00:00\t2016-02-11 00:00:00\tFull\t128\t0.119548011\t-0.0554077574\t0.0190812744\t-0.0270984519\t0.147173413\t-0.0276254029",
+     "Brexit vote (2016)\tGeopolitical\t2016-06-23 00:00:00\t2016-06-27 00:00:00\tFull\t3\t-0.00326337031\t-0.0118858723\t0.00538244264\t-0.0118858723\t-0.0082501942\t0.00498682389",
+     "Volmageddon (February 2018)\tLiquidity event\t2018-02-02 00:00:00\t2018-02-09 00:00:00\tFull\t6\t0.0256963655\t-0.00484092248\t0.0149694759\t-0.00484092248\t0.0170695974\t0.00862676806",
+     "Q4 2018 selloff\tBear market\t2018-09-20 00:00:00\t2018-12-24 00:00:00\tFull\t68\t0.0627007396\t-0.0499012867\t0.0222905907\t-0.0172106334\t0.0269025446\t0.0357981951",
+     "US-China trade war escalation (2019)\tTrade policy\t2019-05-03 00:00:00\t2019-06-03 00:00:00\tFull\t22\t0.0130958245\t-0.012612111\t0.0146173971\t-0.0107164094\t-0.0134645858\t0.0265604103",
+     "COVID-19 crash (2020)\tCrash\t2020-02-19 00:00:00\t2020-03-23 00:00:00\tFull\t24\t0.0500426388\t-0.00676646714\t0.00874735654\t-0.00539638562\t0.0449042488\t0.00513839001",
+     "2022 inflation / rate-hike bear market\tBear market\t2022-01-03 00:00:00\t2022-10-12 00:00:00\tFull\t203\t0.24184214\t-0.0803703475\t0.0814063566\t-0.0487995727\t0.231977522\t0.00986461799",
+     "Russia invades Ukraine (2022)\tGeopolitical\t2022-02-09 00:00:00\t2022-03-08 00:00:00\tFull\t20\t0.0312328046\t-0.0423646027\t0.0346712098\t-0.0236588284\t0.00947358441\t0.0217592202",
+     "SVB / regional banking crisis (2023)\tLiquidity event\t2023-03-08 00:00:00\t2023-03-24 00:00:00\tFull\t13\t0.0338220527\t-0.0116665873\t0.0169698151\t-0.00561015682\t0.0131951152\t0.0206269375",
+     "Higher-for-longer bond selloff (2023)\tRate shock\t2023-07-31 00:00:00\t2023-10-27 00:00:00\tFull\t65\t-0.00352236383\t-0.0341575859\t0.0144805152\t-0.0126865966\t-0.0367953705\t0.0332730067",
+     "Yen carry-trade unwind (August 2024)\tLiquidity event\t2024-07-31 00:00:00\t2024-08-09 00:00:00\tFull\t8\t0.0126150825\t-0.00663505341\t0.0108666359\t-0.00370253349\t0.0032838708\t0.00933121169",
+     "Tariff tantrum (2025)\tTrade policy\t2025-02-19 00:00:00\t2025-04-08 00:00:00\tFull\t35\t-0.00395155219\t-0.0380136002\t0.0164404566\t-0.0108367976\t-0.0267388036\t0.0227872514",
+     "",
+     "",
+     "Stress Summary",
+     "Measure\tValue",
+     "Periods covered\t12",
+     "Periods listed\t24",
+     "Positive periods\t9",
+     "Median return\t0.0284645851",
+     "Worst period\tTariff tantrum (2025)",
+     "Worst return\t-0.00395155219",
+     "Best period\t2022 inflation / rate-hike bear market",
+     "Best return\t0.24184214",
+     "Deepest drawdown\t-0.0803703475",
+     "Periods with a benchmark\t12",
+     "Periods beating the benchmark\t11",
+     "Median excess vs benchmark\t0.0152457777"
+    ]
+   },
+   "Data": {
+    "rows": 19,
+    "cols": 6,
+    "digest": "b1978b9b1021ca30",
+    "charts": 0,
+    "images": 0,
+    "text": [
+     "Data Quality",
+     "Instrument\tStart\tEnd\tObservations\tInternal Gaps\t% Missing",
+     "XEI.TO\t2012-01-02 00:00:00\t2025-07-31 00:00:00\t3544\t0\t0",
+     "XIC.TO\t2012-01-02 00:00:00\t2025-07-31 00:00:00\t3544\t0\t0",
+     "ZEB.TO\t2012-01-02 00:00:00\t2025-07-31 00:00:00\t3544\t0\t0",
+     "ZLB.TO\t2012-01-02 00:00:00\t2025-07-31 00:00:00\t3544\t0\t0",
+     "",
+     "",
+     "Data Flags",
+     "Flag",
+     "No adjusted close for XIC.TO: the benchmark is measured on price return, which understates it. Supply an Adj Close column, or choose “Price return + dividends”.",
+     "",
+     "",
+     "Return Correlation",
+     "t\tXEI.TO\tXIC.TO\tZEB.TO\tZLB.TO",
+     "XEI.TO\t1\t0.850741239\t0.765798585\t0.74649697",
+     "XIC.TO\t0.850741239\t1\t0.827596545\t0.803133865",
+     "ZEB.TO\t0.765798585\t0.827596545\t1\t0.723124847",
+     "ZLB.TO\t0.74649697\t0.803133865\t0.723124847\t1"
+    ]
+   },
+   "Daily Series": {
+    "rows": 2740,
+    "cols": 14,
+    "digest": "5cdc51c6e2bcc95f",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Date\tValue\tReturn\tGross return\tExposure\tCash weight\tTurnover\tCost\tDividend income\tBenchmark value\tBenchmark return\tDrawdown\tImported weights: target_weights.csv\tImported weights: target_weights.csv (after tax)",
+     "2015-02-02 00:00:00\t99700.8973\t-0.00299102692\t0\t1\t0\t0.997008973\t0.00299102692\t0\t100000\t0\t0\t99700.8973\t99700.8973",
+     "2015-02-03 00:00:00\t100009.555\t0.00309583444\t0.00309583444\t1\t0\t0\t0\t0\t100476.746\t0.00476746133\t0\t100009.555\t100009.555",
+     "2015-02-04 00:00:00\t90422.6086\t-0.0958603024\t-0.0958603024\t1\t0\t0\t0\t0\t90011.2906\t-0.104157986\t-0.0958603024\t90422.6086\t90422.6086",
+     "2015-02-05 00:00:00\t85639.835\t-0.0528935594\t-0.0528935594\t1\t0\t0\t0\t0\t84949.9484\t-0.0562300818\t-0.143683469\t85639.835\t85639.835",
+     "2015-02-06 00:00:00\t84799.9515\t-0.00980715925\t-0.00980715925\t1\t0\t0\t0\t0\t84051.0186\t-0.010581876\t-0.152081502\t84799.9515\t84799.9515"
+    ]
+   },
+   "Daily Positions": {
+    "rows": 2740,
+    "cols": 20,
+    "digest": "dc8f6060590383cd",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Date\tWeight XEI.TO\tWeight XIC.TO\tWeight ZEB.TO\tWeight ZLB.TO\tTarget XEI.TO\tTarget XIC.TO\tTarget ZEB.TO\tTarget ZLB.TO\tUnits XEI.TO\tUnits XIC.TO\tUnits ZEB.TO\tUnits ZLB.TO\tContribution XEI.TO\tContribution XIC.TO\tContribution ZEB.TO\tContribution ZLB.TO\tContribution Cash & financing\tContribution Trading costs\tContribution Management fee",
+     "2015-02-02 00:00:00\t0.3572\t0.3213\t0.147\t0.1745\t0.3572\t0.3213\t0.147\t0.1745\t1191.52591\t865.271227\t473.393689\t786.107041\t0\t0\t0\t0\t0\t-0.00299102692\t0",
+     "2015-02-03 00:00:00\t0.356453813\t0.321835436\t0.146516023\t0.175194728\t0.3572\t0.3213\t0.147\t0.1745\t1191.52591\t865.271227\t473.393689\t786.107041\t0.000357335046\t0.00153178533\t-3.03880877e-05\t0.00123710215\t0\t0\t0",
+     "2015-02-04 00:00:00\t0.356899285\t0.318881812\t0.142793553\t0.18142535\t0.3572\t0.3213\t0.147\t0.1745\t1191.52591\t865.271227\t473.393689\t786.107041\t-0.033767001\t-0.0335217308\t-0.0174107031\t-0.0111608675\t0\t0\t0",
+     "2015-02-05 00:00:00\t0.35763516\t0.317758437\t0.140533633\t0.184072771\t0.3572\t0.3213\t0.147\t0.1745\t1191.52591\t865.271227\t473.393689\t786.107041\t-0.0181807219\t-0.0179307504\t-0.00969324407\t-0.00708884305\t0\t0\t0",
+     "2015-02-06 00:00:00\t0.357484675\t0.317509826\t0.140807907\t0.184197592\t0.3572\t0.3213\t0.147\t0.1745\t1191.52591\t865.271227\t473.393689\t786.107041\t-0.00365639436\t-0.00336248037\t-0.00110665109\t-0.00168163343\t0\t0\t0"
+    ]
+   },
+   "Market Data": {
+    "rows": 2740,
+    "cols": 5,
+    "digest": "f305fe8c4ccf30f5",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Date\tPrice XEI.TO\tPrice XIC.TO\tPrice ZEB.TO\tPrice ZLB.TO",
+     "2015-02-02 00:00:00\t29.8887\t37.0218\t30.9595\t22.1316",
+     "2015-02-03 00:00:00\t29.9186\t37.1983\t30.9531\t22.2885",
+     "2015-02-04 00:00:00\t27.0844\t33.3238\t27.2749\t20.8686",
+     "2015-02-05 00:00:00\t25.7047\t31.45\t25.4234\t20.0532",
+     "2015-02-06 00:00:00\t25.4419\t31.1172\t25.2232\t19.87"
+    ]
+   },
+   "_Analysis Data": {
+    "rows": 12,
+    "cols": 9,
+    "digest": "b49177712a98d58a",
+    "charts": 0,
+    "images": 0,
+    "text": [
+     "Category\tAllocation\tSelection\t\t\tYear\tAllocation\tSelection\tCosts & fees",
+     "Unclassified\t8.78753477e-06\t0.737225328\t\t\t2015\t0.00441825023\t0.0154536425\t-0.0171407854",
+     "Cash balance\t0.00877874723\t0\t\t\t2016\t0.000118897492\t0.0318347667\t-0.0165353784",
+     "\t\t\t\t\t2017\t1.10198285e-05\t0.0542697424\t-0.0107309747",
+     "\t\t\t\t\t2018\t0.000103638044\t0.0436046592\t-0.0122748662",
+     "\t\t\t\t\t2019\t8.83109916e-05\t0.0590327835\t-0.0138844859",
+     "\t\t\t\t\t2020\t0.000111705062\t0.0309976372\t-0.0119233637",
+     "\t\t\t\t\t2021\t1.72362813e-05\t0.0454063838\t-0.0149287933",
+     "\t\t\t\t\t2022\t0.000220213834\t0.037993269\t-0.0185972234",
+     "\t\t\t\t\t2023\t-5.27475699e-05\t0.0372633969\t-0.0138934506",
+     "\t\t\t\t\t2024\t-6.4056976e-05\t0.0141651718\t-0.0118809331",
+     "\t\t\t\t\t2025\t-4.69203871e-05\t0.00702578317\t-0.00724983228"
+    ]
+   },
+   "_Chart Data": {
+    "rows": 127,
+    "cols": 3,
+    "digest": "e7e767fe3d025203",
+    "charts": 0,
+    "images": 0,
+    "head": [
+     "Date\tImported weights: target_weights.csv\tXIC.TO",
+     "2015-02-28 00:00:00\t100000\t100000",
+     "2015-03-31 00:00:00\t92410.2724\t94885.9861",
+     "2015-04-30 00:00:00\t91005.737\t92153.542",
+     "2015-05-31 00:00:00\t90981.9651\t91678.1464",
+     "2015-06-30 00:00:00\t94322.175\t94043.5095"
+    ]
+   }
+  }
+ },
+ "preset_export": {
+  "label": "Export all presets",
+  "file_name": "qbt_presets.json",
+  "mime": "application/json",
+  "digest": "95ad98114d95c06c",
+  "text": [
+   "{",
+   " \"schema\": 1,",
+   " \"presets\": {},",
+   " \"exported\": \"<NOW>\"",
+   "}"
+  ]
+ }
+}
