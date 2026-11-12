@@ -5,8 +5,8 @@
 // which blocks sit side by side on a wide screen. Every other screen can
 // start as `<BlockList blocks={...} />` and get an arrangement like this one
 // only where the default single column wastes space.
-import type { Block, ChartBlock, TableBlock } from "../api";
-import { BlockList, Chart, DataTable, Note, One } from "../blocks/Blocks";
+import type { Block, ChartBlock, KpiBlock, TableBlock } from "../api";
+import { BlockList, Chart, DataTable, KpiStrip, Note, One } from "../blocks/Blocks";
 import { TimePanel } from "../charts/TimePanel";
 
 const chart = (blocks: Block[], kind: string) =>
@@ -36,6 +36,7 @@ export function Results({ blocks }: { blocks: Block[] }) {
   const firstHeading = blocks.findIndex((b) => b.kind === "heading");
   const lead = firstHeading < 0 ? blocks : blocks.slice(0, firstHeading);
   const notes = lead.filter((b) => b.kind === "note" || b.kind === "flag");
+  const kpis = lead.filter((b): b is KpiBlock => b.kind === "kpi");
   const equity = chart(lead, "equity");
   const drawdown = chart(lead, "drawdown");
   const others = lead.filter((b): b is ChartBlock => b.kind === "chart" && b !== equity && b !== drawdown);
@@ -55,6 +56,7 @@ export function Results({ blocks }: { blocks: Block[] }) {
 
   return (
     <div className="results">
+      {kpis.length > 0 && <KpiStrip items={kpis} />}
       {notes.length > 0 && (
         <div className="lead-notes">{notes.map((b, i) => <Note key={i} block={b as never} />)}</div>
       )}

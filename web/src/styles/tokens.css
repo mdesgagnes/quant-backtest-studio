@@ -22,6 +22,7 @@
   /* Sign. Used for gains and losses and nothing else. */
   --gain: #45b88f;
   --loss: #ea6f5f;
+  --gain-soft: #8fc7a4;  /* a weaker positive verdict (Research) */
   --gain-wash: rgba(69, 184, 143, 0.16);
   --loss-wash: rgba(234, 111, 95, 0.16);
 
