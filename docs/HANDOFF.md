@@ -192,9 +192,9 @@ default; ask.
 - **U3**: compute walk-forward, in/out-of-sample and cost sensitivity once
   per run instead of on every click? (Assumed yes in ticket B6; confirm.)
 - **U4**: the Assistant tab's machine-specific Python path.
-- **U5**: the accent. This session chose brass because a red accent beside a
-  red loss colour is unreadable. The owner has not confirmed it. Changing it
-  is three tokens.
+- **U5**: decided. The owner confirmed brass as the accent on 2026-11-12.
+  `qbt/brand.py` and `qbt/charts.py` stay as they are for the classic app
+  and the exported reports.
 - **Hosting**: where the new app will run, whether it must be free, and
   whether firm data may sit on a third-party host. Streamlit Community Cloud
   cannot run it. (Blocks ticket D2.)
