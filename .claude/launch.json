@@ -2,9 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "studio",
+      "runtimeExecutable": "C:\\Users\\marcd\\miniconda3\\envs\\quant\\python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "server.app:app", "--port", "8000", "--app-dir", "C:\\Users\\marcd\\Documents\\quant-backtest-studio-fresh"],
+      "port": 8000
+    },
+    {
       "name": "legacy-streamlit",
       "runtimeExecutable": "C:\\Users\\marcd\\miniconda3\\envs\\quant\\python.exe",
-      "runtimeArgs": ["-m", "streamlit", "run", "app.py", "--server.headless", "true", "--server.port", "8501"],
+      "runtimeArgs": ["-m", "streamlit", "run", "C:\\Users\\marcd\\Documents\\quant-backtest-studio-fresh\\app.py", "--server.headless", "true", "--server.port", "8501"],
       "port": 8501
     }
   ]
