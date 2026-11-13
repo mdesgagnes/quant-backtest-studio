@@ -1,0 +1,23 @@
+# Diversification (return-stream clustering): the defaults.
+# Load it in Return stream > Diversification or Backtest > Diversification,
+# or use it from Python:
+#   from qbt import clustering as CL
+#   cfg = CL.config_from_yaml(open("configs/clustering_default.yaml").read())
+#   d = CL.analyse(returns, cfg)
+clustering:
+  frequency: weekly          # daily | weekly | monthly; never finer than the data.
+                             # Weekly avoids the non-synchronous close between
+                             # Canadian and US listings.
+  min_observations: 52       # per stream, and for the window they all share
+  correlation: pearson       # pearson | spearman
+  linkage: average           # average | ward. With average, the cut line is a correlation
+  cut: threshold             # threshold | clusters
+  threshold: 0.8             # streams at or above this correlation are one bet
+  n_clusters: 4              # used when cut is clusters
+  effective_bets: entropy    # entropy | participation (eigenvalues of the correlation matrix)
+  rolling_window: 52         # periods, for the pair-stability chart (one year weekly)
+  stress:
+    benchmark: null          # a column name; null uses the screen's benchmark,
+                             # else the equal-weight average of the streams
+    percentile: 0.2          # down markets: the benchmark's worst 20% of periods
+    min_observations: 26     # fewer down-market periods than this are flagged

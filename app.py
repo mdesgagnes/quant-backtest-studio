@@ -43,6 +43,7 @@ from qbt import tax as TAX
 from qbt import full_report as FULLREPORT
 from qbt import report as REPORT
 from qbt import returns_input as RS
+from qbt import clustering_ui as CLUI
 from qbt import presets as PRESETS
 from qbt import formula as FORMULA
 from qbt import excel_export as XL
@@ -1533,7 +1534,7 @@ if source == "Return stream":
         return "n/a" if pd.isna(v) else f"{v * 100:+.2f}%"
 
     rs_tabs = st.tabs(["Results", "Stress tests", "Market regimes",
-                       "Robustness", "Export", "Fund review"])
+                       "Robustness", "Export", "Fund review", "Diversification"])
 
     # ==================================================================
     # Results
@@ -2009,6 +2010,11 @@ if source == "Return stream":
             help="Choose what the Full report (Excel) carries. The About sheet "
                  "(settings and an index of every table) always comes, and lists "
                  "whatever was left out.")
+        rs_xl_div = st.checkbox(
+            "Add the Diversification sheet", value=False, key="rs_xl_div",
+            help="Clusters, effective number of bets, redundant pairs and the "
+                 "correlation matrices, with the settings chosen on the "
+                 "Diversification tab.")
         rs_comments = ""
         if "Executive summary" in rs_pick:
             rs_comments = st.text_area(
@@ -2083,6 +2089,16 @@ if source == "Return stream":
             except Exception as exc:
                 _rs_secs, _rs_miss = [], [("All", "Additional modules",
                                            f"Could not be assembled: {exc}")]
+            _rs_include = list(rs_pick)
+            if rs_xl_div:
+                _rs_include.append("Diversification")
+                try:
+                    _rs_secs += CLUI.export_sections(
+                        rets, "rsdiv", bench=rets[bench_col] if bench_col else None,
+                        bench_label=bench_col, start=start_d, end=end_d, default=sel)
+                except Exception as exc:
+                    _rs_miss.append(("Diversification", "Clusters",
+                                     f"Could not be assembled: {exc}"))
             _rs_summary = None
             if "Executive summary" in rs_pick:
                 _lbl, _bl = str(main_col), (str(bench_col) if bench_col else None)
@@ -2143,7 +2159,7 @@ if source == "Return stream":
                                       "Risk-free rate": rf_label,
                                       "Source": rs_source,
                                       "Period": f"{rs_start.date()} to {rs_end.date()}"},
-                        sections=_rs_secs, omitted=_rs_miss, include=list(rs_pick),
+                        sections=_rs_secs, omitted=_rs_miss, include=_rs_include,
                         summary=_rs_summary)
             rbook = _deferred_book(lambda _p=_rpos, _k=_rkw: XL.workbook_from_returns(*_p, **_k))
             e3.download_button("Full report (Excel)", rbook,
@@ -2373,6 +2389,14 @@ if source == "Return stream":
                 eyebrow("Portfolio funding test")
                 st.dataframe(_ft, use_container_width=True)
                 st.image(_im["funding"], use_container_width=True)
+
+    # ==================================================================
+    # Diversification: which streams are distinct bets (qbt/clustering.py)
+    # ==================================================================
+    with rs_tabs[6]:
+        CLUI.render(rets, "rsdiv", bench=rets[bench_col] if bench_col else None,
+                    bench_label=bench_col, start=start_d, end=end_d, default=sel,
+                    source_note="Dates follow the From and To above.")
     st.stop()
 
 
@@ -3855,7 +3879,7 @@ st.markdown(f'<div class="runbar">{"".join(_bits)}</div>', unsafe_allow_html=Tru
 
 battr_cfg = None        # set by the Attribution tab; the Excel export reuses it
 tabs = st.tabs(["Results", "Compare", "Signals", "Positions", "Attribution",
-                "Tax", "Robustness", "Data", "Builder", "Export"])
+                "Tax", "Robustness", "Data", "Builder", "Export", "Diversification"])
 
 # --------------------------- RESULTS -----------------------------------
 with tabs[0]:
@@ -5805,6 +5829,11 @@ with tabs[9]:
         help="Choose what the Full report (Excel) carries. The About sheet "
              "(settings and an index of every table) always comes, and lists "
              "whatever was left out.")
+    xl_div = st.checkbox(
+        "Add the Diversification sheet", value=False, key="xl_div",
+        help="Clusters of the holdings and strategies, effective number of "
+             "bets, redundant pairs and the correlation matrices, with the "
+             "settings chosen on the Diversification tab.")
     cio_comments = ""
     if "Executive summary" in xl_pick:
         cio_comments = st.text_area(
@@ -6178,6 +6207,17 @@ with tabs[9]:
         except Exception as exc:
             _xl_secs, _xl_miss = [], [("All", "Additional modules",
                                        f"Could not be assembled: {exc}")]
+        _xl_include = list(xl_pick)
+        if xl_div:
+            _xl_include.append("Diversification")
+            try:
+                _dv_r, _dv_b, _dv_bl, _dv_def = CLUI.backtest_streams(run)
+                _xl_secs += CLUI.export_sections(_dv_r, "btdiv", bench=_dv_b,
+                                                 bench_label=_dv_bl, start=_xw0,
+                                                 end=_xw1, default=_dv_def)
+            except Exception as exc:
+                _xl_miss.append(("Diversification", "Clusters",
+                                 f"Could not be assembled: {exc}"))
         _summary = None
         if "Executive summary" in xl_pick:
             try:
@@ -6209,7 +6249,7 @@ with tabs[9]:
         _args = dict(analysis=_analysis, prices=universe.loc[_xw0:_xw1],
                      exog=exog_used.loc[_xw0:_xw1] if exog_used is not None else None,
                      quality=quality.per_asset if quality is not None else None,
-                     sections=_xl_secs, omitted=_xl_miss, include=list(xl_pick),
+                     sections=_xl_secs, omitted=_xl_miss, include=_xl_include,
                      extra_notes=_xnotes, summary=_summary)
         _pos = (xres, xbench, xstats, xbstats or None, rcfg)
         book = _deferred_book(lambda _p=_pos, _k=_args: XL.workbook_from_backtest(*_p, **_k))
@@ -6244,3 +6284,12 @@ with tabs[9]:
         f'{REBALANCE_RULES[rcfg.engine.rebalance].lower()} \u00b7 '
         f'{rcfg.costs.commission_bps + rcfg.costs.slippage_bps:.0f} bps of '
         f'costs per trade.</div>', unsafe_allow_html=True)
+
+# ----------------------- DIVERSIFICATION --------------------------------
+# Which holdings and strategies are distinct bets (qbt/clustering.py).
+with tabs[10]:
+    _dv_r, _dv_b, _dv_bl, _dv_def = CLUI.backtest_streams(run)
+    CLUI.render(_dv_r, "btdiv", bench=_dv_b, bench_label=_dv_bl, default=_dv_def,
+                source_note="Holdings are measured on price returns (dividends "
+                            "not included); strategies and the benchmark on "
+                            "their total returns from the backtest.")

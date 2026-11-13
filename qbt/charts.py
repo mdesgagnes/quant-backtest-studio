@@ -482,3 +482,95 @@ def regime_timeline(price: pd.Series, segments: pd.DataFrame, order: list,
     fig.update_yaxes(type="log")
     fig.update_layout(legend=dict(orientation="h", y=-0.12, x=0))
     return fig
+
+
+# ----------------------------------------------------------------------
+# Diversification (qbt/clustering.py)
+# ----------------------------------------------------------------------
+def dendrogram(linkage: np.ndarray, labels: list, cut_height: float,
+               cut_label: str = "", clusters: Optional[pd.Series] = None,
+               correlation_axis: bool = True, title: str = "",
+               theme: str = "dark") -> go.Figure:
+    """Cluster tree, leaves listed top to bottom, with the cut line drawn.
+
+    Branches below the cut take their cluster's colour; branches above it
+    are grey. With `correlation_axis` the distance axis is labelled in the
+    equivalent correlation, rho = 1 - 2 d^2.
+    """
+    from scipy.cluster.hierarchy import dendrogram as _dg
+    pal, colors = _colors(theme)
+    dg = _dg(linkage, labels=[str(x) for x in labels], no_plot=True,
+             color_threshold=0, above_threshold_color="x")
+    leaves = dg["ivl"]
+    # Colour each link by the cluster of the leaves under it, when below the cut.
+    leaf_y = {nm: 5.0 + 10.0 * i for i, nm in enumerate(leaves)}
+    fig = go.Figure()
+    for ic, dc in zip(dg["icoord"], dg["dcoord"]):
+        color = pal["muted"]
+        if clusters is not None and max(dc) <= cut_height:
+            mid = (ic[0] + ic[3]) / 2.0
+            nearest_leaf = min(leaves, key=lambda nm: abs(leaf_y[nm] - mid))
+            k = int(clusters.get(nearest_leaf, 0))
+            color = colors[(k - 1) % len(colors)] if k else pal["muted"]
+        fig.add_trace(go.Scatter(x=dc, y=ic, mode="lines", hoverinfo="skip",
+                                 line=dict(color=color, width=1.4), showlegend=False))
+    top = max([max(d) for d in dg["dcoord"]] + [cut_height]) * 1.05 + 1e-9
+    fig.add_vline(x=cut_height, line=dict(color=pal["brass"], width=1.5, dash="dash"))
+    if cut_label:
+        fig.add_annotation(x=cut_height, y=1.0, yref="paper", text=cut_label,
+                           showarrow=False, xanchor="left", yanchor="bottom",
+                           font=dict(family=MONO, size=10, color=pal["brass"]))
+    _base(fig, max(300, 16 * len(leaves) + 90), title, theme)
+    fig.update_layout(hovermode=False, margin=dict(l=8, r=8, t=48, b=8))
+    fig.update_yaxes(tickvals=[leaf_y[nm] for nm in leaves], ticktext=leaves,
+                     range=[10.0 * len(leaves), 0], showgrid=False,
+                     tickfont=dict(family=MONO, size=10, color=pal["text"]))
+    fig.update_xaxes(range=[top, 0], showgrid=True, gridcolor=pal["rule"])
+    if correlation_axis:
+        rhos = [r for r in (1.0, 0.9, 0.8, 0.6, 0.4, 0.2, 0.0, -0.5, -1.0)
+                if np.sqrt(0.5 * (1 - r)) <= top]
+        fig.update_xaxes(tickvals=[float(np.sqrt(0.5 * (1 - r))) for r in rhos],
+                         ticktext=[f"{r:.1f}" for r in rhos],
+                         title=dict(text="Correlation at which branches join",
+                                    font=dict(size=11, color=pal["muted"])))
+    else:
+        fig.update_xaxes(title=dict(text="Ward merge distance",
+                                    font=dict(size=11, color=pal["muted"])))
+    return fig
+
+
+def cluster_heatmap(corr: pd.DataFrame, clusters: Optional[pd.Series] = None,
+                    title: str = "", theme: str = "dark") -> go.Figure:
+    """Correlation matrix in the order given, with cluster blocks outlined.
+    Values are printed in the cells up to 25 streams."""
+    pal, _ = _colors(theme)
+    labels = [str(c) for c in corr.columns]
+    n = len(labels)
+    show_text = n <= 25
+    fig = go.Figure(go.Heatmap(
+        z=corr.values, x=labels, y=labels,
+        colorscale=[[0.0, pal["teal"]], [0.5, pal["panel"]], [1.0, pal["rust"]]],
+        zmin=-1, zmax=1, zmid=0,
+        text=np.round(corr.values, 2) if show_text else None,
+        texttemplate="%{text}" if show_text else None,
+        textfont=dict(family=MONO, size=10 if n <= 15 else 8),
+        hovertemplate="%{y} / %{x}: %{z:.2f}<extra></extra>",
+        colorbar=dict(thickness=8, outlinewidth=0, tickfont=dict(family=MONO, size=9)),
+        xgap=1 if n > 40 else 2, ygap=1 if n > 40 else 2,
+    ))
+    if clusters is not None:
+        lab = [int(clusters.get(c, 0)) for c in labels]
+        i = 0
+        while i < n:
+            j = i
+            while j + 1 < n and lab[j + 1] == lab[i]:
+                j += 1
+            if j > i:
+                fig.add_shape(type="rect", x0=i - 0.5, x1=j + 0.5, y0=i - 0.5, y1=j + 0.5,
+                              line=dict(color=pal["text"], width=1.5))
+            i = j + 1
+    _base(fig, int(min(900, max(300, (30 if n <= 25 else 12) * n + 120))), title, theme)
+    fig.update_layout(hovermode="closest")
+    fig.update_xaxes(showgrid=False, tickangle=-45 if n > 8 else 0)
+    fig.update_yaxes(autorange="reversed", showgrid=False)
+    return fig

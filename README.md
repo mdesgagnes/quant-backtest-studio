@@ -779,6 +779,61 @@ open("review.pdf", "wb").write(FX.render_pdf(review))
 
 ---
 
+## 4 bis ter. Diversification: which streams are distinct bets
+
+The **Diversification** tab (last tab of the Return stream workspace, and of
+a Backtest) groups return streams by how they behave, so it is plain which
+holdings add a new bet and which repeat one already held.
+
+- **Streams.** Return stream: any loaded column, with no 10-series limit.
+  Backtest: the holdings (price returns), the strategy, the comparison
+  strategies and the benchmark.
+- **Window.** Returns are compounded to weekly by default, because Canadian
+  and US closes are not synchronous and daily correlations between them read
+  too low. Monthly data stays monthly. Every statistic uses only the window
+  all kept streams share. A stream with too few returns (52 by default) or
+  that never moves is left out, and the reason is shown. If one late or
+  short stream would shrink the shared window below the minimum, it is the
+  one left out.
+- **Clusters.** Correlation distance sqrt(0.5 x (1 - correlation)),
+  hierarchical clustering with average linkage, cut where the correlation
+  falls below 0.80: streams above that line are treated as one bet. Ward
+  linkage and a fixed number of clusters are options. The silhouette score
+  is shown as a guide and never picks the cut.
+- **Measures.** Effective number of independent bets (exp of the entropy of
+  the correlation matrix's eigenvalues; the participation ratio is an
+  option), average correlation within and between clusters, and every pair
+  at or above the threshold.
+- **Down markets.** The same correlation matrix measured only in the
+  benchmark's worst 20% of periods: the screen's benchmark, a stream you
+  choose, or the equal-weight average of the streams.
+- **Candidate check.** Pick a candidate and the current holdings. One line
+  says whether it duplicates an existing bet, partly repeats one, or adds a
+  new one, names the closest holding, and gives the change in effective
+  bets next to what a fully independent stream would add.
+- **Rolling correlation** of any pair, to see whether a relationship holds.
+- **Export.** A cluster table CSV on the tab. In the Export tab, **Add the
+  Diversification sheet** (off by default) adds the tables to the Excel
+  report; with it off the workbook is unchanged.
+
+Every setting is in `configs/clustering_default.yaml` (load and save it in
+the tab). Without the interface:
+
+```python
+from qbt import clustering as CL
+cfg = CL.config_from_yaml(open("configs/clustering_default.yaml").read())
+d = CL.analyse(returns, cfg)                 # returns: one column per stream
+d.table, d.redundant, d.effective_bets
+CL.candidate_test(returns, ["XIC.TO", "XBB.TO"], "ZEB.TO", cfg).sentence
+```
+
+Correlations measured in down markets alone are biased toward zero when
+streams move with the benchmark: selecting the benchmark's worst weeks
+narrows their range. Read a rise in down-market correlation as a strong
+signal; a fall is not proof of protection.
+
+---
+
 ## 4 ter. Period reporting
 
 The Results tab and the tearsheet both carry two standard tables.
