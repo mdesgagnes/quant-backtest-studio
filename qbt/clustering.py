@@ -732,7 +732,8 @@ def verdict_table(d: "Diversification") -> pd.DataFrame:
                       f"though not grouped with it")
         elif verdict == DISTINCT and rho >= thr - margin:
             verdict = REVIEW
-            reason = (f"stands alone, but {rho:.2f} correlated with {near}, close to "
+            where = ("just under" if f"{rho:.2f}" == f"{thr:.2f}" else "close to")
+            reason = (f"stands alone, but {rho:.2f} correlated with {near}, {where} "
                       f"the {thr:.2f} line")
         rows.append({"Stream": s, "Verdict": verdict, "Group": "", "Reason": reason})
     for r in d.alignment.dropped.itertuples(index=False):

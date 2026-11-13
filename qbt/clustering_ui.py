@@ -11,11 +11,13 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
 from . import charts as C
 from . import clustering as CL
+from .brand import BRAND
 
 PLOT_CFG = {"displaylogo": False}
 _FREQ = {"Weekly": "weekly", "Daily": "daily", "Monthly": "monthly"}
@@ -294,6 +296,65 @@ def _controls(prefix: str, cols: List[str], default: Optional[List[str]],
         m3.number_input("Fewest down-market periods to trust", 3, 500, key=_k(prefix, "stressmin"))
 
 
+_ANSWER = [
+    (CL.DISTINCT, "Distinct return streams", "gain",
+     "Each adds a bet the others do not."),
+    (CL.SAME, "Same bet", "red",
+     "Holding more than one of a group adds no diversification."),
+    (CL.REVIEW, "To review", "sand",
+     "Close to the line, or they move together in sell-offs."),
+]
+
+
+def _card(title: str, colour: str, sub: str, items: List[str]) -> str:
+    body = "".join(items) if items else (
+        f'<div style="color:{BRAND['faint']};">None.</div>')
+    return (f'<div style="background:{BRAND['panel']};border:1px solid {BRAND['rule']};'
+            f'border-top:3px solid {BRAND[colour]};border-radius:4px;'
+            f'padding:0.7rem 0.85rem;height:100%;">'
+            f'<div style="color:{BRAND[colour]};font-weight:600;font-size:0.95rem;">'
+            f'{title}</div>'
+            f'<div style="color:{BRAND['muted']};font-size:0.78rem;margin-bottom:0.5rem;">'
+            f'{sub}</div>{body}</div>')
+
+
+def _item(name: str, detail: str) -> str:
+    return (f'<div style="margin:0 0 0.45rem;"><b>{name}</b>'
+            f'<div style="color:{BRAND['muted']};font-size:0.78rem;">{detail}</div></div>')
+
+
+def _answer(d: CL.Diversification) -> None:
+    """The headline answer: which streams are distinct, which repeat a bet,
+    which need a closer look."""
+    v = d.verdicts
+    _eyebrow("The answer")
+    st.markdown(f'<div style="font-size:1.15rem;font-weight:600;margin:0.1rem 0 0.7rem;">'
+                f'{CL.headline(d)}</div>', unsafe_allow_html=True)
+    cols = st.columns(3)
+    for col, (key, title, colour, sub) in zip(cols, _ANSWER):
+        rows = v[v["Verdict"] == key]
+        items: List[str] = []
+        if key == CL.SAME:
+            for grp, g in rows.groupby("Group", sort=False):
+                names = list(g["Stream"])
+                if d.relative_to and grp == d.relative_to:
+                    detail = f"track {grp}, the reference, too closely to count as a bet"
+                    if len(names) == 1:
+                        detail = f"tracks {grp}, the reference, too closely to count as a bet"
+                else:
+                    m = d.corr.loc[names, names].to_numpy()
+                    avg = float(m[np.triu_indices(len(names), 1)].mean())
+                    detail = f"average correlation {avg:.2f}"
+                items.append(_item(", ".join(names), detail))
+        else:
+            items = [_item(r.Stream, r.Reason) for r in rows.itertuples()]
+        col.markdown(_card(title, colour, sub, items), unsafe_allow_html=True)
+    na = v[v["Verdict"] == CL.NOT_ASSESSED]
+    if not na.empty:
+        _note("Not assessed: " + "; ".join(f"<b>{r.Stream}</b> ({r.Reason})"
+                                          for r in na.itertuples()) + ".")
+
+
 def render(rets: pd.DataFrame, prefix: str, *, bench: Optional[pd.Series] = None,
            bench_label: Optional[str] = None, start: Any = None, end: Any = None,
            default: Optional[List[str]] = None, source_note: str = ""
@@ -319,6 +380,8 @@ def render(rets: pd.DataFrame, prefix: str, *, bench: Optional[pd.Series] = None
     cfg = d.cfg
     al = d.alignment
     rel = d.relative_to
+
+    _answer(d)
 
     # -- what was used --------------------------------------------------
     for n in al.notes:

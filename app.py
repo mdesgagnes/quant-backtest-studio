@@ -1297,8 +1297,22 @@ if source == "Return stream":
         day_first = {"Auto-detect": None, "Day first (31/12/2024)": True,
                      "Month first (12/31/2024)": False}[order_label]
     else:
+        rs_preset = st.sidebar.selectbox(
+            "Preset universe", ["Custom"] + PRESETS.names(), key="rs_preset",
+            help="Fills the tickers below with a ready-made set. They stay "
+                 "editable. The Results tab compares up to 10 at a time; the "
+                 "Diversification tab takes them all.")
+        if rs_preset != st.session_state.get("_rs_preset_applied"):
+            st.session_state["_rs_preset_applied"] = rs_preset
+            if rs_preset != "Custom":
+                st.session_state["rsyft"] = ", ".join(PRESETS.get(rs_preset)["tickers"])
+        if rs_preset != "Custom":
+            st.sidebar.markdown(
+                f'<div class="note">{PRESETS.get(rs_preset).get("note", "")}</div>',
+                unsafe_allow_html=True)
+        st.session_state.setdefault("rsyft", "SPY, QQQ, TLT, GLD")
         yf_text = st.sidebar.text_input(
-            "Tickers", "SPY, QQQ, TLT, GLD", key="rsyft",
+            "Tickers", key="rsyft",
             help="Comma-separated Yahoo Finance symbols: .TO for Toronto "
                  "listings (XIU.TO), ^ for indices (^GSPC). Up to 10 can be "
                  "analysed side by side.")
