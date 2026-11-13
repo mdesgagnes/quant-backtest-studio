@@ -493,7 +493,9 @@ def dendrogram(linkage: np.ndarray, labels: list, cut_height: float,
                theme: str = "dark") -> go.Figure:
     """Cluster tree, leaves listed top to bottom, with the cut line drawn.
 
-    Branches below the cut take their cluster's colour; branches above it
+    Each branch starts beside its label (correlation 1 on the left) and
+    joins grow to the right. Branches inside a cluster of two or more take
+    that cluster's colour; streams that stand alone and joins beyond the cut
     are grey. With `correlation_axis` the distance axis is labelled in the
     equivalent correlation, rho = 1 - 2 d^2.
     """
@@ -504,6 +506,19 @@ def dendrogram(linkage: np.ndarray, labels: list, cut_height: float,
     leaves = dg["ivl"]
     # Colour each link by the cluster of the leaves under it, when below the cut.
     leaf_y = {nm: 5.0 + 10.0 * i for i, nm in enumerate(leaves)}
+    # Distinct colours for clusters of two or more, in tree order. The grey
+    # and blue series colours are left out: grey is for streams that stand
+    # alone, and the palette has no blue accent.
+    cluster_color: Dict[int, str] = {}
+    if clusters is not None:
+        # Sand sits too close to the grey of a lone stream, so it comes last.
+        hues = [c for c in colors if c not in ("#8C93A8", "#5B9EC7", "#3F3A34", "#5B7A8C")]
+        hues = [c for c in hues if c not in ("#C9B896",)] + [c for c in hues if c == "#C9B896"]
+        sizes = clusters.value_counts()
+        for nm in leaves:
+            k = int(clusters.get(nm, 0))
+            if k and sizes.get(k, 0) > 1 and k not in cluster_color:
+                cluster_color[k] = hues[len(cluster_color) % len(hues)]
     fig = go.Figure()
     for ic, dc in zip(dg["icoord"], dg["dcoord"]):
         color = pal["muted"]
@@ -511,7 +526,7 @@ def dendrogram(linkage: np.ndarray, labels: list, cut_height: float,
             mid = (ic[0] + ic[3]) / 2.0
             nearest_leaf = min(leaves, key=lambda nm: abs(leaf_y[nm] - mid))
             k = int(clusters.get(nearest_leaf, 0))
-            color = colors[(k - 1) % len(colors)] if k else pal["muted"]
+            color = cluster_color.get(k, pal["muted"])
         fig.add_trace(go.Scatter(x=dc, y=ic, mode="lines", hoverinfo="skip",
                                  line=dict(color=color, width=1.4), showlegend=False))
     top = max([max(d) for d in dg["dcoord"]] + [cut_height]) * 1.05 + 1e-9
@@ -525,12 +540,14 @@ def dendrogram(linkage: np.ndarray, labels: list, cut_height: float,
     fig.update_yaxes(tickvals=[leaf_y[nm] for nm in leaves], ticktext=leaves,
                      range=[10.0 * len(leaves), 0], showgrid=False,
                      tickfont=dict(family=MONO, size=10, color=pal["text"]))
-    fig.update_xaxes(range=[top, 0], showgrid=True, gridcolor=pal["rule"])
+    fig.update_xaxes(range=[0, top], showgrid=True, gridcolor=pal["rule"])
     if correlation_axis:
-        rhos = [r for r in (1.0, 0.9, 0.8, 0.6, 0.4, 0.2, 0.0, -0.5, -1.0)
-                if np.sqrt(0.5 * (1 - r)) <= top]
+        low = 1.0 - 2.0 * top * top            # lowest correlation on the axis
+        step = next(s for s in (0.05, 0.1, 0.2, 0.5) if (1.0 - low) / s <= 10)
+        rhos = [round(1.0 - i * step, 2) for i in range(int(2.0 / step) + 1)]
+        rhos = [r for r in rhos if r >= -1.0 and np.sqrt(0.5 * (1 - r)) <= top]
         fig.update_xaxes(tickvals=[float(np.sqrt(0.5 * (1 - r))) for r in rhos],
-                         ticktext=[f"{r:.1f}" for r in rhos],
+                         ticktext=[f"{r:.2f}" if step < 0.1 else f"{r:.1f}" for r in rhos],
                          title=dict(text="Correlation at which branches join",
                                     font=dict(size=11, color=pal["muted"])))
     else:
