@@ -277,7 +277,7 @@ def test_export_sections():
     df["FLAT"] = 0.0
     secs = CL.export_sections(CL.analyse(df))
     titles = [s[1] for s in secs]
-    assert titles[:4] == ["Diversification Summary", "Cluster Assignment",
+    assert titles[:5] == ["Verdict", "Diversification Summary", "Cluster Assignment",
                           "Redundant Pairs", "Correlation, Cluster Order"]
     assert "Streams Left Out" in titles
     assert all(s[0] == "Diversification" for s in secs)
@@ -412,3 +412,77 @@ def test_relative_mode_near_reference_is_the_reference_bet():
     # the floor is a setting: at zero the stream is clustered like any other
     cfg0 = _cfg(relative_to="MKT", min_tracking_error=0.0)
     assert "NEAR" in CL.analyse(df, cfg0).corr.columns
+
+
+# ---------------------------------------------------------------- verdict
+def _v(d):
+    return d.verdicts.set_index("Stream")
+
+
+def test_verdict_same_bet_and_distinct():
+    df = _blocks()
+    rng = np.random.default_rng(21)
+    df["LONE"] = 0.02 * rng.standard_normal(len(df))
+    d = CL.analyse(df)
+    v = _v(d)
+    assert (v.loc[[c for c in df.columns if c.startswith("B")], "Verdict"] == "Same bet").all()
+    assert v.at["LONE", "Verdict"] == "Distinct"
+    assert v.loc["B0S0", "Group"] != v.loc["B1S0", "Group"]
+    assert "same bet as B0S1 and B0S2" in v.at["B0S0", "Reason"]
+    assert d.table.set_index("Stream").at["LONE", "Verdict"] == "Distinct"
+    assert CL.headline(d) == ("Of 7 streams, 1 is a distinct return stream and "
+                              "6 repeat another bet (2 groups).")
+    assert list(d.verdicts["Verdict"])[0] == "Distinct"          # answer order
+
+
+def test_verdict_close_to_line_is_to_review():
+    rng = np.random.default_rng(5)
+    a = rng.standard_normal(2000)
+    df = pd.DataFrame({"A": a, "NEAR": 0.75 * a + np.sqrt(1 - 0.75 ** 2) * rng.standard_normal(2000),
+                       "FAR": rng.standard_normal(2000)},
+                      index=pd.date_range("1990-01-05", periods=2000, freq="W-FRI")) * 0.02
+    v = _v(CL.analyse(df))                                     # threshold 0.80, margin 0.10
+    assert v.at["NEAR", "Verdict"] == "To review"
+    assert "close to the 0.80 line" in v.at["NEAR", "Reason"]
+    assert v.at["FAR", "Verdict"] == "Distinct"
+    v0 = _v(CL.analyse(df, _cfg(review_margin=0.0)))
+    assert v0.at["NEAR", "Verdict"] == "Distinct"
+
+
+def test_verdict_down_market_convergence_is_to_review():
+    rng = np.random.default_rng(8)
+    n = 520
+    a = 0.02 * rng.standard_normal(n)
+    x = 0.02 * rng.standard_normal(n)
+    df = pd.DataFrame({"A": a, "X": x, "B": 0.02 * rng.standard_normal(n)}, index=_weekly(n))
+    mask = CL.down_market_mask(df["A"], 0.1)
+    df.loc[mask, "X"] = df.loc[mask, "A"]                       # moves with A only in sell-offs
+    cfg = _cfg()
+    cfg.stress.percentile = 0.1
+    cfg.stress.benchmark = "A"
+    v = _v(CL.analyse(df, cfg))
+    assert v.at["X", "Verdict"] == "To review"
+    assert "in down markets" in v.at["X", "Reason"]
+
+
+def test_verdict_loose_group_and_not_assessed():
+    df = _blocks(blocks=3)
+    df["SHORT"] = np.nan
+    df.iloc[-10:, df.columns.get_loc("SHORT")] = 0.01
+    d = CL.analyse(df, _cfg(cut="clusters", n_clusters=2))      # forces two blocks together
+    v = _v(d)
+    loose = v[v["Reason"].str.startswith("grouped with")]
+    assert len(loose) == 6 and (loose["Verdict"] == "To review").all()
+    assert v.at["SHORT", "Verdict"] == "Not assessed"
+    assert "could not be assessed" in CL.headline(d)
+
+
+def test_verdict_relative_mode_reference_clone():
+    df = _one_market()
+    rng = np.random.default_rng(11)
+    df["NEAR"] = df["MKT"] + 0.0015 * rng.standard_normal(len(df))
+    d = CL.analyse(df, _cfg(relative_to="MKT"))
+    v = _v(d)
+    assert v.at["NEAR", "Verdict"] == "Same bet" and v.at["NEAR", "Group"] == "MKT"
+    assert "MKT" not in v.index
+    assert "measured beyond MKT" in CL.headline(d)

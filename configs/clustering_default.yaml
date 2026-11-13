@@ -19,6 +19,8 @@ clustering:
   relative_to: null          # a column name (e.g. XIC.TO): cluster each stream's
                              # return minus this one's, to compare funds of one
                              # asset class or region by their tilts
+  review_margin: 0.1         # a stream standing alone but this close below the threshold
+                             # is flagged "to review" rather than "distinct"
   min_tracking_error: 0.02   # relative mode: a stream closer to the reference than this
                              # (annualized) is the reference's own bet, not a new one
   stress:

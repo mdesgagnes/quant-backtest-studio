@@ -78,6 +78,7 @@ class ClusteringConfig:
     rolling_window: int = 52          # periods, for the pair-stability chart
     relative_to: Optional[str] = None  # column name: cluster returns minus this stream's
     min_tracking_error: float = 0.02  # relative mode: below this a stream is the reference's bet
+    review_margin: float = 0.10       # a lone stream this close below the threshold is "to review"
     stress: StressSettings = field(default_factory=StressSettings)
 
     def validate(self) -> "ClusteringConfig":
@@ -98,6 +99,8 @@ class ClusteringConfig:
              "relative_to must be a column name or null"),
             (0.0 <= float(self.min_tracking_error) < 1.0,
              "min_tracking_error must be between 0 and 1"),
+            (0.0 <= float(self.review_margin) < 1.0,
+             "review_margin must be between 0 and 1"),
         ]
         bad = [msg for ok, msg in checks if not ok]
         if bad:
@@ -513,6 +516,7 @@ class Diversification:
     down_n: int
     down_label: str
     relative_to: Optional[str] = None
+    verdicts: Optional[pd.DataFrame] = None   # Stream, Verdict, Group, Reason
 
     @property
     def n_streams(self) -> int:
@@ -651,13 +655,125 @@ def analyse(rets: pd.DataFrame, cfg: Optional[ClusteringConfig] = None,
     down, dn = stress_correlation(al.returns[keep], b[keep], cfg.stress.percentile,
                                   cfg.correlation)
     cc = cluster_correlation(corr, res.labels)
-    return Diversification(
+    d = Diversification(
         cfg=cfg, alignment=al, corr=corr, clusters=res,
         effective_bets=effective_bets(corr, cfg.effective_bets),
         within=cc["within"], between=cc["between"],
         table=cluster_table(total[list(corr.columns)], corr, res, al.ppy, ref),
         redundant=redundancy_table(corr, float(cfg.threshold), down),
         down_corr=down, down_n=dn, down_label=blabel, relative_to=cfg.relative_to)
+    d.verdicts = verdict_table(d)
+    d.table["Verdict"] = d.table["Stream"].map(
+        d.verdicts.set_index("Stream")["Verdict"])
+    return d
+
+
+# ----------------------------------------------------------------------
+# The answer: distinct, same bet, to review
+# ----------------------------------------------------------------------
+DISTINCT, SAME, REVIEW, NOT_ASSESSED = "Distinct", "Same bet", "To review", "Not assessed"
+VERDICT_ORDER = [DISTINCT, SAME, REVIEW, NOT_ASSESSED]
+
+
+def _names(xs: List[str]) -> str:
+    xs = list(xs)
+    return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
+
+
+def verdict_table(d: "Diversification") -> pd.DataFrame:
+    """One row per stream: Distinct, Same bet, To review or Not assessed,
+    with the group it belongs to and the reason in plain words.
+
+    Same bet: grouped with others whose average correlation is at or above
+    the threshold. To review: a lone stream within `review_margin` of the
+    threshold, or above it with another stream in down markets; or a group
+    whose average correlation is below the threshold (fixed cluster count).
+    Distinct: the rest. Not assessed: left out for lack of data.
+    """
+    cfg = d.cfg
+    thr, margin = float(cfg.threshold), float(cfg.review_margin)
+    corr, labels = d.corr, d.clusters.labels
+    down_ok = (d.down_corr is not None and d.down_n >= cfg.stress.min_observations
+               and not d.down_corr.isna().all().all())
+    rows: List[Dict[str, Any]] = []
+    group_no = 0
+    for k in pd.unique(labels.loc[d.clusters.order]):
+        members = [s for s in d.clusters.order if labels[s] == k]
+        if len(members) > 1:
+            group_no += 1
+            sub = corr.loc[members, members].to_numpy()
+            avg = float(sub[np.triu_indices(len(members), 1)].mean())
+            for s in members:
+                others = _names([m for m in members if m != s])
+                if avg >= thr:
+                    rows.append({"Stream": s, "Verdict": SAME, "Group": f"Group {group_no}",
+                                 "Reason": f"same bet as {others} (average correlation "
+                                           f"{avg:.2f})"})
+                else:
+                    rows.append({"Stream": s, "Verdict": REVIEW, "Group": f"Group {group_no}",
+                                 "Reason": f"grouped with {others}, but their average "
+                                           f"correlation is {avg:.2f}, below the "
+                                           f"{thr:.2f} line"})
+            continue
+        s = members[0]
+        others = corr.loc[s].drop(s)
+        near, rho = str(others.idxmax()), float(others.max())
+        reason, verdict = f"highest correlation {rho:.2f}, with {near}", DISTINCT
+        if down_ok:
+            dc = d.down_corr.loc[s].drop(s)
+            dn, drho = str(dc.idxmax()), float(dc.max())
+            if drho >= thr:
+                verdict = REVIEW
+                reason = (f"distinct on average ({rho:.2f} at most, with {near}), but "
+                          f"{drho:.2f} correlated with {dn} in down markets")
+        if verdict == DISTINCT and rho >= thr:
+            verdict = REVIEW
+            reason = (f"{rho:.2f} correlated with {near}, above the {thr:.2f} line, "
+                      f"though not grouped with it")
+        elif verdict == DISTINCT and rho >= thr - margin:
+            verdict = REVIEW
+            reason = (f"stands alone, but {rho:.2f} correlated with {near}, close to "
+                      f"the {thr:.2f} line")
+        rows.append({"Stream": s, "Verdict": verdict, "Group": "", "Reason": reason})
+    for r in d.alignment.dropped.itertuples(index=False):
+        why = str(r.Reason)
+        if why.startswith("it is the reference"):
+            continue
+        if d.relative_to and (why.startswith("it tracks") or why.startswith("it moves exactly")):
+            rows.append({"Stream": r.Stream, "Verdict": SAME, "Group": d.relative_to,
+                         "Reason": f"same bet as {d.relative_to}, the reference: "
+                                   + why.split(": the same bet")[0][3:]})
+        else:
+            rows.append({"Stream": r.Stream, "Verdict": NOT_ASSESSED, "Group": "",
+                         "Reason": why})
+    out = pd.DataFrame(rows, columns=["Stream", "Verdict", "Group", "Reason"])
+    out["_o"] = out["Verdict"].map({v: i for i, v in enumerate(VERDICT_ORDER)})
+    return out.sort_values(["_o", "Group"], kind="mergesort").drop(columns="_o") \
+        .reset_index(drop=True)
+
+
+def headline(d: "Diversification") -> str:
+    """The answer in one sentence."""
+    v = d.verdicts if d.verdicts is not None else verdict_table(d)
+    n = {k: int((v["Verdict"] == k).sum()) for k in VERDICT_ORDER}
+    groups = v.loc[v["Verdict"] == SAME, "Group"].nunique()
+    total = int(len(v))
+
+    def count(k: int, one: str, many: str) -> str:
+        return f"{k} {one if k == 1 else many}"
+
+    parts = [count(n[DISTINCT], "is a distinct return stream", "are distinct return streams")
+             if n[DISTINCT] else "none is a distinct return stream"]
+    if n[SAME]:
+        parts.append(count(n[SAME], "repeats", "repeat") + " another bet ("
+                     + count(groups, "group", "groups") + ")")
+    if n[REVIEW]:
+        parts.append(count(n[REVIEW], "needs", "need") + " a closer look")
+    if n[NOT_ASSESSED]:
+        parts.append(count(n[NOT_ASSESSED], "could not be assessed", "could not be assessed"))
+    body = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    beyond = f", measured beyond {d.relative_to}" if d.relative_to else ""
+    return f"Of {total} streams{beyond}, {body}."
 
 
 # ----------------------------------------------------------------------
@@ -766,6 +882,7 @@ def summary_frame(d: Diversification) -> pd.DataFrame:
     rows = [
         ("Streams analysed", d.n_streams),
         ("Streams left out", len(d.alignment.dropped)),
+        ("Answer", headline(d)),
         ("Window", d.window_text),
         ("Measured relative to", d.relative_to or "nothing (total returns)"),
         ("Minimum tracking error (relative mode)",
@@ -779,6 +896,7 @@ def summary_frame(d: Diversification) -> pd.DataFrame:
         ("Average correlation within clusters", d.within),
         ("Average correlation between clusters", d.between),
         ("Silhouette (guide only)", d.clusters.silhouette),
+        ("Review margin", f"{cfg.review_margin:.2f} below the threshold"),
         ("Down markets defined by", d.down_label),
         ("Down-market periods",
          f"{d.down_n} (worst {cfg.stress.percentile:.0%} of periods)"),
@@ -790,6 +908,8 @@ def export_sections(d: Diversification, module: str = MODULE) -> List[Tuple[Any,
     """Workbook sections (module, title, frame, write index) for `excel_export`."""
     order = d.clusters.order
     secs: List[Tuple[Any, ...]] = [
+        (module, "Verdict", d.verdicts if d.verdicts is not None else verdict_table(d),
+         False, headline(d)),
         (module, "Diversification Summary", summary_frame(d), False),
         (module, "Cluster Assignment", d.table, False),
         (module, "Redundant Pairs", d.redundant, False),
