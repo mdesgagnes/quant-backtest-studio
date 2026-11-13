@@ -25,12 +25,17 @@ Method, kept deliberately simple:
    clusters, every pair above the threshold, and the same matrix measured
    only in the benchmark's worst periods.
 
+With `relative_to` set (a market index such as XIC.TO), every stream's
+return minus that stream's return is clustered instead. The shared market
+move drops out, so funds from one asset class or region separate by their
+tilts rather than all looking alike.
+
 No statistic uses data outside the window it is given.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -71,6 +76,8 @@ class ClusteringConfig:
     n_clusters: int = 4               # used when cut = clusters
     effective_bets: str = "entropy"   # entropy | participation
     rolling_window: int = 52          # periods, for the pair-stability chart
+    relative_to: Optional[str] = None  # column name: cluster returns minus this stream's
+    min_tracking_error: float = 0.02  # relative mode: below this a stream is the reference's bet
     stress: StressSettings = field(default_factory=StressSettings)
 
     def validate(self) -> "ClusteringConfig":
@@ -87,6 +94,10 @@ class ClusteringConfig:
             (int(self.rolling_window) >= 3, "rolling_window must be at least 3"),
             (0.0 < float(self.stress.percentile) < 1.0, "stress percentile must be between 0 and 1"),
             (int(self.stress.min_observations) >= 3, "stress min_observations must be at least 3"),
+            (self.relative_to is None or isinstance(self.relative_to, str),
+             "relative_to must be a column name or null"),
+            (0.0 <= float(self.min_tracking_error) < 1.0,
+             "min_tracking_error must be between 0 and 1"),
         ]
         bad = [msg for ok, msg in checks if not ok]
         if bad:
@@ -102,6 +113,8 @@ def config_from_dict(data: Optional[Dict[str, Any]]) -> ClusteringConfig:
     stress = data.pop("stress", None) or {}
     known = set(ClusteringConfig.__dataclass_fields__) - {"stress"}
     cfg = ClusteringConfig(**{k: v for k, v in data.items() if k in known})
+    if cfg.relative_to is not None:
+        cfg.relative_to = str(cfg.relative_to).strip() or None
     s_known = set(StressSettings.__dataclass_fields__)
     cfg.stress = StressSettings(**{k: v for k, v in stress.items() if k in s_known})
     return cfg.validate()
@@ -404,21 +417,32 @@ def nearest(corr: pd.DataFrame) -> pd.DataFrame:
 
 
 def cluster_table(returns: pd.DataFrame, corr: pd.DataFrame, res: ClusterResult,
-                  ppy: int) -> pd.DataFrame:
+                  ppy: int, ref: Optional[pd.Series] = None) -> pd.DataFrame:
     """Stream, cluster, nearest neighbour and its correlation, annualized
-    volatility and max drawdown, all over the aligned window."""
+    volatility and max drawdown, all over the aligned window.
+
+    With `ref` (total returns of the reference), the last two become
+    tracking error and the deepest fall of the stream's value relative to
+    the reference's."""
     near = nearest(corr)
+    vol_col, dd_col = (("Tracking error", "Max relative drawdown") if ref is not None
+                       else ("Volatility", "Max drawdown"))
     rows = []
     for nm in res.order:
         r = returns[nm]
         eq = (1.0 + r).cumprod()
+        if ref is not None:
+            eq = eq / (1.0 + ref).cumprod()
+            vol = float((r - ref).std(ddof=0) * math.sqrt(ppy))
+        else:
+            vol = float(r.std(ddof=0) * math.sqrt(ppy))
         eq = pd.concat([pd.Series([1.0]), eq.reset_index(drop=True)])
         rows.append({"Stream": nm, "Cluster": int(res.labels[nm]),
                      "Cluster size": int((res.labels == res.labels[nm]).sum()),
                      "Closest to": near.at[nm, "Closest to"],
                      "Correlation": float(near.at[nm, "Correlation"]),
-                     "Volatility": float(r.std(ddof=0) * math.sqrt(ppy)),
-                     "Max drawdown": float((eq / eq.cummax() - 1.0).min())})
+                     vol_col: vol,
+                     dd_col: float((eq / eq.cummax() - 1.0).min())})
     return pd.DataFrame(rows)
 
 
@@ -488,6 +512,7 @@ class Diversification:
     down_corr: Optional[pd.DataFrame]
     down_n: int
     down_label: str
+    relative_to: Optional[str] = None
 
     @property
     def n_streams(self) -> int:
@@ -522,18 +547,93 @@ def _bench_for(rets: pd.DataFrame, aligned: Alignment, cfg: ClusteringConfig,
     return aligned.returns.mean(axis=1), "equal-weight average of the streams"
 
 
+def relative_returns(total: pd.DataFrame, ref: str) -> pd.DataFrame:
+    """Each stream's return minus the reference's, period by period."""
+    return total.drop(columns=[ref]).sub(total[ref], axis=0)
+
+
+def _prepare(df: pd.DataFrame, cols: List[str], cfg: ClusteringConfig,
+             start: Any, end: Any
+             ) -> Tuple[Alignment, pd.DataFrame, Optional[pd.Series]]:
+    """(alignment of the returns to cluster, aligned total returns, the
+    reference's total returns or None). Without `relative_to` the returns to
+    cluster are the total returns."""
+    ref = cfg.relative_to
+    if not ref:
+        al = align(df[cols], cfg, start, end)
+        return al, al.returns, None
+    if ref not in df.columns:
+        raise ClusteringError(f"{ref} is not loaded, so returns cannot be measured "
+                              f"relative to it.")
+    use = [c for c in cols if c != ref]
+    al = align(df[use + [ref]], cfg, start, end)
+    if ref not in al.returns.columns:
+        why = al.dropped.loc[al.dropped["Stream"] == ref, "Reason"]
+        reason = why.iloc[0] if len(why) else "not enough history"
+        raise ClusteringError(f"{ref} was left out ({reason}), so returns cannot be "
+                              f"measured relative to it.")
+    total = al.returns
+    act = relative_returns(total, ref)
+    dropped = list(al.dropped.itertuples(index=False, name=None))
+    if ref in cols:
+        dropped.append((ref, "it is the reference the others are measured against"))
+    # Correlation ignores the size of a tilt: a fund that barely differs from
+    # the reference would count as a full bet. Below the minimum tracking
+    # error it is the reference's own bet.
+    flat = []
+    floor = float(cfg.min_tracking_error)
+    for c in act.columns:
+        te = float(act[c].std(ddof=0)) * math.sqrt(al.ppy)
+        if te < 1e-9:
+            flat.append(c)
+            dropped.append((c, f"it moves exactly with {ref}"))
+        elif te < floor:
+            flat.append(c)
+            dropped.append((c, f"it tracks {ref} closely, with a tracking error of "
+                               f"{te:.1%} a year, below {floor:.1%}: the same bet as {ref}"))
+    act = act.drop(columns=flat)
+    if act.shape[1] < 2:
+        raise ClusteringError(f"At least two streams that differ from {ref} are needed. "
+                              + _dropped_text(dropped))
+    notes = list(al.notes) + [
+        f"Returns are measured relative to {ref}: each period, the stream's return "
+        f"minus {ref}'s. The move they share drops out, so the clusters show which "
+        f"tilts differ."]
+    rel = replace(al, returns=act,
+                  dropped=pd.DataFrame(dropped, columns=["Stream", "Reason"]),
+                  truncated=al.truncated[al.truncated["Stream"] != ref]
+                  .reset_index(drop=True),
+                  notes=notes)
+    return rel, total, total[ref]
+
+
+def pair_returns(rets: pd.DataFrame, a: str, b: str, cfg: ClusteringConfig,
+                 start: Any = None, end: Any = None) -> pd.DataFrame:
+    """Two streams over their own shared window, relative to the reference
+    when the config sets one; for the rolling-correlation chart."""
+    df = rets.copy()
+    df.columns = [str(c) for c in df.columns]
+    al, _, _ = _prepare(df, [str(a), str(b)], cfg, start, end)
+    return al.returns[[str(a), str(b)]]
+
+
 def analyse(rets: pd.DataFrame, cfg: Optional[ClusteringConfig] = None,
             bench: Optional[pd.Series] = None, bench_label: Optional[str] = None,
             start: Any = None, end: Any = None) -> Diversification:
     """Align, correlate, cluster and summarise a set of return streams.
 
     `bench` (optional) defines the down markets when the config names no
-    benchmark; without either, the equal-weight average of the streams does.
+    benchmark; without either, the equal-weight average of the streams does
+    (or, with `relative_to`, the reference). Down markets are always read
+    on total returns.
     """
     cfg = (cfg or ClusteringConfig()).validate()
     rets = rets.copy()
     rets.columns = [str(c) for c in rets.columns]
-    al = align(rets, cfg, start, end)
+    cols = list(rets.columns)
+    if cfg.relative_to:
+        cols = [c for c in cols if c != cfg.relative_to]
+    al, total, ref = _prepare(rets, cols, cfg, start, end)
     corr = correlation(al.returns, cfg.correlation)
     res = cluster(corr, cfg)
     if bench is not None:
@@ -543,7 +643,9 @@ def analyse(rets: pd.DataFrame, cfg: Optional[ClusteringConfig] = None,
             bench = bench[bench.index >= pd.Timestamp(start)]
         if end is not None:
             bench = bench[bench.index <= pd.Timestamp(end)]
-    b, blabel = _bench_for(rets, al, cfg, bench, bench_label)
+    b, blabel = _bench_for(rets, replace(al, returns=total), cfg, bench, bench_label)
+    if ref is not None and blabel.startswith("equal-weight"):
+        b, blabel = ref, str(cfg.relative_to)
     b = b.reindex(al.returns.index)
     keep = b.notna().to_numpy()
     down, dn = stress_correlation(al.returns[keep], b[keep], cfg.stress.percentile,
@@ -553,9 +655,9 @@ def analyse(rets: pd.DataFrame, cfg: Optional[ClusteringConfig] = None,
         cfg=cfg, alignment=al, corr=corr, clusters=res,
         effective_bets=effective_bets(corr, cfg.effective_bets),
         within=cc["within"], between=cc["between"],
-        table=cluster_table(al.returns, corr, res, al.ppy),
+        table=cluster_table(total[list(corr.columns)], corr, res, al.ppy, ref),
         redundant=redundancy_table(corr, float(cfg.threshold), down),
-        down_corr=down, down_n=dn, down_label=blabel)
+        down_corr=down, down_n=dn, down_label=blabel, relative_to=cfg.relative_to)
 
 
 # ----------------------------------------------------------------------
@@ -581,7 +683,14 @@ def candidate_test(rets: pd.DataFrame, holdings: List[str], candidate: str,
                    start: Any = None, end: Any = None) -> CandidateVerdict:
     """Does `candidate` add a new bet to `holdings`, or repeat one?"""
     cfg = (cfg or ClusteringConfig()).validate()
-    holdings = [h for h in dict.fromkeys(map(str, holdings)) if h != str(candidate)]
+    ref = cfg.relative_to
+    if ref and str(candidate) == ref:
+        return CandidateVerdict(str(candidate), "untestable", None, float("nan"), [],
+                                float("nan"), float("nan"),
+                                f"{candidate} cannot be tested: it is the reference the "
+                                f"others are measured against.")
+    holdings = [h for h in dict.fromkeys(map(str, holdings))
+                if h != str(candidate) and h != ref]
     if not holdings:
         raise ClusteringError("Pick at least one current holding to compare with.")
     cols = holdings + [str(candidate)]
@@ -591,7 +700,7 @@ def candidate_test(rets: pd.DataFrame, holdings: List[str], candidate: str,
     if missing:
         raise ClusteringError("Not loaded: " + ", ".join(missing) + ".")
     try:
-        al = align(df[cols], cfg, start, end)
+        al, _, _ = _prepare(df, cols, cfg, start, end)
     except ClusteringError as exc:
         return CandidateVerdict(str(candidate), "untestable", None, float("nan"), [],
                                 float("nan"), float("nan"),
@@ -599,6 +708,12 @@ def candidate_test(rets: pd.DataFrame, holdings: List[str], candidate: str,
     if str(candidate) not in al.returns.columns:
         why = al.dropped.loc[al.dropped["Stream"] == str(candidate), "Reason"]
         reason = why.iloc[0] if len(why) else "not enough history"
+        if ref and (reason.startswith("it tracks") or reason.startswith("it moves exactly")):
+            detail = reason.split(": the same bet")[0]
+            return CandidateVerdict(
+                str(candidate), "duplicates", ref, 1.0, [ref], float("nan"), float("nan"),
+                f"{candidate} duplicates {ref} itself: {detail}. It adds nothing "
+                f"beyond the market it is measured against.", dropped=al.dropped)
         return CandidateVerdict(str(candidate), "untestable", None, float("nan"), [],
                                 float("nan"), float("nan"),
                                 f"{candidate} cannot be tested: {reason}.",
@@ -635,7 +750,8 @@ def candidate_test(rets: pd.DataFrame, holdings: List[str], candidate: str,
         sentence = (f"{candidate} adds a new bet: its highest correlation is {rho:.2f}, "
                     f"with {near}. {change}")
     win = (f"{len(al.returns):,} {al.frequency} returns, "
-           f"{al.returns.index[0].date()} to {al.returns.index[-1].date()}")
+           f"{al.returns.index[0].date()} to {al.returns.index[-1].date()}"
+           + (f", relative to {ref}" if ref else ""))
     return CandidateVerdict(str(candidate), verdict, near, rho, joins, before, after,
                             sentence, ceiling, win, al.dropped)
 
@@ -651,6 +767,9 @@ def summary_frame(d: Diversification) -> pd.DataFrame:
         ("Streams analysed", d.n_streams),
         ("Streams left out", len(d.alignment.dropped)),
         ("Window", d.window_text),
+        ("Measured relative to", d.relative_to or "nothing (total returns)"),
+        ("Minimum tracking error (relative mode)",
+         f"{cfg.min_tracking_error:.1%}" if d.relative_to else "not used"),
         ("Effective number of bets", round(d.effective_bets, 2)),
         ("Effective bets method", cfg.effective_bets),
         ("Clusters", d.clusters.n_clusters),

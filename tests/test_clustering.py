@@ -321,3 +321,94 @@ def test_workbook_sheet_is_opt_in():
     cells = [c.value for row in wb["Diversification"].iter_rows() for c in row]
     assert "Cluster Assignment" in cells and "Effective number of bets" in cells
     assert set(plain.sheetnames) == set(wb.sheetnames) - {"Diversification"}
+
+
+# ---------------------------------------------------------------- relative mode
+def _one_market(n=520, seed=4):
+    """Six funds of one market: a large shared move, plus one of two tilts."""
+    rng = np.random.default_rng(seed)
+    m = 0.02 * rng.standard_normal(n)
+    tilts = [0.006 * rng.standard_normal(n) for _ in range(2)]
+    cols = {"MKT": m}
+    for t in range(2):
+        for i in range(3):
+            cols[f"T{t}F{i}"] = m + tilts[t] + 0.002 * rng.standard_normal(n)
+    return pd.DataFrame(cols, index=_weekly(n))
+
+
+def test_relative_mode_separates_tilts_the_market_hides():
+    df = _one_market()
+    total = CL.analyse(df.drop(columns="MKT"))
+    assert total.clusters.n_clusters == 1           # everything looks alike
+    rel = CL.analyse(df, _cfg(relative_to="MKT"))
+    lab = rel.clusters.labels
+    assert "MKT" not in rel.corr.columns
+    assert rel.clusters.n_clusters == 2
+    assert lab["T0F0"] == lab["T0F1"] == lab["T0F2"] != lab["T1F0"]
+    assert rel.effective_bets > total.effective_bets
+    assert rel.relative_to == "MKT"
+    assert rel.down_label == "MKT"                  # down markets read on the reference
+    assert any("relative to MKT" in n for n in rel.alignment.notes)
+
+
+def test_relative_returns_and_table_figures():
+    df = _one_market(n=120)
+    rel = CL.analyse(df, _cfg(relative_to="MKT"))
+    act = df["T0F0"] - df["MKT"]
+    assert rel.corr.loc["T0F0", "T0F1"] == pytest.approx(act.corr(df["T0F1"] - df["MKT"]))
+    row = rel.table.set_index("Stream").loc["T0F0"]
+    assert row["Tracking error"] == pytest.approx(act.std(ddof=0) * np.sqrt(52))
+    wealth = (1 + df["T0F0"]).cumprod() / (1 + df["MKT"]).cumprod()
+    wealth = pd.concat([pd.Series([1.0]), wealth.reset_index(drop=True)])
+    assert row["Max relative drawdown"] == pytest.approx((wealth / wealth.cummax() - 1).min())
+    assert "Volatility" not in rel.table.columns
+
+
+def test_relative_mode_drops_reference_and_its_clones():
+    df = _one_market()
+    df["CLONE"] = df["MKT"]
+    rel = CL.analyse(df, _cfg(relative_to="MKT"))
+    reasons = rel.alignment.dropped.set_index("Stream")["Reason"]
+    assert "moves exactly with MKT" in reasons["CLONE"]
+    with pytest.raises(CL.ClusteringError, match="not loaded"):
+        CL.analyse(df, _cfg(relative_to="NOPE"))
+
+
+def test_relative_candidate_and_pair():
+    df = _one_market()
+    cfg = _cfg(relative_to="MKT")
+    v = CL.candidate_test(df, ["T0F0", "T0F1", "T1F0"], "T0F2", cfg)
+    assert v.verdict == "duplicates" and "relative to MKT" in v.window
+    # in total returns the same candidate says nothing useful: it duplicates everything
+    assert CL.candidate_test(df, ["T1F0", "T1F1"], "T0F2").verdict == "duplicates"
+    assert CL.candidate_test(df, ["T1F0", "T1F1"], "T0F2", cfg).verdict == "new"
+    assert CL.candidate_test(df, ["T0F0"], "MKT", cfg).verdict == "untestable"
+    pr = CL.pair_returns(df, "T0F0", "T1F0", cfg)
+    assert pr["T0F0"].iloc[5] == pytest.approx(df["T0F0"].iloc[5] - df["MKT"].iloc[5])
+
+
+def test_relative_summary_row():
+    df = _one_market()
+    summ = CL.summary_frame(CL.analyse(df, _cfg(relative_to="MKT"))).set_index("Measure")
+    assert summ.at["Measured relative to", "Value"] == "MKT"
+    summ = CL.summary_frame(CL.analyse(df)).set_index("Measure")
+    assert summ.at["Measured relative to", "Value"].startswith("nothing")
+
+
+def test_relative_mode_near_reference_is_the_reference_bet():
+    """A fund that barely differs from the reference is not a new bet, however
+    its tiny tilt happens to correlate."""
+    df = _one_market()
+    rng = np.random.default_rng(11)
+    df["NEAR"] = df["MKT"] + 0.0015 * rng.standard_normal(len(df))   # about 1% a year
+    cfg = _cfg(relative_to="MKT")
+    rel = CL.analyse(df, cfg)
+    reason = rel.alignment.dropped.set_index("Stream").at["NEAR", "Reason"]
+    assert "tracks MKT closely" in reason and "below 2.0%" in reason
+    assert "NEAR" not in rel.corr.columns
+    v = CL.candidate_test(df, ["T0F0", "T1F0"], "NEAR", cfg)
+    assert v.verdict == "duplicates" and v.nearest == "MKT"
+    assert v.sentence.startswith("NEAR duplicates MKT itself")
+    # the floor is a setting: at zero the stream is clustered like any other
+    cfg0 = _cfg(relative_to="MKT", min_tracking_error=0.0)
+    assert "NEAR" in CL.analyse(df, cfg0).corr.columns

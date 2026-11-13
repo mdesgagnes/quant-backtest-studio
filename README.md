@@ -812,6 +812,16 @@ holdings add a new bet and which repeat one already held.
   new one, names the closest holding, and gives the change in effective
   bets next to what a fully independent stream would add.
 - **Rolling correlation** of any pair, to see whether a relationship holds.
+- **Relative to a reference.** For funds of one asset class or region, set
+  **Measure returns relative to** to the market they share (XIC.TO for
+  Canadian equity, say). Each stream's return minus the reference's is then
+  clustered, so the common move drops out and the funds separate by their
+  tilts: the table shows tracking error and max relative drawdown instead
+  of volatility and drawdown. A fund that tracks the reference within 2% a
+  year (a setting) is reported as the reference's own bet rather than
+  counted as a new one. Relative correlations run lower, so a lower cut
+  (0.70, say) usually reads better. Down markets are still defined on total
+  returns, by default the reference's worst periods.
 - **Export.** A cluster table CSV on the tab. In the Export tab, **Add the
   Diversification sheet** (off by default) adds the tables to the Excel
   report; with it off the workbook is unchanged.

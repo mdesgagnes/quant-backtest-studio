@@ -23,6 +23,7 @@ _LINK = {"Average": "average", "Ward": "ward"}
 _ENB = {"Entropy": "entropy", "Participation ratio": "participation"}
 _CORR = {"Pearson": "pearson", "Spearman (ranks)": "spearman"}
 EQUAL = "Equal-weight average of the streams"
+TOTAL = "Nothing (total returns)"
 
 
 # ----------------------------------------------------------------------
@@ -82,6 +83,8 @@ def _apply_config(prefix: str, cfg: CL.ClusteringConfig) -> None:
     s[_k(prefix, "stressmin")] = int(cfg.stress.min_observations)
     s[_k(prefix, "roll")] = int(cfg.rolling_window)
     s[_k(prefix, "yaml_bench")] = cfg.stress.benchmark
+    s[_k(prefix, "rel")] = cfg.relative_to or TOTAL
+    s[_k(prefix, "minte")] = float(cfg.min_tracking_error * 100)
 
 
 def config_from_state(prefix: str) -> CL.ClusteringConfig:
@@ -101,6 +104,10 @@ def config_from_state(prefix: str) -> CL.ClusteringConfig:
         n_clusters=int(s.get(_k(prefix, "k"), d.n_clusters)),
         effective_bets=_ENB.get(s.get(_k(prefix, "enb"), ""), d.effective_bets),
         rolling_window=int(s.get(_k(prefix, "roll"), d.rolling_window)),
+        relative_to=(None if s.get(_k(prefix, "rel"), TOTAL) == TOTAL
+                     else str(s.get(_k(prefix, "rel")))),
+        min_tracking_error=float(s.get(_k(prefix, "minte"),
+                                       d.min_tracking_error * 100)) / 100.0,
     )
     cfg.stress.percentile = int(s.get(_k(prefix, "pct"),
                                       round(d.stress.percentile * 100))) / 100.0
@@ -152,7 +159,8 @@ def compute(rets: pd.DataFrame, prefix: str, *, bench: Optional[pd.Series] = Non
     streams = selected_streams(prefix, cols, default)
     cfg = config_from_state(prefix)
     b, bl = _bench_choice(prefix, cfg, streams, bench, bench_label)
-    data = rets[streams]
+    ref = cfg.relative_to
+    data = rets[streams + ([ref] if ref and ref in cols and ref not in streams else [])]
     if cfg.stress.benchmark and cfg.stress.benchmark in cols \
             and cfg.stress.benchmark not in streams:
         b, bl = rets[cfg.stress.benchmark], cfg.stress.benchmark
@@ -221,18 +229,30 @@ def _controls(prefix: str, cols: List[str], default: Optional[List[str]],
             "k": d.n_clusters, "link": "Average", "corr": "Pearson",
             "minobs": d.min_observations, "enb": "Entropy", "roll": d.rolling_window,
             "pct": int(round(d.stress.percentile * 100)),
-            "stressmin": d.stress.min_observations}
+            "stressmin": d.stress.min_observations,
+            "minte": float(d.min_tracking_error * 100)}
     for name, v in seed.items():
         s.setdefault(_k(prefix, name), v)
     s[_k(prefix, "thr")] = min(0.99, max(0.0, float(s[_k(prefix, "thr")])))
     s[_k(prefix, "k")] = min(max(1, len(cols)), max(1, int(s[_k(prefix, "k")])))
     s[_k(prefix, "pct")] = min(50, max(5, int(s[_k(prefix, "pct")])))
     s[_k(prefix, "roll")] = min(520, max(3, int(s[_k(prefix, "roll")])))
-    st.multiselect(
+    s.setdefault(_k(prefix, "rel"), TOTAL)
+    if s[_k(prefix, "rel")] not in [TOTAL] + cols:
+        s[_k(prefix, "rel")] = TOTAL
+    r1, r2 = st.columns([3, 1])
+    r1.multiselect(
         "Streams", cols, default=default or cols,
         key=_k(prefix, f"streams_{_cols_key(cols)}"),
         help="Every loaded stream can be included, not only the ones analysed "
              "on the other tabs.")
+    r2.selectbox(
+        "Measure returns relative to", [TOTAL] + cols, key=_k(prefix, "rel"),
+        help="For funds of one asset class or region. Pick the market they share "
+             "(XIC.TO for Canadian equity, say): each stream's return minus that "
+             "one's is clustered, so the common move drops out and the funds "
+             "separate by their tilts. Down markets are still read on total "
+             "returns.")
     c1, c2, c3, c4 = st.columns([1, 1.4, 1.2, 1])
     c1.selectbox("Frequency", list(_FREQ), key=_k(prefix, "freq"),
                  help="Weekly by default: Canadian and US markets close at "
@@ -256,6 +276,12 @@ def _controls(prefix: str, cols: List[str], default: Optional[List[str]],
                         help="Per stream, and for the window they all share.")
         m2.selectbox("Effective bets measure", list(_ENB), key=_k(prefix, "enb"))
         m2.number_input("Rolling window (periods)", 3, 520, key=_k(prefix, "roll"))
+        m2.number_input("Relative mode: minimum tracking error (% a year)", 0.0, 20.0,
+                        step=0.5, key=_k(prefix, "minte"),
+                        help="A stream closer to the reference than this is treated "
+                             "as the reference's own bet and left out of the "
+                             "clusters: a tiny tilt would otherwise count as a "
+                             "full bet.")
         opts = ([f"Screen benchmark ({bench_label})"] if bench_label else []) + \
             [EQUAL] + cols
         yb = s.get(_k(prefix, "yaml_bench"))
@@ -292,6 +318,7 @@ def render(rets: pd.DataFrame, prefix: str, *, bench: Optional[pd.Series] = None
         return None
     cfg = d.cfg
     al = d.alignment
+    rel = d.relative_to
 
     # -- what was used --------------------------------------------------
     for n in al.notes:
@@ -311,7 +338,8 @@ def render(rets: pd.DataFrame, prefix: str, *, bench: Optional[pd.Series] = None
     thr = cfg.threshold
     a, b, c, e, f = st.columns(5)
     with a:
-        _dial("Effective bets", f"{d.effective_bets:.1f}", f"of {d.n_streams} streams")
+        _dial("Effective bets", f"{d.effective_bets:.1f}",
+              f"of {d.n_streams} streams" + (f", beyond {rel}" if rel else ""))
     with b:
         _dial("Clusters", f"{d.clusters.n_clusters}",
               f"cut at {thr:.2f}" if cfg.cut == "threshold" else "fixed count")
@@ -324,7 +352,8 @@ def render(rets: pd.DataFrame, prefix: str, *, bench: Optional[pd.Series] = None
     singles = int((d.table["Cluster size"] == 1).sum())
     k = d.clusters.n_clusters
     lead = (f"<b>{d.n_streams} streams carry about {d.effective_bets:.1f} independent "
-            f"bets in {k} cluster{'s' if k != 1 else ''}.</b> ")
+            + (f"bets beyond {rel}" if rel else "bets")
+            + f" in {k} cluster{'s' if k != 1 else ''}.</b> ")
     lead += (f"{n_red} pair{'s are' if n_red != 1 else ' is'} correlated at "
              f"{thr:.2f} or more" if n_red else f"No pair is correlated at {thr:.2f} or more")
     lead += (f"; {singles} stream{'s stand' if singles != 1 else ' stands'} alone."
@@ -361,29 +390,36 @@ def render(rets: pd.DataFrame, prefix: str, *, bench: Optional[pd.Series] = None
                       f"{cfg.stress.min_observations}, these correlations are rough.")
         else:
             m = d.corr.loc[order, order]
-            title = d.window_text
+            title = d.window_text + (f", relative to {rel}" if rel else "")
         st.plotly_chart(C.cluster_heatmap(m, d.clusters.labels, title),
                         use_container_width=True, config=PLOT_CFG)
 
     # -- tables ---------------------------------------------------------
     _eyebrow("Cluster assignment")
     tbl = d.table.copy()
-    tbl["Volatility"] = tbl["Volatility"] * 100
-    tbl["Max drawdown"] = tbl["Max drawdown"] * 100
+    vol_col, dd_col = (("Tracking error", "Max relative drawdown") if rel
+                       else ("Volatility", "Max drawdown"))
+    tbl[vol_col] = tbl[vol_col] * 100
+    tbl[dd_col] = tbl[dd_col] * 100
     st.dataframe(
         tbl, hide_index=True, use_container_width=True,
         column_config={
             "Correlation": st.column_config.NumberColumn("Correlation to closest",
                                                          format="%.2f"),
-            "Volatility": st.column_config.NumberColumn("Volatility (ann.)",
-                                                        format="%.1f%%"),
-            "Max drawdown": st.column_config.NumberColumn(format="%.1f%%"),
+            vol_col: st.column_config.NumberColumn(f"{vol_col} (ann.)",
+                                                   format="%.1f%%"),
+            dd_col: st.column_config.NumberColumn(format="%.1f%%"),
         })
     st.download_button("Cluster table (CSV)", d.table.to_csv(index=False).encode("utf-8"),
                        "clusters.csv", "text/csv", key=_k(prefix, "dl"))
-    _note(f"Volatility and drawdown are measured on the same {al.frequency} returns "
-          f"and window as the correlations, so they can differ slightly from the "
-          f"other tabs.")
+    if rel:
+        _note(f"Correlations are between returns relative to {rel}. Tracking error "
+              f"and max relative drawdown compare each stream with {rel} over the "
+              f"same {al.frequency} returns and window.")
+    else:
+        _note(f"Volatility and drawdown are measured on the same {al.frequency} returns "
+              f"and window as the correlations, so they can differ slightly from the "
+              f"other tabs.")
 
     _eyebrow(f"Same bet: pairs correlated at {thr:.2f} or more")
     if d.redundant.empty:
@@ -421,24 +457,27 @@ def render(rets: pd.DataFrame, prefix: str, *, bench: Optional[pd.Series] = None
     with st.expander("Is a relationship stable? Rolling correlation of a pair"):
         top = (list(d.redundant.iloc[0][["Stream", "Same bet as"]])
                if not d.redundant.empty else order[:2])
+        for key in (_k(prefix, "pa"), _k(prefix, "pb")):
+            if st.session_state.get(key) not in order:
+                st.session_state.pop(key, None)
         p1, p2 = st.columns(2)
         sa = p1.selectbox("First", order, index=order.index(top[0]), key=_k(prefix, "pa"))
         sb = p2.selectbox("Second", order, index=order.index(top[1]), key=_k(prefix, "pb"))
         if sa != sb:
             try:
-                pair = CL.align(rets[[sa, sb]], cfg, start, end)
+                pair = CL.pair_returns(rets, sa, sb, cfg, start, end)
             except CL.ClusteringError as exc:
                 st.error(str(exc))
             else:
-                rc = CL.rolling_correlation(pair.returns[sa], pair.returns[sb],
-                                            cfg.rolling_window)
+                rc = CL.rolling_correlation(pair[sa], pair[sb], cfg.rolling_window)
                 if rc.empty:
                     _note("Not enough shared history for one rolling window.")
                 else:
                     st.plotly_chart(
                         C.multi_line(rc.to_frame(f"{sa} / {sb}"),
                                      f"Rolling {cfg.rolling_window}-period correlation, "
-                                     f"{al.frequency} returns", ref=thr),
+                                     f"{al.frequency} returns"
+                                     + (f" relative to {rel}" if rel else ""), ref=thr),
                         use_container_width=True, config=PLOT_CFG)
                     _note(f"The dotted line is the {thr:.2f} threshold. A pair that "
                           f"crosses it often is not reliably the same bet, or "
