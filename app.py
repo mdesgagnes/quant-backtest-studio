@@ -44,6 +44,7 @@ from qbt import full_report as FULLREPORT
 from qbt import report as REPORT
 from qbt import returns_input as RS
 from qbt import clustering_ui as CLUI
+from qbt import sortable as SORTABLE
 from qbt import presets as PRESETS
 from qbt import formula as FORMULA
 from qbt import excel_export as XL
@@ -588,6 +589,12 @@ def _dataframe(data=None, *args, **kwargs):
             pass
         if kwargs.get("height") is None and len(frame) <= 40:
             kwargs["height"] = 35 * (len(frame) + 1) + 3
+        # Figures arrive as text ("10.59%"), which sorts as text: hand the
+        # table numbers that show the same text (qbt/sortable.py).
+        try:
+            data = SORTABLE.sortable(data, index_shown=not kwargs.get("hide_index"))
+        except Exception:
+            pass
     return _st_dataframe(data, *args, **kwargs)
 
 
