@@ -30,6 +30,7 @@ module is testable offline.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -262,6 +263,62 @@ def load_rates(currencies: Iterable[str], base: str,
                              f"{JUMP_WARN * 100:.0f}% (first on {when}). "
                              f"Check the series for a bad print.")
     return rates, notes
+
+
+# ----------------------------------------------------------------------
+# Stored history, for the years before the downloaded rates begin
+# ----------------------------------------------------------------------
+HISTORY_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "data", "fx")
+
+
+def read_history(pair: str, folder: str = HISTORY_DIR) -> Optional[pd.Series]:
+    """A stored daily rate for `pair` ("USDCAD": units of the second currency
+    per one of the first), from `<folder>/<pair>_history.csv`: lines starting
+    with # are notes, then a date column and a rate column. None if absent."""
+    path = os.path.join(folder, f"{pair.upper()}_history.csv")
+    if not os.path.exists(path):
+        return None
+    df = pd.read_csv(path, comment="#")
+    s = pd.Series(pd.to_numeric(df.iloc[:, 1], errors="coerce").to_numpy(),
+                  index=pd.to_datetime(df.iloc[:, 0], errors="coerce"))
+    s = s[s.index.notna()].dropna()
+    s = s[s > 0].sort_index()
+    return s[~s.index.duplicated(keep="last")]
+
+
+def extend_with_history(rates: pd.DataFrame, base: str, folder: str = HISTORY_DIR
+                        ) -> Tuple[pd.DataFrame, List[str]]:
+    """Fills the years before each downloaded rate begins from a stored
+    history, where one exists. `rates` holds base per one unit of each
+    column's currency, as `load_rates` returns them. The stored values are
+    used only before the first downloaded rate, never in place of it, so
+    the recent series keeps updating from the download."""
+    base = base.upper()
+    out = rates.copy()
+    notes: List[str] = []
+    for c in list(out.columns):
+        direct, inverse = read_history(f"{c}{base}", folder), read_history(f"{base}{c}", folder)
+        if direct is not None:
+            hist, name = direct, f"{c}{base}_history.csv"
+        elif inverse is not None:
+            hist, name = 1.0 / inverse, f"{base}{c}_history.csv"
+        else:
+            continue
+        live = out[c].dropna()
+        early = hist[hist.index < live.index[0]] if not live.empty else hist
+        if early.empty:
+            continue
+        idx = out.index.union(early.index)
+        out = out.reindex(idx)
+        out.loc[early.index, c] = early.to_numpy()
+        out.index.name = rates.index.name
+        start = live.index[0].date() if not live.empty else None
+        notes.append(f"{c}/{base} rates before {start} come from the stored history "
+                     f"(data/fx/{name}), from {early.index[0].date()}."
+                     if start else
+                     f"{c}/{base} rates come from the stored history (data/fx/{name}).")
+    return out, notes
 
 
 # ----------------------------------------------------------------------

@@ -619,9 +619,15 @@ def fetch_currency_guess(tickers: tuple, ask_yahoo: bool) -> dict:
 @st.cache_data(show_spinner=False, ttl=3600)
 def fetch_fxbook(tickers: tuple, base: str, overrides: tuple, ask_yahoo: bool,
                  start: str, end: Optional[str]) -> "FX.FxBook":
-    """Currencies and daily exchange rates for a run."""
-    return FX.FxBook.build(list(tickers), base, dict(overrides), start, end,
+    """Currencies and daily exchange rates for a run. Years before Yahoo's
+    rates begin (USD/CAD: 2003-09-17) come from the history stored in
+    data/fx, where there is one."""
+    book = FX.FxBook.build(list(tickers), base, dict(overrides), start, end,
                            detect=None if ask_yahoo else (lambda t: None))
+    if not book.rates.empty:
+        book.rates, _hist_notes = FX.extend_with_history(book.rates, book.base)
+        book.notes.extend(_hist_notes)
+    return book
 
 
 def tv(html: str, height: int) -> None:

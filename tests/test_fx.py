@@ -8,6 +8,7 @@ import os
 import sys
 
 import numpy as np
+import pytest
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -439,3 +440,46 @@ def test_open_fills_convert_at_the_previous_close_and_the_day_earns_the_rest():
     marked = res.weights["US1"].iloc[k] * res.equity.iloc[k]
     assert abs(marked - held * local["US1"].iloc[k] * rate.iloc[k]) < 1e-6 * marked
     _assert_sound(res)
+
+
+# ---------------------------------------------------------------- stored history
+def _write_history(folder, pair, rows):
+    path = os.path.join(folder, f"{pair}_history.csv")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write("# a note line\nDate,Rate\n")
+        for d, v in rows:
+            fh.write(f"{d},{v}\n")
+
+
+def test_history_fills_only_the_years_before_the_download(tmp_path):
+    rates = pd.DataFrame({"USD": [1.36, 1.37, 1.38]},
+                         index=pd.to_datetime(["2003-09-17", "2003-09-18", "2003-09-19"]))
+    _write_history(tmp_path, "USDCAD", [("1971-01-04", 1.0109), ("1990-06-01", 1.17),
+                                        ("2003-09-16", 1.3700), ("2003-09-18", 9.99)])
+    out, notes = FX.extend_with_history(rates, "CAD", str(tmp_path))
+    assert out.loc["1971-01-04", "USD"] == pytest.approx(1.0109)
+    assert out.loc["2003-09-16", "USD"] == pytest.approx(1.37)
+    assert out.loc["2003-09-18", "USD"] == pytest.approx(1.37)     # download wins after it starts
+    assert len(out) == 6
+    assert "before 2003-09-17" in notes[0] and "USDCAD_history.csv" in notes[0]
+
+
+def test_history_is_inverted_for_the_other_base(tmp_path):
+    rates = pd.DataFrame({"CAD": [0.73]}, index=pd.to_datetime(["2003-09-17"]))
+    _write_history(tmp_path, "USDCAD", [("1990-01-02", 1.25)])
+    out, _ = FX.extend_with_history(rates, "USD", str(tmp_path))
+    assert out.loc["1990-01-02", "CAD"] == pytest.approx(1 / 1.25)
+
+
+def test_no_history_file_changes_nothing(tmp_path):
+    rates = pd.DataFrame({"EUR": [1.5]}, index=pd.to_datetime(["2010-01-04"]))
+    out, notes = FX.extend_with_history(rates, "CAD", str(tmp_path))
+    assert out.equals(rates) and notes == []
+
+
+def test_stored_usdcad_history_is_sound():
+    s = FX.read_history("USDCAD")
+    assert s is not None and s.index[0] == pd.Timestamp("1971-01-04")
+    assert s.index.is_monotonic_increasing and not s.index.duplicated().any()
+    assert 0.9 < s.min() and s.max() < 1.7                          # CAD per USD, not inverted
+    assert (s.pct_change().abs().dropna() < 0.06).all()             # no bad prints
