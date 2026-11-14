@@ -541,10 +541,11 @@ HTML file directly.
 
 ## 3 quater. Preset universes and the benchmark
 
-**Presets.** The Yahoo Finance source offers ready-made universes (Canadian
-ETFs, Canadian asset classes, TSX sectors, U.S. SPDR sectors, global asset
-classes, U.S. factors, sixty-forty blocks, a Canadian equity factor mix,
-HIDE's target asset classes, and a 32-ETF global multi-asset universe
+**Presets.** The Yahoo Finance source offers ready-made universes (a
+Canadian equity factor mix, Canadian asset classes including the
+sixty-forty building blocks, TSX sectors, U.S. SPDR sectors, global asset
+classes, U.S. factors, the VIX-adaptive momentum proxy, HIDE's target asset
+classes, and a 32-ETF global multi-asset universe
 spanning US and international equities, sectors, factors, sovereign and
 credit fixed income, commodities, gold and the dollar). Picking one fills
 the symbol box and sets a matching benchmark and cash proxy; everything

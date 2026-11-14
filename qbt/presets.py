@@ -22,35 +22,51 @@ from __future__ import annotations
 from typing import Dict, List
 
 UNIVERSES: Dict[str, Dict[str, object]] = {
-    "Canadian ETFs: broad": {
+    "Canadian equity factor mix": {
+        "tickers": ["XIC.TO", "HCAL.TO", "WXM.TO", "XDV.TO", "XCV.TO",
+                    "XCG.TO", "XDIV.TO", "XEI.TO", "HXT.TO", "ZLB.TO",
+                    "ZEB.TO", "XCS.TO"],
         "classes": {
-            "XIC.TO": "Equities",
-            "ZEB.TO": "Equities",
-            "XEI.TO": "Equities",
-            "ZLB.TO": "Equities",
-            "XDV.TO": "Equities",
-            "XCG.TO": "Equities",
+            "XIC.TO": "Equities", "HCAL.TO": "Equities", "WXM.TO": "Equities",
+            "XDV.TO": "Equities", "XCV.TO": "Equities", "XCG.TO": "Equities",
+            "XDIV.TO": "Equities", "XEI.TO": "Equities", "HXT.TO": "Equities",
+            "ZLB.TO": "Equities", "ZEB.TO": "Equities", "XCS.TO": "Equities",
         },
-        "tickers": ["XIC.TO", "ZEB.TO", "XEI.TO", "ZLB.TO", "XDV.TO", "XCG.TO"],
         "benchmark": "XIC.TO",
         "cash": "PSA.TO",
-        "note": "Canadian equity: broad market, banks, dividend, low volatility, growth.",
+        "note": "Canadian equity styles for cross-sectional rotation: broad "
+                "market, banks (leveraged HCAL and unlevered ZEB), momentum, "
+                "dividend, value, growth, income, low volatility and small "
+                "caps. Three things to know before reading a "
+                "result. HCAL is leveraged, so it will win most momentum "
+                "rankings in a rising market and lose them badly otherwise. "
+                "HXT is a total-return swap structure that pays no "
+                "distributions, so it is unaffected by the dividend setting "
+                "while its peers are not. And several of these launched in "
+                "the mid-2010s, so an early start date quietly drops them.",
     },
     "Canadian asset classes": {
         "classes": {
             "XIC.TO": "Equities",
             "XEF.TO": "Equities",
             "XUU.TO": "Equities",
+            "XEC.TO": "Equities",
             "XBB.TO": "Fixed income",
             "XSB.TO": "Fixed income",
+            "XCB.TO": "Fixed income",
+            "XRB.TO": "Fixed income",
             "XRE.TO": "Real assets",
             "CGL.TO": "Real assets",
         },
-        "tickers": ["XIC.TO", "XBB.TO", "XSB.TO", "XRE.TO", "CGL.TO", "XEF.TO", "XUU.TO"],
+        "tickers": ["XIC.TO", "XBB.TO", "XSB.TO", "XRE.TO", "CGL.TO", "XEF.TO", "XUU.TO",
+                    "XEC.TO", "XCB.TO", "XRB.TO"],
         "benchmark": "XIC.TO",
         "cash": "PSA.TO",
-        "note": "Multi-asset in CAD: equity, aggregate and short bonds, REITs, "
-                "gold, developed and U.S. equity.",
+        "note": "Multi-asset in CAD: Canadian, U.S., developed and emerging "
+                "equity; aggregate, short, corporate and real return bonds; "
+                "REITs and gold. XIC, XUU, XEF, XBB and XSB rebuild a balanced "
+                "sixty-forty mandate. XEC launched in 2013, so an earlier "
+                "start drops it.",
     },
     "Canadian sectors": {
         "classes": {
@@ -60,13 +76,18 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
             "XIT.TO": "Equities",
             "XST.TO": "Equities",
             "XUT.TO": "Equities",
+            "XGD.TO": "Equities",
+            "ZIN.TO": "Equities",
             "XRE.TO": "Real assets",
         },
-        "tickers": ["XFN.TO", "XEG.TO", "XMA.TO", "XIT.TO", "XST.TO", "XUT.TO", "XRE.TO"],
+        "tickers": ["XFN.TO", "XEG.TO", "XMA.TO", "XIT.TO", "XST.TO", "XUT.TO", "XRE.TO",
+                    "XGD.TO", "ZIN.TO"],
         "benchmark": "XIC.TO",
         "cash": "PSA.TO",
         "note": "TSX sectors: financials, energy, materials, technology, "
-                "staples, utilities, real estate.",
+                "staples, utilities, real estate, gold miners and industrials "
+                "(equal weight). ZIN launched in 2012, so an earlier start "
+                "drops it.",
     },
     "U.S. sectors (SPDR)": {
         "classes": {
@@ -117,27 +138,6 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
         "cash": "BIL",
         "note": "Momentum, quality, minimum volatility, value, size. Most "
                 "launched in 2013.",
-    },
-    "Canadian equity factor mix": {
-        "tickers": ["XIC.TO", "HCAL.TO", "WXM.TO", "XDV.TO", "XCV.TO",
-                    "XCG.TO", "XDIV.TO", "XEI.TO", "HXT.TO", "ZLB.TO"],
-        "classes": {
-            "XIC.TO": "Equities", "HCAL.TO": "Equities", "WXM.TO": "Equities",
-            "XDV.TO": "Equities", "XCV.TO": "Equities", "XCG.TO": "Equities",
-            "XDIV.TO": "Equities", "XEI.TO": "Equities", "HXT.TO": "Equities",
-            "ZLB.TO": "Equities",
-        },
-        "benchmark": "XIC.TO",
-        "cash": "PSA.TO",
-        "note": "Canadian equity styles for cross-sectional rotation: broad "
-                "market, banks, multifactor, dividend, value, growth, income "
-                "and low volatility. Three things to know before reading a "
-                "result. HCAL is leveraged, so it will win most momentum "
-                "rankings in a rising market and lose them badly otherwise. "
-                "HXT is a total-return swap structure that pays no "
-                "distributions, so it is unaffected by the dividend setting "
-                "while its peers are not. And several of these launched in "
-                "the mid-2010s, so an early start date quietly drops them.",
     },
     "Global multi-asset ETF universe": {
         "tickers": ["SPY", "PDBC", "IEFA", "IEF", "IEMG", "VNQ", "QQQ", "XLE",
@@ -198,20 +198,6 @@ UNIVERSES: Dict[str, Dict[str, object]] = {
                 "model at 50/25/25; its momentum test measures each class "
                 "against BIL. BCI launched in 2017, so an earlier start "
                 "drops it.",
-    },
-    "Sixty-forty building blocks": {
-        "classes": {
-            "XIC.TO": "Equities",
-            "XUU.TO": "Equities",
-            "XEF.TO": "Equities",
-            "XBB.TO": "Fixed income",
-            "XSB.TO": "Fixed income",
-        },
-        "tickers": ["XIC.TO", "XUU.TO", "XEF.TO", "XBB.TO", "XSB.TO"],
-        "benchmark": "XIC.TO",
-        "cash": "PSA.TO",
-        "note": "Enough to rebuild a balanced mandate and test deviations "
-                "from it.",
     },
 }
 

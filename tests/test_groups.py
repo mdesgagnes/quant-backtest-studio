@@ -32,7 +32,7 @@ def test_groups_from_presets_and_classes():
     assert set(gc) == {"Equities", "Fixed income", "Real assets"}
     assert "XBB.TO" in gc["Fixed income"]
     # counted once even when two presets tag it
-    both = G.groups_by_class(["Canadian asset classes", "Canadian ETFs: broad"])
+    both = G.groups_by_class(["Canadian asset classes", "Canadian equity factor mix"])
     flat = [t for v in both.values() for t in v]
     assert len(flat) == len(set(flat))
 
