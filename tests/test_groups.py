@@ -78,3 +78,12 @@ def test_group_curves_common_window(prices):
     assert list(c.columns) == ["Low", "High"]
     assert (c.iloc[0] == 0).all()
     assert G.group_curves(prices, groups, ["nope"], "1Y").empty
+
+
+def test_all_presets_unique_tickers():
+    from qbt import presets as P
+    allt = P.all_tickers()
+    assert len(allt) == len(set(allt))
+    assert set(allt) == {t for n in P.names() for t in P.get(n)["tickers"]}
+    assert allt[0] == P.get(P.names()[0])["tickers"][0]
+    assert P.ALL_PRESETS not in P.names()

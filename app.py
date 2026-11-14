@@ -1240,6 +1240,8 @@ x0 = loaded.exog if loaded else ExogConfig()
 # --- Data ---
 st.sidebar.markdown('<div class="eyebrow">Data</div>', unsafe_allow_html=True)
 SOURCES = ["Yahoo Finance", "File (CSV / Excel)", "Return stream"]
+_RS_CUR_OFF = "Off (each in its own currency)"
+_RS_BASES = ["CAD", "USD", "EUR", "GBP", "CHF", "JPY", "AUD"]
 _src_idx = {"yfinance": 0, "upload": 1, "returns": 2}.get(d0.source, 0)
 source = st.sidebar.radio("Source", SOURCES, index=_src_idx,
                           label_visibility="collapsed",
@@ -1266,6 +1268,7 @@ if source == "Return stream":
     day_first = None
     yf_tickers: List[str] = []
     yf_freq = "Daily"
+    rs_base_ccy = ""
     if rs_from == "Upload a file":
         rfile = st.sidebar.file_uploader("Returns file",
                                          type=["csv", "xlsx", "xls", "txt"], key="rsup")
@@ -1298,15 +1301,28 @@ if source == "Return stream":
                      "Month first (12/31/2024)": False}[order_label]
     else:
         rs_preset = st.sidebar.selectbox(
-            "Preset universe", ["Custom"] + PRESETS.names(), key="rs_preset",
+            "Preset universe", ["Custom", PRESETS.ALL_PRESETS] + PRESETS.names(),
+            key="rs_preset",
             help="Fills the tickers below with a ready-made set. They stay "
                  "editable. The Results tab compares up to 10 at a time; the "
-                 "Diversification tab takes them all.")
+                 "Diversification tab takes them all. “All presets” "
+                 "takes every ticker any preset names, once each.")
         if rs_preset != st.session_state.get("_rs_preset_applied"):
             st.session_state["_rs_preset_applied"] = rs_preset
-            if rs_preset != "Custom":
+            if rs_preset == PRESETS.ALL_PRESETS:
+                st.session_state["rsyft"] = ", ".join(PRESETS.all_tickers())
+                # Canadian and US listings side by side: compare them in one
+                # currency unless one was already chosen.
+                if st.session_state.get("rs_base", _RS_CUR_OFF) == _RS_CUR_OFF:
+                    st.session_state["rs_base"] = "CAD"
+            elif rs_preset != "Custom":
                 st.session_state["rsyft"] = ", ".join(PRESETS.get(rs_preset)["tickers"])
-        if rs_preset != "Custom":
+        if rs_preset == PRESETS.ALL_PRESETS:
+            st.sidebar.markdown(
+                f'<div class="note">{len(PRESETS.all_tickers())} tickers from '
+                f'{len(PRESETS.names())} presets, each once.</div>',
+                unsafe_allow_html=True)
+        elif rs_preset != "Custom":
             st.sidebar.markdown(
                 f'<div class="note">{PRESETS.get(rs_preset).get("note", "")}</div>',
                 unsafe_allow_html=True)
@@ -1324,6 +1340,25 @@ if source == "Return stream":
             help="Daily returns give the most detail for short stress "
                  "episodes; monthly returns are the convention for comparing "
                  "managers and funds.")
+        st.session_state.setdefault("rs_base", _RS_CUR_OFF)
+        _rs_base_pick = st.sidebar.selectbox(
+            "Base currency", [_RS_CUR_OFF] + _RS_BASES, key="rs_base",
+            help="The investor's currency. Each security quoted in another "
+                 "currency (SPY for a Canadian investor) is converted into it "
+                 "at each day's exchange rate, so its return includes the "
+                 "currency move, as the investor lives it. Off keeps every "
+                 "return in the currency the security is quoted in.")
+        rs_base_ccy = "" if _rs_base_pick == _RS_CUR_OFF else _rs_base_pick
+        if not rs_base_ccy and len(yf_tickers) > 1:
+            _rs_mixed = sorted({FX.parse_currency(FX.guess_currency(t))[0]
+                                for t in yf_tickers})
+            if len(_rs_mixed) > 1:
+                st.sidebar.markdown(
+                    f'<div class="flag">These look to be quoted in different '
+                    f'currencies ({", ".join(_rs_mixed)}). Their returns are '
+                    f'compared each in its own currency. Pick a base currency '
+                    f'above for a like-for-like comparison.</div>',
+                    unsafe_allow_html=True)
 
     rs_capital = st.sidebar.number_input("Base value ($)", 1_000, 1_000_000_000,
                                          100_000, 10_000, key="rscap")
@@ -1375,6 +1410,46 @@ if source == "Return stream":
             st.error("No data came back for any of these tickers. Check the "
                      "symbols (.TO suffix for Canada, ^ for indices).")
             st.stop()
+        _rs_fx_notes: List[str] = []
+        if rs_base_ccy:
+            try:
+                with st.spinner("Loading exchange rates..."):
+                    _rs_fx = fetch_fxbook(tuple(yf_px.columns), rs_base_ccy, (), True,
+                                          "1970-01-01", None)
+                _first = {c: yf_px[c].first_valid_index() for c in yf_px.columns}
+                yf_px = _rs_fx.convert_frame(yf_px)
+            except Exception as exc:
+                st.error(f"Exchange rates could not be loaded: {exc}")
+                st.stop()
+            _foreign = [c for c in yf_px.columns if _rs_fx.currency_of(c) != rs_base_ccy
+                        or _rs_fx.scale.get(str(c).upper(), 1.0) != 1.0]
+            if _foreign:
+                _by = {}
+                for c in _foreign:
+                    _by.setdefault(_rs_fx.currency_of(c), []).append(str(c))
+                _rs_fx_notes.append(
+                    f"Converted to {rs_base_ccy} at each day's exchange rate: "
+                    + "; ".join(f"{', '.join(v)} (quoted in {k})" for k, v in _by.items())
+                    + ". Their returns include the currency move.")
+                _late: Dict[str, List[str]] = {}
+                for c in _foreign:
+                    _f = yf_px[c].first_valid_index()
+                    if _f is not None and _f > _first[c] + pd.Timedelta(days=10):
+                        _late.setdefault(str(_f.date()), []).append(str(c))
+                for _d, _names in _late.items():
+                    _rs_fx_notes.append(
+                        f"The exchange rate starts {_d}, later than the price history "
+                        f"of {len(_names)} securit{'ies' if len(_names) != 1 else 'y'}, "
+                        f"so in {rs_base_ccy} they begin then: {', '.join(_names)}.")
+            else:
+                _rs_fx_notes.append(f"Every security is already quoted in {rs_base_ccy}: "
+                                    f"nothing to convert.")
+            if any(v == "guessed from ticker" for k, v in _rs_fx.source.items()
+                   if k in {str(c).upper() for c in yf_px.columns}):
+                _rs_fx_notes.append("Some currencies were guessed from the ticker suffix "
+                                    "because Yahoo did not say.")
+            _rs_fx_notes += list(_rs_fx.notes)
+            yf_px = yf_px.dropna(how="all")
         try:
             rets, rrep = RS.prepare_returns(
                 RS.returns_from_prices(yf_px, yf_freq), "decimal", {})
@@ -1388,7 +1463,9 @@ if source == "Return stream":
             rrep.warnings.append(
                 f"The latest {yf_freq.lower()[:-2]} is still in progress, so "
                 f"its return is to date only.")
-        rs_source = "Yahoo Finance: " + ", ".join(yf_px.columns)
+        rrep.warnings.extend(_rs_fx_notes)
+        rs_source = "Yahoo Finance: " + ", ".join(yf_px.columns) + (
+            f" (in {rs_base_ccy})" if rs_base_ccy else "")
 
     cols = list(rets.columns)
     ppy = rrep.periods_per_year
@@ -1510,7 +1587,9 @@ if source == "Return stream":
         dial("Period", str(rs_start.date()), f"to {rs_end.date()}")
     with d:
         if rs_from == "Yahoo Finance":
-            dial("Source", "Yahoo Finance", "total return, dividends reinvested")
+            dial("Source", "Yahoo Finance",
+                 f"total return in {rs_base_ccy}, dividends reinvested" if rs_base_ccy
+                 else "total return, dividends reinvested")
         else:
             dial("Scale read", rrep.scale.capitalize())
     if rs_from == "Upload a file":
@@ -2109,7 +2188,8 @@ if source == "Return stream":
                 try:
                     _rs_secs += CLUI.export_sections(
                         rets, "rsdiv", bench=rets[bench_col] if bench_col else None,
-                        bench_label=bench_col, start=start_d, end=end_d, default=sel)
+                        bench_label=bench_col, start=start_d, end=end_d,
+                        default=(cols if rs_from == "Yahoo Finance" else sel))
                 except Exception as exc:
                     _rs_miss.append(("Diversification", "Clusters",
                                      f"Could not be assembled: {exc}"))
@@ -2409,7 +2489,8 @@ if source == "Return stream":
     # ==================================================================
     with rs_tabs[6]:
         CLUI.render(rets, "rsdiv", bench=rets[bench_col] if bench_col else None,
-                    bench_label=bench_col, start=start_d, end=end_d, default=sel,
+                    bench_label=bench_col, start=start_d, end=end_d,
+                    default=(cols if rs_from == "Yahoo Finance" else sel),
                     source_note="Dates follow the From and To above.")
     st.stop()
 

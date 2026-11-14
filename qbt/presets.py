@@ -220,6 +220,15 @@ def names() -> List[str]:
     return list(UNIVERSES.keys())
 
 
+ALL_PRESETS = "All presets: every unique ticker"
+
+
+def all_tickers() -> List[str]:
+    """Every ticker named by any preset, once each, in preset order."""
+    return list(dict.fromkeys(t for n in UNIVERSES
+                              for t in (UNIVERSES[n].get("tickers") or [])))
+
+
 def get(name: str) -> Dict[str, object]:
     return UNIVERSES.get(name, {})
 
