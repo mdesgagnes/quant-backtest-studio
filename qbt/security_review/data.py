@@ -230,6 +230,9 @@ def month_end_prices(px: pd.Series, drop_current: Optional[pd.Timestamp] = None)
     if px.empty:
         return px
     m = px.groupby(px.index.to_period("M")).last()
+    # A month with no price at all stays a gap (NaN), so the next month's
+    # return is NaN too rather than silently spanning two months.
+    m = m.reindex(pd.period_range(m.index[0], m.index[-1], freq="M"))
     m.index = m.index.to_timestamp("M")
     today = pd.Timestamp(drop_current) if drop_current is not None else pd.Timestamp.today()
     cur = today.to_period("M").to_timestamp("M")
@@ -238,7 +241,7 @@ def month_end_prices(px: pd.Series, drop_current: Optional[pd.Timestamp] = None)
 
 def monthly_returns(px: pd.Series, drop_current: Optional[pd.Timestamp] = None) -> pd.Series:
     m = month_end_prices(px, drop_current)
-    return m.pct_change().iloc[1:]
+    return m.pct_change(fill_method=None).iloc[1:]
 
 
 def splice(primary: pd.Series, proxy: Optional[pd.Series]) -> Tuple[pd.Series, pd.Series]:

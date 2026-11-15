@@ -123,7 +123,7 @@ def _coef(y: pd.Series, X: pd.DataFrame, name: str, min_n: int = 24) -> float:
 def megacap_beta(r: pd.Series, ctx: Context) -> float:
     if ctx.mkt_cad is None or ctx.spread is None:
         return np.nan
-    X = pd.concat([ctx.mkt_cad.rename("mkt"), ctx.spread.rename("spread")], axis=1)
+    X = pd.concat([ctx.mkt_cad.rename("mkt"), ctx.spread.rename("spread")], axis=1, sort=True)
     return _coef(r, X, "spread")
 
 
@@ -187,7 +187,7 @@ def impact_metrics(cand: pd.Series, base: pd.Series, new: pd.Series,
     m["corr_to_home_equity"] = float(cand.corr(ctx.home)) if ctx.home is not None else np.nan
     if ctx.usd_market is not None and ctx.usdcad is not None:
         m["usd_beta"] = _coef(cand, pd.concat([ctx.usd_market.rename("mkt"),
-                                               ctx.usdcad.rename("usdcad")], axis=1), "usdcad")
+                                               ctx.usdcad.rename("usdcad")], axis=1, sort=True), "usdcad")
     else:
         m["usd_beta"] = np.nan
     if bench is not None and ctx.spread is not None:

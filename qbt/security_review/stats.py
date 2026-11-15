@@ -54,7 +54,7 @@ def worst_12m(r: pd.Series) -> float:
 
 def ols(y: pd.Series, X: pd.DataFrame) -> Dict[str, object]:
     """OLS with an intercept: coefficients, t-stats (classical) and R2."""
-    df = pd.concat([y.rename("_y"), X], axis=1).dropna()
+    df = pd.concat([y.rename("_y"), X], axis=1, sort=True).dropna()
     n, k = len(df), X.shape[1] + 1
     if n <= k + 2:
         return {"n": n, "coef": pd.Series(dtype=float), "t": pd.Series(dtype=float), "r2": np.nan}
@@ -201,7 +201,7 @@ def factor_exposure(r: pd.Series, market: pd.Series, factors: pd.DataFrame,
     rfx = rf.reindex(r.index).fillna(0.0)
     y = (r - rfx).rename("y")
     X = pd.concat([(market - rf.reindex(market.index).fillna(0.0)).rename("market"),
-                   factors], axis=1)
+                   factors], axis=1, sort=True)
     res = ols(y, X)
     if res["n"] < min_months:
         return {"n": res["n"], "ok": False, "coef": pd.Series(dtype=float),
