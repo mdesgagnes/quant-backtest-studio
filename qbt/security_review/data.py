@@ -33,6 +33,7 @@ import io
 import json
 import os
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
@@ -161,26 +162,90 @@ def fetch_prices(tickers: Iterable[str], start: str = "1990-01-01",
     return PriceSet(frames, failed, notes)
 
 
-def fetch_url_cached(url: str, name: str, cache_dir: Optional[str] = CACHE_DIR,
-                     max_age_days: float = 7.0, timeout: float = 20.0) -> Optional[str]:
-    """Text from a URL, cached on disk. None when unreachable and not cached."""
-    p = os.path.join(cache_dir, "macro", name) if cache_dir else None
-    if p and os.path.exists(p) and (time.time() - os.path.getmtime(p)) / 86400 <= max_age_days:
-        with open(p, "r", encoding="utf-8") as fh:
-            return fh.read()
+# Hosts that did not answer recently: skipped for UNREACHABLE_HOURS instead of
+# waiting for the timeout again on every load (FRED and the Ken French
+# library are blocked on some networks; each attempt used to cost ~20 s).
+UNREACHABLE_HOURS = 24.0
+_DOWN: Dict[str, float] = {}
+
+
+def _down_file(cache_dir: Optional[str]) -> Optional[str]:
+    return os.path.join(cache_dir, "macro", "_unreachable.json") if cache_dir else None
+
+
+def _host(url: str) -> str:
+    return urllib.parse.urlparse(url).netloc.lower()
+
+
+def host_is_down(url: str, cache_dir: Optional[str] = CACHE_DIR) -> bool:
+    import json
+    seen = dict(_DOWN)
+    f = _down_file(cache_dir)
+    if f and os.path.exists(f):
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                seen.update(json.load(fh))
+        except Exception:
+            pass
+    t = seen.get(_host(url))
+    return t is not None and (time.time() - float(t)) / 3600 < UNREACHABLE_HOURS
+
+
+def _mark_down(url: str, cache_dir: Optional[str]) -> None:
+    import json
+    _DOWN[_host(url)] = time.time()
+    f = _down_file(cache_dir)
+    if not f:
+        return
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        text = urllib.request.urlopen(req, timeout=timeout).read().decode("utf-8")
-        if p:
-            os.makedirs(os.path.dirname(p), exist_ok=True)
-            with open(p, "w", encoding="utf-8") as fh:
-                fh.write(text)
-        return text
+        os.makedirs(os.path.dirname(f), exist_ok=True)
+        cur = {}
+        if os.path.exists(f):
+            with open(f, "r", encoding="utf-8") as fh:
+                cur = json.load(fh)
+        cur[_host(url)] = time.time()
+        with open(f, "w", encoding="utf-8") as fh:
+            json.dump(cur, fh)
     except Exception:
-        if p and os.path.exists(p):
-            with open(p, "r", encoding="utf-8") as fh:
-                return fh.read()
-        return None
+        pass
+
+
+def _fetch_cached(url: str, name: str, cache_dir: Optional[str], max_age_days: float,
+                  timeout: float, binary: bool):
+    """Bytes or text from a URL, cached on disk. A fresh cached copy is used
+    as is; otherwise the URL is tried unless its host failed in the last
+    UNREACHABLE_HOURS; a stale copy is the fallback. None when nothing is
+    available."""
+    p = os.path.join(cache_dir, "macro", name) if cache_dir else None
+    mode = "rb" if binary else "r"
+    enc = None if binary else "utf-8"
+
+    def read():
+        with open(p, mode, encoding=enc) as fh:
+            return fh.read()
+    if p and os.path.exists(p) and (time.time() - os.path.getmtime(p)) / 86400 <= max_age_days:
+        return read()
+    if not host_is_down(url, cache_dir):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            raw = urllib.request.urlopen(req, timeout=timeout).read()
+            data = raw if binary else raw.decode("utf-8")
+            if p:
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "wb" if binary else "w", encoding=enc) as fh:
+                    fh.write(data)
+            return data
+        except Exception:
+            _mark_down(url, cache_dir)
+    if p and os.path.exists(p):
+        return read()
+    return None
+
+
+def fetch_url_cached(url: str, name: str, cache_dir: Optional[str] = CACHE_DIR,
+                     max_age_days: float = 7.0, timeout: float = 10.0) -> Optional[str]:
+    """Text from a URL, cached on disk. None when unreachable and not cached."""
+    return _fetch_cached(url, name, cache_dir, max_age_days, timeout, binary=False)
 
 
 # ----------------------------------------------------------------------
@@ -442,24 +507,8 @@ KF_FILES = ("F-F_Research_Data_5_Factors_2x3", "F-F_Momentum_Factor")
 
 
 def fetch_bytes_cached(url: str, name: str, cache_dir: Optional[str] = CACHE_DIR,
-                       max_age_days: float = 7.0, timeout: float = 20.0) -> Optional[bytes]:
-    p = os.path.join(cache_dir, "macro", name) if cache_dir else None
-    if p and os.path.exists(p) and (time.time() - os.path.getmtime(p)) / 86400 <= max_age_days:
-        with open(p, "rb") as fh:
-            return fh.read()
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        data = urllib.request.urlopen(req, timeout=timeout).read()
-        if p:
-            os.makedirs(os.path.dirname(p), exist_ok=True)
-            with open(p, "wb") as fh:
-                fh.write(data)
-        return data
-    except Exception:
-        if p and os.path.exists(p):
-            with open(p, "rb") as fh:
-                return fh.read()
-        return None
+                       max_age_days: float = 7.0, timeout: float = 10.0) -> Optional[bytes]:
+    return _fetch_cached(url, name, cache_dir, max_age_days, timeout, binary=True)
 
 
 def parse_ken_french_csv(text: str) -> pd.DataFrame:

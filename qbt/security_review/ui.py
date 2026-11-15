@@ -24,7 +24,7 @@ from . import config as CF
 from . import engine as E
 from . import export as X
 from . import report as RP
-from .bundle import load_bundle, with_streams
+from .bundle import load_bundle, load_macro, with_streams
 
 # Red, then the sand / gold family: no blue (house colour scheme).
 PALETTE = [RED, "#C9B896", "#D08C4E", "#EFE9DE", "#9A9389", "#B01419", "#CBBFA8", "#8C6D4F"]
@@ -38,10 +38,19 @@ def _config() -> CF.AllConfig:
     return CF.load_all()
 
 
-@st.cache_resource(show_spinner="Loading prices (cached on disk after the first run)…", ttl=6 * 3600)
+@st.cache_resource(show_spinner="Loading T-bill, CPI and factor data…", ttl=6 * 3600)
+def _macro():
+    return load_macro(_config())
+
+
+@st.cache_resource(show_spinner="Loading prices (cached on disk after the first run)…", ttl=6 * 3600,
+                   max_entries=8)
 def _bundle(tickers: tuple):
+    """Prices for exactly the tickers a run needs (the securities, the
+    portfolio's holdings, and the benchmark, factor, regime and FX series),
+    not the whole universe."""
     cfg = _config()
-    b = load_bundle(cfg, list(tickers))
+    b = load_bundle(cfg, list(tickers), macro_data=_macro())
     return b, E.regime_labels(cfg, b)
 
 
@@ -410,7 +419,7 @@ def _run(inp, cfg):
     if inp["benchmark"] and inp["benchmark"] != "sleeve":
         extra.append(inp["benchmark"])
     try:
-        b, reg = _bundle(tuple(sorted(set(tickers + extra + cfg.universe.all_tickers()))))
+        b, reg = _bundle(tuple(sorted(set(tickers + extra))))
         b = with_streams(b, uploads, inp["currency"])
         bases = [p if p.custom else p.key for p in inp["bases"]]
         req = E.Request(bases[0], inp["objective"], inp["candidates"], inp["benchmark"], inp["mode"],
@@ -477,7 +486,7 @@ def render() -> None:
         st.markdown('<div class="note">Pick one or more securities (or upload return streams), '
                     'choose what to add them to (a benchmark, a blend, your portfolio\'s returns '
                     'or a profile), then press <b>Run</b>. The first run downloads prices '
-                    '(about 30 seconds); later runs read the disk cache.</div>', unsafe_allow_html=True)
+                    '(a few seconds); later runs read the disk cache.</div>', unsafe_allow_html=True)
         return
     rvs, sw = res
     secs = RP.all_sections(rvs, cfg, sw)

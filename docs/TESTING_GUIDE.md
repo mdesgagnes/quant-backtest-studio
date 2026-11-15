@@ -24,7 +24,7 @@ Expected: **340 passed** (285 existing + 55 new). Takes about a minute.
 streamlit run app.py
 ```
 
-The first Security review run downloads prices for the 44-ticker universe and the profile blocks (about 30 seconds) into `data/cache/`; later runs read the cache (refreshed after 3 days).
+A Security review run downloads prices only for the tickers it needs (the securities, the portfolio's holdings, and the profile-block, factor, regime and FX series: about 20 for two ETFs) into `data/cache/`, the first time in about 10 to 15 seconds; later runs read the cache (refreshed after 3 days).
 
 ## 2. Ready-to-run demos (no interface)
 

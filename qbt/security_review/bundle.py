@@ -148,12 +148,28 @@ def needed_tickers(cfg: AllConfig, candidates: Iterable[str] = (),
     return [str(t).upper() for t in dict.fromkeys(out) if t]
 
 
+def load_macro(cfg: AllConfig, cache_dir: Optional[str] = D.CACHE_DIR) -> Dict[str, object]:
+    """T-bill, CPI and Ken French factors: the same for every run, so the app
+    loads them once per server instead of with every set of tickers."""
+    tb, rf_label = D.cad_tbill_monthly(cache_dir)
+    src = (cfg.scenarios["regimes"].get("high_inflation") or {}).get("sources") or []
+    cpi, cpi_label = D.cpi_series(src, cache_dir)
+    kf, kf_label = (None, "ETF factor proxies (config/factors.yaml: source)")
+    if str(cfg.factors.get("source", "auto")) in ("auto", "ken_french"):
+        kf, kf_label = D.ken_french_factors(cache_dir)
+    return {"tbill": tb, "rf_label": rf_label, "cpi": cpi, "cpi_label": cpi_label,
+            "kf": kf, "kf_label": kf_label}
+
+
 def load_bundle(cfg: AllConfig, candidates: Iterable[str] = (), extra: Iterable[str] = (),
                 downloader: Optional[D.Downloader] = None,
                 cache_dir: Optional[str] = D.CACHE_DIR,
                 as_of: Optional[pd.Timestamp] = None,
                 macro: bool = True,
-                info_fetcher: Optional[D.InfoFetcher] = None) -> Bundle:
+                info_fetcher: Optional[D.InfoFetcher] = None,
+                macro_data: Optional[Dict[str, object]] = None) -> Bundle:
+    """Prices for the tickers a run needs, plus the macro series. Pass
+    `macro_data` (from `load_macro`) to reuse macro series already loaded."""
     tickers = needed_tickers(cfg, candidates, extra)
     ps = D.fetch_prices(tickers, downloader=downloader, cache_dir=cache_dir)
     notes = list(ps.notes)
@@ -180,17 +196,19 @@ def load_bundle(cfg: AllConfig, candidates: Iterable[str] = (), extra: Iterable[
     mdf = pd.DataFrame(monthly).sort_index()
     udf = pd.DataFrame(usd_monthly).sort_index()
     fxm = D.monthly_returns(usdcad, as_of) if len(usdcad) else pd.Series(dtype=float)
-    tb, rf_label = D.cad_tbill_monthly(cache_dir) if macro else (None, "risk-free set to 0 (offline)")
-    rf = D.rf_monthly(mdf.index, tb)
-    cpi, cpi_label = (None, "offline")
+    if macro and macro_data is None:
+        macro_data = load_macro(cfg, cache_dir)
     if macro:
-        src = (cfg.scenarios["regimes"].get("high_inflation") or {}).get("sources") or []
-        cpi, cpi_label = D.cpi_series(src, cache_dir)
+        tb, rf_label = macro_data["tbill"], macro_data["rf_label"]
+        cpi, cpi_label = macro_data["cpi"], macro_data["cpi_label"]
+        kf, kf_label = macro_data["kf"], macro_data["kf_label"]
         if cpi is None:
             notes.append(cpi_label + ": the inflation regime is unavailable.")
-    kf, kf_label = (None, "offline: ETF factor proxies used")
-    if macro and str(cfg.factors.get("source", "auto")) in ("auto", "ken_french"):
-        kf, kf_label = D.ken_french_factors(cache_dir)
+    else:
+        tb, rf_label = None, "risk-free set to 0 (offline)"
+        cpi, cpi_label = None, "offline"
+        kf, kf_label = None, "offline: ETF factor proxies used"
+    rf = D.rf_monthly(mdf.index, tb)
     return Bundle(mdf, daily_px, udf, fxm, rf, rf_label, raw_px, yields, flags,
                   ps.failed, notes, cpi, cpi_label, as_of, kf=kf, kf_label=kf_label,
                   cache_dir=cache_dir, info_fetcher=info_fetcher, fetch_info=macro)

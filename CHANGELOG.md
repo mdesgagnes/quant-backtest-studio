@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased: `feature/symbol-impact-view` (2026-11-15), second round
+## Unreleased: `feature/symbol-impact-view` (2026-11-15), third round
+
+### Changed
+- **Faster loading.** A run loads prices only for the tickers it needs (about 20 for two ETFs) instead of the whole 44-ticker universe plus those. The T-bill, CPI and Ken French series are loaded once per server (`bundle.load_macro`), not again with every new set of tickers. A data host that does not answer (FRED and the Ken French library on some networks) is remembered for 24 hours (`data/cache/macro/_unreachable.json`) instead of costing a timeout on every load; the timeout is 10 seconds instead of 20. Measured here with prices on disk: price loading for a two-ETF run went from about 20 seconds to 0.5 to 1.2 seconds. The command line loads the same way.
+
 
 ### Changed
 - **The benchmark is the portfolio by default, everywhere.** Relative statistics (excess return, tracking error, information ratio, capture, beta), the factor regression, the excess-return correlation and the Fund Review now compare each security with the portfolio it is added to. Before, they used each security's sleeve benchmark (USMV against SPY while the portfolio was XIC.TO). Advanced keeps the sleeve benchmark, or any ticker, as an option. Fund Review lists the portfolio over each security's period instead of a sleeve benchmark.

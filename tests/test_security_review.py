@@ -774,3 +774,28 @@ def test_full_report_has_the_backtest_workbook(world):
     exp = M.summary(rw, M.to_equity(rw, 100_000.0), r.series["Portfolio without"].reindex(rw.index),
                     None, None, rf, 12)
     assert rows["CAGR"] == pytest.approx(exp["CAGR"]) and rows["Sharpe"] == pytest.approx(exp["Sharpe"])
+
+
+def test_unreachable_host_is_not_retried(tmp_path, monkeypatch):
+    calls = []
+
+    def boom(req, timeout=None):
+        calls.append(req.full_url)
+        raise OSError("blocked")
+    monkeypatch.setattr(D.urllib.request, "urlopen", boom)
+    monkeypatch.setattr(D, "_DOWN", {})
+    url = "https://blocked.example.org/a.csv"
+    assert D.fetch_url_cached(url, "a.csv", str(tmp_path)) is None
+    assert D.fetch_url_cached(url.replace("a.csv", "b.csv"), "b.csv", str(tmp_path)) is None
+    assert len(calls) == 1                      # same host: not tried again
+    monkeypatch.setattr(D, "_DOWN", {})         # a new process reads the marker on disk
+    assert D.host_is_down(url, str(tmp_path))
+
+
+def test_only_needed_tickers_are_loaded(world):
+    from qbt.security_review.bundle import needed_tickers
+    cfg, _, _ = world
+    need = needed_tickers(cfg, ["USMV"])
+    assert "USMV" in need and "XIC.TO" in need          # the security and the profile blocks
+    assert "SCHD" not in need                           # universe members nobody asked for
+    assert len(need) < len(needed_tickers(cfg, cfg.universe.all_tickers()))
