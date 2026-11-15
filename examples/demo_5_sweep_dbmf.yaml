@@ -1,0 +1,9 @@
+# Demo 5: Profile sweep of one diversifier (DBMF) across all 7 profiles,
+# for the stock-bond correlation hedge objective, Add 10%.
+profile: balanced
+objective: stock_bond_correlation_hedge
+candidates: [DBMF]
+sweep: DBMF
+mode: add
+weight: 0.10
+output: examples/output/demo_5_sweep_dbmf.xlsx

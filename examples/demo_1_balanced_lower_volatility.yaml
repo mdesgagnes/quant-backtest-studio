@@ -1,0 +1,8 @@
+# Demo 1: Balanced profile, lower volatility, US equity sleeve candidates (benchmark SPY).
+profile: balanced
+objective: lower_volatility
+candidates: [SPY, RSP, QQQ, USMV, SPLV, QUAL, MTUM, VTV, VUG, SCHD, IWM]
+mode: add
+weight: 0.10
+alignment: common
+output: examples/output/demo_1_balanced_lower_volatility.xlsx

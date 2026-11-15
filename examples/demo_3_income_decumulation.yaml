@@ -1,0 +1,9 @@
+# Demo 3: Income profile, sequence risk in decumulation (4%/yr withdrawals, 30 years),
+# Canadian bond and Canadian income-equity candidates.
+profile: income
+objective: sequence_risk_decumulation
+candidates: [XBB.TO, ZAG.TO, XSB.TO, XLB.TO, XRB.TO, ZCS.TO, XEI.TO, ZWC.TO]
+mode: add
+weight: 0.10
+alignment: common
+output: examples/output/demo_3_income_decumulation.xlsx

@@ -1,0 +1,9 @@
+# Demo 2: Balanced profile, stock-bond correlation hedge, alternatives and bonds.
+# 'each': every candidate keeps its own history (RSSB/RSST are only a few years old).
+profile: balanced
+objective: stock_bond_correlation_hedge
+candidates: [DBMF, KMLM, BTAL, TAIL, RSST, RSSB, AGG, SHY, IEF, TLT, TIP]
+mode: add
+weight: 0.10
+alignment: each
+output: examples/output/demo_2_balanced_stock_bond_hedge.xlsx

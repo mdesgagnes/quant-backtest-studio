@@ -1,0 +1,8 @@
+# Demo 4: Growth profile, reduce drawdown, one candidate in Replace mode:
+# USMV takes the whole US equity weight (VFV.TO, 31.5%).
+profile: growth
+objective: reduce_drawdown
+candidates: [USMV]
+mode: replace
+replace_holding: VFV.TO
+output: examples/output/demo_4_growth_replace_drawdown.xlsx
