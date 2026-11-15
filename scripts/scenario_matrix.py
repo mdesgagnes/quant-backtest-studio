@@ -1,0 +1,130 @@
+"""Scenario matrix: every preset profile x every objective x the objective's
+relevant candidate groups (config/objectives.yaml `candidate_groups`).
+
+    python scripts/scenario_matrix.py
+
+Writes docs/SCENARIO_MATRIX.md (summary) and examples/scenario_matrix.xlsx
+(every verdict). Each candidate is judged on its own overlap with the
+profile (alignment "each"), because the common period of a group that holds
+a 2023 launch would be too short to judge the others. One engine run per
+profile and sleeve gives the verdicts for all 15 objectives at once (the
+metrics do not depend on the objective; only the scoring does).
+"""
+from __future__ import annotations
+
+import os
+import sys
+import time
+import warnings
+from datetime import date
+
+import pandas as pd
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+warnings.filterwarnings("ignore")
+
+from qbt.security_review import config as CF  # noqa: E402
+from qbt.security_review import engine as E  # noqa: E402
+from qbt.security_review import export as X  # noqa: E402
+from qbt.security_review import report as RP  # noqa: E402
+from qbt.security_review.bundle import load_bundle  # noqa: E402
+
+
+def main():
+    t0 = time.time()
+    cfg = CF.load_all()
+    b = load_bundle(cfg, cfg.universe.all_tickers())
+    reg = E.regime_labels(cfg, b)
+    rows = []
+    profiles = [k for k, p in cfg.profiles.profiles.items() if not p.custom]
+    for pk in profiles:
+        for sk, sleeve in cfg.universe.sleeves.items():
+            rv = E.run(E.Request(pk, "lower_volatility", sleeve.tickers, alignment="each"), cfg, b, reg)
+            for c, r in rv.results.items():
+                for _, o in r.objectives.iterrows():
+                    rows.append({"Profile": cfg.profiles.profiles[pk].label, "Profile key": pk,
+                                 "Objective": o["Objective"], "Objective key": o["Key"],
+                                 "Group": sleeve.label, "Group key": sk, "Candidate": c,
+                                 "Verdict": o["Verdict"], "Confidence": o["Confidence"],
+                                 "Score": o["Score"], "Rolling share": o["Rolling share"],
+                                 "Months": r.months, "From": f"{r.start:%Y-%m}"})
+            for c, why in rv.skipped.items():
+                rows.append({"Profile": cfg.profiles.profiles[pk].label, "Profile key": pk,
+                             "Objective": "(all)", "Objective key": "", "Group": sleeve.label,
+                             "Group key": sk, "Candidate": c, "Verdict": "skipped: " + why})
+        print(f"{pk} done ({time.time() - t0:.0f}s)", flush=True)
+    full = pd.DataFrame(rows)
+    rel = []
+    for ok, o in cfg.objectives.objectives.items():
+        sub = full[(full["Objective key"] == ok) & (full["Group key"].isin(o.candidate_groups))]
+        rel.append(sub)
+    rel = pd.concat(rel, ignore_index=True)
+
+    summ = []
+    for (ok, pk), g in rel.groupby(["Objective key", "Profile key"], sort=False):
+        g = g.sort_values("Score", ascending=False)
+        top = g.head(3)
+        summ.append({"Objective": cfg.objectives.objectives[ok].label, "Profile": g["Profile"].iloc[0],
+                     "Candidates": len(g), "Add": int((g["Verdict"] == "Add").sum()),
+                     "Consider": int((g["Verdict"] == "Consider").sum()),
+                     "Do not add": int((g["Verdict"] == "Do not add").sum()),
+                     "Top 3 (score)": ", ".join(f"{c} {s:+.2f}" for c, s in zip(top["Candidate"], top["Score"])),
+                     "Bottom": f"{g['Candidate'].iloc[-1]} {g['Score'].iloc[-1]:+.2f}",
+                     "Add list": ", ".join(g.loc[g["Verdict"] == "Add", "Candidate"]) or "-"})
+    summ = pd.DataFrame(summ)
+
+    # Verdict changes: the same candidate under different objectives / profiles.
+    flips_obj = (rel.groupby(["Profile key", "Candidate"])["Verdict"].nunique() > 1).mean()
+    flips_prof = (rel.groupby(["Objective key", "Candidate"])["Verdict"].nunique() > 1).mean()
+
+    xl = os.path.join(ROOT, "examples", "scenario_matrix.xlsx")
+    secs = [("Summary", "Profile x objective summary (relevant candidate groups)",
+             RP._cols(summ.copy(), integer=["Candidates", "Add", "Consider", "Do not add"]), ""),
+            ("Relevant", "Every verdict: profile x objective x relevant candidate",
+             RP._cols(rel.drop(columns=["Profile key", "Objective key", "Group key"]),
+                      ratio=["Score"], pct=["Rolling share"], integer=["Months"]), ""),
+            ("All", "Every verdict: profile x objective x every universe candidate",
+             RP._cols(full.drop(columns=["Profile key", "Objective key", "Group key"]),
+                      ratio=["Score"], pct=["Rolling share"], integer=["Months"]), "")]
+    with open(xl, "wb") as fh:
+        fh.write(X.write_sections(secs))
+
+    md = ["# Scenario matrix", "",
+          f"Generated by `python scripts/scenario_matrix.py` on {date.today().isoformat()} "
+          f"(prices to {b.as_of:%Y-%m-%d}), in {time.time() - t0:.0f} seconds.", "",
+          "Every preset profile x every objective, with the candidate groups each objective names "
+          "in `config/objectives.yaml`. Add mode, 10% funded pro rata, quarterly rebalancing, each "
+          "candidate on its own overlap with the profile. The full list of "
+          f"{len(rel)} verdicts (and {len(full)} for every candidate x objective) is in "
+          "`examples/scenario_matrix.xlsx`.", "",
+          f"- Profile x objective cells: {len(summ)}",
+          f"- Verdicts: Add {int((rel['Verdict'] == 'Add').sum())}, Consider "
+          f"{int((rel['Verdict'] == 'Consider').sum())}, Do not add "
+          f"{int((rel['Verdict'] == 'Do not add').sum())}",
+          f"- Share of (profile, candidate) pairs whose verdict changes with the objective: {flips_obj:.0%}",
+          f"- Share of (objective, candidate) pairs whose verdict changes with the profile: {flips_prof:.0%}",
+          "", "NOTES_PLACEHOLDER", ""]
+    for ok, o in cfg.objectives.objectives.items():
+        s = summ[summ["Objective"] == o.label]
+        md += [f"## {o.label}", "", f"Groups: {', '.join(o.candidate_groups)}.", "",
+               "| Profile | Add | Consider | Do not add | Top 3 (score) | Bottom |",
+               "|---|---|---|---|---|---|"]
+        md += [f"| {r['Profile']} | {r['Add']} | {r['Consider']} | {r['Do not add']} | "
+               f"{r['Top 3 (score)']} | {r['Bottom']} |" for _, r in s.iterrows()]
+        md += [""]
+    out = os.path.join(ROOT, "docs", "SCENARIO_MATRIX.md")
+    old = open(out, encoding="utf-8").read() if os.path.exists(out) else ""
+    text = "\n".join(md)
+    if "## Notes on surprising results" in old:          # keep hand-written notes
+        i = old.index("## Notes on surprising results")
+        j = old.find("\n## ", i + 5)
+        text = text.replace("NOTES_PLACEHOLDER", old[i:j if j > 0 else None].strip())
+    with open(out, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    full.to_csv(os.path.join(ROOT, "data", "cache", "scenario_matrix_full.csv"), index=False)
+    print(text[:3000])
+
+
+if __name__ == "__main__":
+    main()

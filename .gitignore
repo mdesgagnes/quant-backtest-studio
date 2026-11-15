@@ -12,3 +12,4 @@ __pycache__/
 # Security review download cache
 data/cache/
 !examples/*.xlsx
+!examples/output/*.xlsx
