@@ -12,6 +12,8 @@ The request file holds the same inputs as the page:
     blend: {XIC.TO: 60, XBB.TO: 40}   # one blend of tickers (blend_name: optional label)
     portfolio_returns: my_portfolio.csv   # uploaded portfolio return stream(s)
     returns_currency: CAD             # CAD | USD, for uploaded files
+    benchmark: sleeve                 # optional: relative statistics vs each sleeve benchmark
+                                      # or a ticker (default: the portfolio itself)
     objective: lower_volatility       # optional; a key of config/objectives.yaml
     mode: add                         # add | replace
     weight: 0.10                      # Add mode
@@ -110,7 +112,7 @@ def main(argv=None) -> int:
     out = q.get("output") or os.path.splitext(path)[0] + ".xlsx"
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "wb") as fh:
-        fh.write(X.write_sections(RP.all_sections(rvs, cfg, sw)))
+        fh.write(X.full_report(rvs, cfg, None, sw))
     print(f"\nWorkbook: {out}")
     return 0
 

@@ -49,6 +49,10 @@ Equity portion: Canadian 30%, US 45%, international 20%, EM 5%. Bond portion: XB
 
 ## 4. Metrics
 
+**Standard.** Every standalone figure is taken from `qbt.metrics.summary`, the function behind the Backtest's statistics table, so the two modules report identical numbers for the same series: population moments, geometric annualisation, nothing annualised under 12 months, Sharpe / Sortino / Calmar net of the same CAD T-bill series (Calmar as in Bacon), VaR and CVaR as positive losses. Any return difference is a geometric excess, (1 + r) / (1 + b) - 1. Beta (and up / down beta) is withheld below R² 0.70.
+
+**Benchmark.** Unless another is chosen (Advanced), the benchmark for every relative statistic is the portfolio the security is added to ("without"). The sleeve benchmark of `config/universe.yaml`, or any ticker, can be chosen instead.
+
 ### 4a. Standalone (each candidate, its benchmark and the profile)
 CIPM conventions from `qbt/metrics.py`: population moments, geometric annualisation.
 

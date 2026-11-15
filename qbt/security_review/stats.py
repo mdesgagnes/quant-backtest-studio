@@ -1,4 +1,4 @@
-"""Standalone, within-sleeve and factor statistics, monthly.
+"""Standalone, benchmark-relative and factor statistics, monthly.
 
 Every figure reuses the app's existing CIPM-convention functions
 (`qbt.metrics`, `qbt.cipm`): population moments, geometric annualisation.
@@ -81,31 +81,41 @@ def ols(y: pd.Series, X: pd.DataFrame) -> Dict[str, object]:
 # Standalone profile
 # ----------------------------------------------------------------------
 def standalone(r: pd.Series, rf: pd.Series) -> Dict[str, float]:
+    """Standalone statistics, taken from `qbt.metrics.summary` -- the
+    function behind the Backtest's statistics table -- so the two modules
+    cannot disagree: CIPM conventions (population moments, geometric
+    annualisation, Sharpe / Sortino / Calmar net of the same risk-free
+    series, VaR and CVaR as positive losses), nothing annualised below a
+    year. Underwater time and the worst 12 months are added here."""
     r = r.dropna()
     if len(r) < 2:
         return {}
-    eq = M.to_equity(r)
-    rfa = M.rf_annual(r.index, rf.reindex(r.index).fillna(0.0), PPY)
+    rfx = rf.reindex(r.index).fillna(0.0)
+    s = M.summary(r, M.to_equity(r), None, None, None, rfx, PPY)
     uw = underwater(r)
     return {
         "Months": len(r),
         "Start": r.index[0].strftime("%Y-%m"),
         "End": r.index[-1].strftime("%Y-%m"),
-        "CAGR": M.ann_return(r, PPY),
-        "Volatility": M.annual_vol(r, PPY),
-        "Sharpe": M.sharpe(r, rf.reindex(r.index).fillna(0.0), PPY),
-        "Sortino": M.sortino(r, rf.reindex(r.index).fillna(0.0), PPY),
-        "Max drawdown": M.max_drawdown(eq),
-        "Calmar": M.calmar(eq, PPY, rf_ann=0.0),
-        "Ulcer index": M.ulcer_index(eq),
+        "Total return": s["Total Return"],
+        "CAGR": s["CAGR"],
+        "Volatility": s["Volatility"],
+        "Sharpe": s["Sharpe"],
+        "Sortino": s["Sortino"],
+        "Max drawdown": s["Max Drawdown"],
+        "Calmar": s["Calmar"],
+        "Ulcer index": s["Ulcer Index"],
         "Longest underwater (months)": uw["max_underwater"],
         "Recovery from max drawdown (months)": uw["recovery_months"],
-        "Skew": M.pop_skew(r),
-        "Excess kurtosis": M.pop_kurt(r),
-        "CVaR 95% (monthly)": M.var_cvar(r, 0.05)["cvar"],
-        "Worst month": float(r.min()),
+        "Skew": s["Skew"],
+        "Excess kurtosis": s["Excess Kurtosis"],
+        "VaR 95% (monthly)": s[M.var_label(PPY)],
+        "CVaR 95% (monthly)": s[M.cvar_label(PPY)],
+        "% positive months": s["% Positive Months"],
+        "Best month": s["Best Month"],
+        "Worst month": s["Worst Month"],
         "Worst 12 months": worst_12m(r),
-        "Risk-free (annual)": rfa,
+        "Risk-free (annual)": M.rf_annual(r.index, rfx, PPY),
     }
 
 
@@ -121,32 +131,36 @@ def relative(r: pd.Series, b: pd.Series, rf: pd.Series) -> Dict[str, float]:
     ba = M.beta_alpha(x, y, rfx, PPY)
     cap = C.capture_ratios(x, y, PPY)
     bb = C.bull_bear_betas(x, y, rfx, PPY)
+    # CIPM, as in the Backtest: below R-squared 0.70 the regression explains
+    # too little, so beta (and the up / down betas) are withheld.
+    ok = bool(ba["r2_reliable"])
     ax, ay = M.ann_return(x, PPY), M.ann_return(y, PPY)
     down = y < 0
     rel = (1 + x).cumprod() / (1 + y).cumprod()
     rel_dd = float((rel / np.maximum.accumulate(np.r_[1.0, rel.to_numpy()])[1:] - 1).min())
     return {
-        "Active return": (1 + ax) / (1 + ay) - 1 if ax == ax and ay == ay else np.nan,
+        "Excess return (geometric, ann.)": (1 + ax) / (1 + ay) - 1 if ax == ax and ay == ay else np.nan,
         "Tracking error": ba["tracking_error"],
         "Information ratio": ba["information_ratio"],
-        "Beta": ba["beta"],
+        "R²": ba["r2"],
+        "Beta": ba["beta"] if ok else np.nan,
         "Correlation": ba["corr"],
         "Upside capture": cap["up_capture"],
         "Downside capture": cap["down_capture"],
-        "Upside beta": bb["bull_beta"],
-        "Downside beta": bb["bear_beta"],
+        "Upside beta": bb["bull_beta"] if ok else np.nan,
+        "Downside beta": bb["bear_beta"] if ok else np.nan,
         "Hit rate in benchmark down months": float((x[down] > y[down]).mean()) if down.any() else np.nan,
         "Relative drawdown": rel_dd,
     }
 
 
 def excess_correlation(rets: pd.DataFrame, bench: Dict[str, pd.Series]) -> pd.DataFrame:
-    """Correlation of candidates' returns in excess of their own sleeve benchmark."""
+    """Correlation of candidates' geometric excess returns over their benchmark."""
     ex = {}
     for c in rets.columns:
         b = bench.get(c)
         if b is not None:
-            ex[c] = (rets[c] - b.reindex(rets.index))
+            ex[c] = (1 + rets[c]) / (1 + b.reindex(rets.index)) - 1
     return pd.DataFrame(ex).corr() if ex else pd.DataFrame()
 
 
@@ -173,8 +187,8 @@ def equivalents(rets: pd.DataFrame, bench: Dict[str, pd.Series],
             ba, bb = bench.get(a), bench.get(b)
             ok, why = False, ""
             if ba is not None and bb is not None:
-                xa = (df[a] - ba.reindex(df.index)).dropna()
-                xb = (df[b] - bb.reindex(df.index)).dropna()
+                xa = ((1 + df[a]) / (1 + ba.reindex(df.index)) - 1).dropna()
+                xb = ((1 + df[b]) / (1 + bb.reindex(df.index)) - 1).dropna()
                 tea = M.pop_std(xa) * np.sqrt(PPY)
                 teb = M.pop_std(xb) * np.sqrt(PPY)
                 if min(tea, teb) < max_te:

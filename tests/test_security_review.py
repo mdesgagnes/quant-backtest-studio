@@ -74,8 +74,41 @@ def test_standalone_matches_existing_metrics():
     assert s["Volatility"] == pytest.approx(r.std(ddof=0) * np.sqrt(12))
     assert s["Worst month"] == pytest.approx(r.min())
     assert s["Max drawdown"] == pytest.approx(M.max_drawdown(M.to_equity(r)))
-    assert s["CVaR 95% (monthly)"] == pytest.approx(M.var_cvar(r)["cvar"])
+    # VaR / CVaR as positive losses, Calmar net of the risk-free (CIPM, as in the Backtest)
+    assert s["CVaR 95% (monthly)"] == pytest.approx(-M.var_cvar(r)["cvar"])
+    assert s["VaR 95% (monthly)"] == pytest.approx(-M.var_cvar(r)["var"])
     assert s["Sharpe"] == pytest.approx(M.sharpe(r, rf, 12))
+    eq = M.to_equity(r)
+    assert s["Calmar"] == pytest.approx((M.cagr(eq, 12) - M.rf_annual(r.index, rf, 12))
+                                        / abs(M.max_drawdown(eq)))
+
+
+def test_standalone_is_the_backtest_summary():
+    """Every shared figure equals qbt.metrics.summary, the Backtest's statistics."""
+    rng = np.random.default_rng(2)
+    r = _m(rng.normal(0.005, 0.035, 72))
+    rf = pd.Series(0.002, index=r.index)
+    s = S.standalone(r, rf)
+    b = M.summary(r, M.to_equity(r), None, None, None, rf, 12)
+    pairs = {"CAGR": "CAGR", "Volatility": "Volatility", "Sharpe": "Sharpe", "Sortino": "Sortino",
+             "Calmar": "Calmar", "Max drawdown": "Max Drawdown", "Ulcer index": "Ulcer Index",
+             "VaR 95% (monthly)": "VaR 95% (monthly)", "CVaR 95% (monthly)": "CVaR 95% (monthly)",
+             "Total return": "Total Return", "Skew": "Skew", "Excess kurtosis": "Excess Kurtosis"}
+    for mine, theirs in pairs.items():
+        assert s[mine] == pytest.approx(b[theirs]), mine
+
+
+def test_relative_is_geometric_and_withholds_beta_below_r2_floor():
+    rng = np.random.default_rng(3)
+    bm = _m(rng.normal(0.006, 0.04, 120))
+    rf = pd.Series(0.0, index=bm.index)
+    tight = 0.8 * bm + _m(rng.normal(0.001, 0.005, 120))          # R2 high
+    loose = 0.2 * bm + _m(rng.normal(0.004, 0.04, 120))           # R2 low
+    rt, rl = S.relative(tight, bm, rf), S.relative(loose, bm, rf)
+    assert rt["R²"] >= 0.70 and rt["Beta"] == pytest.approx(0.8, abs=0.05)
+    assert rl["R²"] < 0.70 and np.isnan(rl["Beta"]) and np.isnan(rl["Downside beta"])
+    ax, ay = M.ann_return(tight, 12), M.ann_return(bm, 12)
+    assert rt["Excess return (geometric, ann.)"] == pytest.approx((1 + ax) / (1 + ay) - 1)
 
 
 def test_numpy_window_stats_match_pandas_versions():
@@ -90,8 +123,8 @@ def test_numpy_window_stats_match_pandas_versions():
     assert fast["Sortino"] == pytest.approx(M.sortino(r, rf, 12))
     assert fast["Max drawdown"] == pytest.approx(M.max_drawdown(eq))
     assert fast["Ulcer index"] == pytest.approx(M.ulcer_index(eq))
-    assert fast["Calmar"] == pytest.approx(M.calmar(eq, 12))
-    assert fast["CVaR 95% (monthly)"] == pytest.approx(M.var_cvar(r)["cvar"])
+    assert fast["Calmar"] == pytest.approx(M.calmar(eq, 12, M.rf_annual(r.index, rf, 12)))
+    assert fast["CVaR 95% (monthly)"] == pytest.approx(-M.var_cvar(r)["cvar"])
 
 
 def test_relative_scaled_benchmark_calibration():
@@ -471,7 +504,8 @@ def test_profiles_build_and_flag_splices(world):
 
 def test_calibration_low_beta_lowers_vol(world):
     cfg, b, reg = world
-    rv = E.run(E.Request("equities_100", "lower_volatility", ["USMV", "SPYCLONE"]), cfg, b, reg)
+    rv = E.run(E.Request("equities_100", "lower_volatility", ["USMV", "SPYCLONE"],
+                         benchmark="sleeve"), cfg, b, reg)
     u, c = rv.results["USMV"], rv.results["SPYCLONE"]
     assert u.relative["Beta"] == pytest.approx(0.7 / 1.0, abs=0.05)
     assert u.metrics["d_vol"] < 0 and u.metrics["down_capture"] < 1
@@ -541,7 +575,7 @@ def test_export_has_every_sheet_and_every_metric(world):
     sw = E.sweep(cfg, b, "USMV", "lower_volatility", regimes=reg, robustness=False)
     secs = RP.sections(rv, cfg, sw)
     wb = openpyxl.load_workbook(io.BytesIO(X.write_sections(secs)))
-    required = {"Verdict", "Fund Review", "Sleeve Comparison", "Diversification", "Portfolio Impact",
+    required = {"Verdict", "Fund Review", "Relative to Benchmark", "Diversification", "Portfolio Impact",
                 "Scenarios", "Regimes", "Factor Exposures", "Robustness", "Profile Sweep", "Ranking",
                 "Methodology"}
     assert required <= set(wb.sheetnames)
@@ -692,3 +726,51 @@ def test_objective_adds_a_verdict_to_the_summary(world):
     assert 'For "Lower volatility"' in RP.headline(rv, "USMV")
     ba = [s for s in RP.summary_sections([rv]) if s[1] == "Before and after"]
     assert len(ba) == 1 and list(ba[0][2]["Measure"])[0] == "Return a year (CAGR)"
+
+
+def test_default_benchmark_is_the_portfolio(world):
+    cfg, b, reg = world
+    base = CF.custom_profile("XIC.TO", {"XIC.TO": 1})
+    rv = E.run(E.Request(base, None, ["USMV"], robustness=False), cfg, b, reg)
+    r = rv.results["USMV"]
+    assert r.benchmark is None and r.benchmark_label == "XIC.TO"
+    # relative statistics are measured against the portfolio itself
+    assert r.relative == pytest.approx(S.relative(r.series["USMV"], r.series["Portfolio without"], b.rf),
+                                       nan_ok=True)
+    assert "SPY (benchmark)" not in rv.fund_review.columns
+    assert list(rv.fund_review.columns)[-1].startswith("XIC.TO, without")
+    # the sleeve benchmark stays available on request
+    rv2 = E.run(E.Request(base, None, ["USMV"], benchmark="sleeve", robustness=False), cfg, b, reg)
+    assert rv2.results["USMV"].benchmark == "SPY" and "SPY (benchmark)" in rv2.fund_review.columns
+
+
+def test_returns_added_are_geometric_excess(world):
+    cfg, b, reg = world
+    rv = E.run(E.Request("balanced", None, ["NEGC"], robustness=False), cfg, b, reg)
+    r = rv.results["NEGC"]
+    assert r.metrics["d_cagr"] == pytest.approx((1 + r.new_stats["CAGR"]) / (1 + r.base_stats["CAGR"]) - 1)
+    st = r.stress[r.stress["Status"] == "ok"].iloc[0]
+    assert st["Change in portfolio return"] == pytest.approx(
+        (1 + st["Portfolio return, with"]) / (1 + st["Portfolio return, without"]) - 1)
+
+
+def test_full_report_has_the_backtest_workbook(world):
+    import openpyxl
+    cfg, b, reg = world
+    rvs = E.run_many(E.Request("balanced", "lower_volatility", ["USMV", "NEGC"], robustness=False),
+                     ["balanced", CF.custom_profile("XIC.TO", {"XIC.TO": 1})], cfg, b, reg)
+    data = X.full_report(rvs, cfg, (rvs[1], "NEGC"))
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    for sheet in ("Executive Summary", "About", "Performance", "Summary", "Scenarios",
+                  "Relative to Benchmark", "Methodology"):
+        assert sheet in wb.sheetnames, sheet
+    assert wb["Executive Summary"]["B2"].value == "XIC.TO + 10% NEGC"
+    # the statistics table is qbt.metrics.summary of with vs without
+    perf = wb["Performance"]
+    rows = {perf.cell(r, 1).value: perf.cell(r, 2).value for r in range(1, 60)}
+    r = rvs[1].results["NEGC"]
+    rw = r.series["Portfolio with"].dropna()
+    rf = rvs[1].rf.reindex(rw.index).fillna(0.0)
+    exp = M.summary(rw, M.to_equity(rw, 100_000.0), r.series["Portfolio without"].reindex(rw.index),
+                    None, None, rf, 12)
+    assert rows["CAGR"] == pytest.approx(exp["CAGR"]) and rows["Sharpe"] == pytest.approx(exp["Sharpe"])

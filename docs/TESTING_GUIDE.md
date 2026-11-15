@@ -18,7 +18,7 @@ conda activate quant
 python -m pytest -q
 ```
 
-Expected: **335 passed** (285 existing + 50 new). Takes about a minute.
+Expected: **340 passed** (285 existing + 55 new). Takes about a minute.
 
 ```bash
 streamlit run app.py
@@ -60,7 +60,7 @@ python -m qbt.security_review examples/demo_7_symbol_vs_benchmarks.yaml
 
 | Demo | Request | What you should see |
 |---|---|---|
-| 1 | Balanced, lower volatility, 11 US equity ETFs, Add 10% | Common period 2013-08 onward (QUAL's start). SPLV, USMV (and SCHD) on top with Consider, driven by downside capture around 0.6-0.7; SPY, RSP, QUAL, MTUM, VUG, QQQ, IWM Do not add, in that order. Trade-off line for SPLV/USMV: upside capture given up. |
+| 1 | Balanced, lower volatility, 11 US equity ETFs, Add 10% | Common period 2013-08 onward (QUAL's start). Every fund is Do not add: measured against the Balanced portfolio itself, a 100% equity fund raises its volatility (downside capture of the portfolio above 1). USMV and SPLV come closest (volatility up only 0.07 and 0.02 points, drawdown about 0.3 to 0.6 points shallower); IWM, QQQ and VUG raise it most. Choose Advanced > Each security's sleeve benchmark to compare them with SPY instead. |
 | 2 | Balanced, stock-bond hedge, alternatives + bonds, each own history | KMLM, DBMF, BTAL Add (KMLM only Moderate confidence: its history covers 4 of the 9 stress windows); TAIL Consider; SHY Add, AGG/TIP/IEF Consider; TLT Do not add; RSST/RSSB Do not add with **Low** confidence (about 3 years, no 2022). |
 | 3 | Income, sequence risk (4%/yr, 30y), Canadian bonds + income equity | XEI.TO Add, ZWC.TO Consider with an option-writing caveat; bond ETFs Do not add (more bonds in a 70% bond profile raise the depletion probability). XBB.TO and ZAG.TO flagged functionally equivalent. In the workbook's Verdict sheet the pair reads "ZAG.TO is cheaper (0.09% vs 0.10% a year); ZAG.TO trades more". |
 | 4 | Growth, reduce drawdown, USMV replacing VFV.TO (Replace mode) | Add: max drawdown about 1.7 points shallower, trade-off about 0.8 point of CAGR; caveats list the SPY/EFA/EEM splices inside the period. |
@@ -85,17 +85,19 @@ Open the **Security review** workspace (first in the sidebar). Defaults: USMV, a
 | 7 | Securities: upload `examples/sample_portfolio_returns.csv` as a return stream instead | It is analysed as a security. |
 | 8 | Objective: **Lower volatility**; run | Each sentence ends with the verdict, confidence and trade-off; Verdict and Confidence columns appear; Details has Verdict and Ranking tabs. |
 | 9 | Portfolio: **Investor profile**; pick Balanced and Growth | One block of rows per profile. Details: a picker for the portfolio. |
-| 10 | Open **Details** | Scenarios, Regimes, Portfolio Impact, Diversification, Factor Exposures, Fund Review, Sleeve Comparison, Robustness, Objectives (or Verdict and Ranking with an objective), Charts, Methodology. |
+| 10 | Open **Details** | Scenarios, Regimes, Portfolio Impact, Diversification, Factor Exposures, Fund Review, Relative to Benchmark, Robustness, Objectives (or Verdict and Ranking with an objective), Charts, Methodology. |
 | 11 | Securities: Pick a whole sleeve: **Alternatives / diversifiers**; run | One table, no sentences; sort by Change in volatility. |
 | 12 | Blend: Upload a file: `examples/custom_profile_example.csv`; name it; **Save as a profile** | Weights shown (XIC.TO 25%, VFV.TO 35%, XEF.TO 10%, XBB.TO 25%, GLD 5%). After saving, the profile appears under Investor profile on the next page load. |
 | 13 | Profile: Growth only. **Replace a holding** VFV.TO, security USMV, objective Reduce drawdown | Add (demo 4). Details > Portfolio Impact target weights: USMV 31.5%, no VFV.TO. |
 | 14 | Pick a whole sleeve: **Canadian bonds**; objective Income generation; profile Income | Details > Verdict lists the XBB.TO / ZAG.TO pair as functionally equivalent, naming the cheaper and more liquid fund. Fund Review shows expense ratio, AUM and daily value traded. |
 | 15 | Advanced: **Each security's own history** | Months differ by row; a long-history security keeps its whole record. |
 | 16 | Advanced: tick **Also run a profile sweep**, run with DBMF first | Details gains a **Profile Sweep** tab with 7 rows. |
+| 17b | Details > **Fund Review** with USMV added to XIC.TO | Columns: USMV, then "XIC.TO, without (period)"; no SPY. Advanced > Benchmark: **Each security's sleeve benchmark** brings back "SPY (benchmark)". |
+| 17c | Look at "What adding it changes" | Teal for changes that help (lower volatility, higher return), rust for those that hurt; the excess return is geometric. |
 | 17 | Advanced: Uploaded returns are in **USD** | The uploaded stream is converted to CAD month by month (USD/CAD). |
 | 18 | Open **Factor Exposures** | Loadings and t-stats for market, size, value, momentum, quality, low vol; R2; mega-cap tilt. The note under the table names the factor source: Ken French where reachable, otherwise the ETF spreads (with the caveat on factor legs). |
 | 19 | Open **Details > Charts** | Stress-window bars and (with an objective) the rolling metric; the monthly series table under them. Red / sand palette. |
-| 20 | Press **Download everything (Excel)** and open it | Sheets: Summary, Verdict, Ranking, Fund Review, Sleeve Comparison, Diversification, Portfolio Impact, Scenarios, Regimes, Factor Exposures, Robustness, (Profile Sweep), Methodology, Series. Red titles, black headers, percentages as numbers. The Summary sheet holds the sentences and the summary table; every Details tab matches a sheet. |
+| 20 | Press **Full report (Excel)** and open it | Opens on the Executive Summary (the portfolio with the security against the portfolio without it), then About (every table, with links), Performance (statistics, CIPM appraisal, trailing periods, calendar years, drawdowns, monthly returns), Performance Analysis, then the review sheets: Summary, Verdict, Ranking, Fund Review, Relative to Benchmark, Diversification, Portfolio Impact, Scenarios, Regimes, Factor Exposures, Robustness, (Profile Sweep), Methodology, Series. Red titles, black headers, percentages as numbers. The Summary sheet holds the sentences and the summary table; every Details tab matches a sheet. |
 | 21 | Methodology sheet | Source field, currency method, T-bill source, CPI source, rebalancing, holdings with proxy splice dates, objective definition and thresholds. |
 | 22 | Switch to **Backtest**, Yahoo Finance source, default settings, run | The backtest works as before (results, tabs, exports). |
 | 23 | Backtest > Source **Return stream** > Yahoo, a few tickers | Return stream, Fund review and Diversification work as before. |

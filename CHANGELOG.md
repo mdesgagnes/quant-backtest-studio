@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased: `feature/symbol-impact-view` (2026-11-15)
+## Unreleased: `feature/symbol-impact-view` (2026-11-15), second round
+
+### Changed
+- **The benchmark is the portfolio by default, everywhere.** Relative statistics (excess return, tracking error, information ratio, capture, beta), the factor regression, the excess-return correlation and the Fund Review now compare each security with the portfolio it is added to. Before, they used each security's sleeve benchmark (USMV against SPY while the portfolio was XIC.TO). Advanced keeps the sleeve benchmark, or any ticker, as an option. Fund Review lists the portfolio over each security's period instead of a sleeve benchmark.
+- **One measurement standard with the Backtest (CIPM).** Standalone figures now come from `qbt.metrics.summary`, the function behind the Backtest's statistics, so the two modules cannot disagree. Consequences: Calmar nets off the T-bill (Bacon); VaR and CVaR are positive losses (the CVaR objective metric now reads "lower is better"); return added is the geometric excess of with over without, (1 + with) / (1 + without) - 1, in the summary, scores, add-weight grid, profile sweep and stress windows; regime returns link the regime's months geometrically and are annualised (n/a under 12 months) instead of arithmetic monthly averages; excess-return correlation and equivalence tests use geometric excess; beta and up / down beta are withheld below R2 0.70 and R2 is shown.
+- **Tables on the page are formatted like the Backtest's**: right-aligned figures that sort by value, every change coloured teal when it helps the investor and rust when it hurts (a fall in volatility is teal, a fall in return rust), security names in bold. "Sleeve Comparison" is now "Relative to Benchmark".
+- **Excel: the Backtest's full report.** "Full report (Excel)" builds, on click, the same workbook as the Backtest's return-stream export (`excel_export.workbook_from_returns`): two-page executive summary for the CIO, About sheet indexing every table with links, statistics, CIPM appraisal, trailing periods, calendar years, drawdowns, monthly returns and the in-depth performance analysis -- for the portfolio with the security against the portfolio without it -- followed by every Security review table. With several results, "Report on" picks the one the summary describes. The command line writes the same file.
+- Calibration and scenario-matrix reports regenerated under the new definitions.
+
 
 ### Changed
 - **The Security review page starts from the security, not the profile.** Inputs, in order: the securities (tickers, or uploaded return streams); what to add them to (a benchmark ticker or several, a blend of tickers, an uploaded portfolio return stream, or one or more investor profiles); how much (Add at a weight, or Replace a holding); and an optional objective.

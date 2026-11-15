@@ -42,7 +42,12 @@ class Request:
     profile: Union[str, Profile]
     objective: Optional[str]                 # None: impact only, no verdict shown
     candidates: List[str]
-    benchmark: Optional[str] = None          # override for every candidate
+    # Benchmark for the relative statistics (capture, tracking error, factor
+    # regression...): None = the portfolio itself (default, so every figure
+    # is measured against what the security is added to); "sleeve" = each
+    # candidate's sleeve benchmark from config/universe.yaml; a ticker = that
+    # ticker for every candidate.
+    benchmark: Optional[str] = None
     mode: str = "add"                        # add | replace
     weight: Optional[float] = None           # add weight; default from objectives.yaml
     replace_holding: Optional[str] = None
@@ -106,6 +111,7 @@ class Review:
     rf_label: str
     cpi_label: str
     objective_chosen: bool = True            # False: the verdict is computed but not the point
+    rf: Optional[pd.Series] = None           # monthly risk-free returns used (CAD T-bill)
 
 
 # ----------------------------------------------------------------------
@@ -261,13 +267,23 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
         else:
             cands.append(c)
 
+    bmode = (req.benchmark or "portfolio").strip()
     bench_of: Dict[str, Optional[str]] = {}
     for c in cands:
-        bt = (req.benchmark or cfg.universe.benchmark_for(c) or "").upper() or None
+        if bmode.lower() == "portfolio":
+            bt = None
+        elif bmode.lower() == "sleeve":
+            bt = (cfg.universe.benchmark_for(c) or "").upper() or None
+        else:
+            bt = bmode.upper()
         if bt and not b.has(bt):
-            notes.append(f"Benchmark {bt} for {c} has no data: the profile is used instead.")
+            notes.append(f"Benchmark {bt} for {c} has no data: the portfolio is used instead.")
             bt = None
         bench_of[c] = bt
+    notes.append("Benchmark for relative statistics: "
+                 + ("the portfolio the security is added to." if bmode.lower() == "portfolio" else
+                    "each security's sleeve benchmark (config/universe.yaml)." if bmode.lower() == "sleeve"
+                    else f"{bmode.upper()}."))
 
     def bench_series(c):
         return b.monthly[bench_of[c]] if bench_of[c] else None
@@ -346,7 +362,7 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
                         wverdicts.setdefault(k, {})[w] = V.raw_verdict(o, sc)
                         if k == okey:
                             row.update({"Score": sc, "Verdict (before caps)": V.raw_verdict(o, sc)})
-                    row.update({"Change in volatility": mw["d_vol"], "Change in CAGR": mw["d_cagr"],
+                    row.update({"Change in volatility": mw["d_vol"], "Excess return (geometric)": mw["d_cagr"],
                                 "Change in max drawdown": mw["d_mdd"], "Change in Sharpe": mw["d_sharpe"]})
                     wgrid_rows.append(row)
 
@@ -359,15 +375,15 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
             "Stress windows where the portfolio did better with it":
                 float((scen_ok["Change in portfolio return"] > 0).mean()) if len(scen_ok) else np.nan,
             "Regimes where the portfolio did better with it":
-                float((reg.loc[reg["Key"].isin(list(regimes)), "Change in portfolio avg monthly return"]
+                float((reg.loc[reg["Key"].isin(list(regimes)), "Change in portfolio ann. return"]
                        .dropna() > 0).mean()) if len(reg) else np.nan,
         }
-        flags = _flags(cfg, b, c, P, holdings, bench_of[c], st)
+        flags = _flags(cfg, b, c, P, holdings, bench_of[c], st, bmode.lower() == "sleeve")
         rat = V.rationale(obj, dec, metrics, oc.metrics, flags, c)
         series = pd.DataFrame({c: cand, "Benchmark": bench, "Portfolio without": base,
                                "Portfolio with": new})
         results[c] = CandidateResult(
-            c, bench_of[c], bench_of[c] or f"{prof.label} profile", len(P), P[0], P[-1], new_w,
+            c, bench_of[c], bench_of[c] or prof.describe(), len(P), P[0], P[-1], new_w,
             metrics, dec, rat, objs, S.standalone(cand, b.rf), imp["relative"], fe, reg, st,
             imp["sim"], rolling, pd.DataFrame(wgrid_rows), consistency, flags,
             imp["base_stats"], imp["new_stats"], series, b.info(c),
@@ -377,7 +393,7 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
     corr, excorr, crisis, equiv = _matrices(results, b, bench_of, base_by_c)
     for e in equiv:
         e.update(_cost_compare(b, e["A"], e["B"]))
-    fund = _fund_review(results, b)
+    fund = _fund_review(results, b, prof.describe())
     period = (f"{common[0]:%Y-%m} to {common[-1]:%Y-%m} ({len(common)} months, common to all)"
               if req.alignment == "common" and len(common) else "each candidate's own overlap")
     if b.streams:
@@ -387,7 +403,7 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
                   obj.description if req.objective else "", weight, holdings,
                   holdings[holdings["Spliced months"] > 0].copy(), results, skipped, ranking,
                   components, corr, excorr, crisis, equiv, fund, notes, period,
-                  b.rf_label, b.cpi_label, req.objective is not None)
+                  b.rf_label, b.cpi_label, req.objective is not None, b.rf)
 
 
 def run_many(req: Request, bases: List[Union[str, Profile]], cfg: AllConfig, b: Bundle,
@@ -400,7 +416,7 @@ def run_many(req: Request, bases: List[Union[str, Profile]], cfg: AllConfig, b: 
 
 
 def _flags(cfg: AllConfig, b: Bundle, c: str, P: pd.DatetimeIndex, holdings: pd.DataFrame,
-           bench: Optional[str], st: pd.DataFrame) -> List[str]:
+           bench: Optional[str], st: pd.DataFrame, sleeve_mode: bool = False) -> List[str]:
     out = []
     n = len(P)
     if n < 36:
@@ -411,8 +427,8 @@ def _flags(cfg: AllConfig, b: Bundle, c: str, P: pd.DatetimeIndex, holdings: pd.
         if h["Spliced months"] and h["Spliced to"] and h["Spliced to"] >= P[0].strftime("%Y-%m"):
             out.append(f"Profile holding {h['Holding']} uses proxy {h['Proxy']} until {h['Spliced to']} "
                        f"inside the analysis period.")
-    if bench is None:
-        out.append("No sleeve benchmark: within-sleeve statistics are measured against the profile.")
+    if bench is None and sleeve_mode:
+        out.append("No sleeve benchmark: relative statistics are measured against the portfolio.")
     out.extend(b.flags.get(c, []))
     srcs = factor_sources(cfg, b)
     legs = [k for k, sp in (cfg.factors.get("factors") or {}).items()
@@ -506,8 +522,11 @@ def _cost_rows(inf: Dict[str, float]) -> Dict[str, float]:
             "Average daily value traded": inf.get("avg_dollar_volume", np.nan)}
 
 
-def _fund_review(results, b: Bundle) -> pd.DataFrame:
-    cols = {}
+def _fund_review(results, b: Bundle, base_label: str = "Portfolio") -> pd.DataFrame:
+    """Each security, then the portfolio over each security's analysis
+    period, then any explicit benchmark: all from the same standalone
+    statistics (qbt.metrics.summary)."""
+    cols, port, bench = {}, {}, {}
     for c, r in results.items():
         st = dict(r.standalone)
         y = b.yields.get(c, {})
@@ -515,17 +534,16 @@ def _fund_review(results, b: Bundle) -> pd.DataFrame:
         st["Distribution variability (CV)"] = y.get("yield_stability", np.nan)
         st.update(_cost_rows(b.info(c)))
         cols[c] = st
-        if r.benchmark and r.benchmark not in cols and r.benchmark not in results:
+        pk = f"{base_label}, without ({r.start:%Y-%m} to {r.end:%Y-%m})"
+        port.setdefault(pk, r.base_stats)
+        if r.benchmark and f"{r.benchmark} (benchmark)" not in bench and r.benchmark not in results:
             bs = S.standalone(r.series["Benchmark"], b.rf)
             yb = b.yields.get(r.benchmark, {})
             bs["Distribution yield (trailing 12m)"] = yb.get("dist_yield", np.nan)
             bs["Distribution variability (CV)"] = yb.get("yield_stability", np.nan)
             bs.update(_cost_rows(b.info(r.benchmark)))
-            cols[f"{r.benchmark} (benchmark)"] = bs
-    if results:
-        r0 = next(iter(results.values()))
-        cols["Portfolio without"] = r0.base_stats
-    return pd.DataFrame(cols)
+            bench[f"{r.benchmark} (benchmark)"] = bs
+    return pd.DataFrame({**cols, **port, **bench})
 
 
 # ----------------------------------------------------------------------
@@ -553,7 +571,7 @@ def sweep(cfg: AllConfig, b: Bundle, candidate: str, objective: str, mode: str =
         m = r.metrics
         row.update({"Verdict": r.decision["verdict"], "Confidence": r.decision["confidence"],
                     "Score": r.decision["composite"], "Months": r.months,
-                    "Change in volatility": m["d_vol"], "Change in CAGR": m["d_cagr"],
+                    "Change in volatility": m["d_vol"], "Excess return (geometric)": m["d_cagr"],
                     "Change in max drawdown": m["d_mdd"], "Change in Sharpe": m["d_sharpe"],
                     "Correlation to portfolio": m["corr_to_portfolio"],
                     "Main trade-off": r.rationale["tradeoff"], "Note": ""})

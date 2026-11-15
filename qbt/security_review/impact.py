@@ -165,6 +165,9 @@ def impact_metrics(cand: pd.Series, base: pd.Series, new: pd.Series,
                       ("d_ulcer", "Ulcer index"), ("d_cvar", "CVaR 95% (monthly)"),
                       ("d_worst_12m", "Worst 12 months")):
         m[key] = sn.get(name, np.nan) - sb.get(name, np.nan)
+    # Return added: geometric excess of the portfolio with the candidate over
+    # the portfolio without it (CIPM), not the difference of the two CAGRs.
+    m["d_cagr"] = geo_excess(sn.get("CAGR", np.nan), sb.get("CAGR", np.nan))
     m["d_div_ratio"] = diversification_ratio(rets, new_w) - diversification_ratio(rets, base_w)
     m["corr_to_portfolio"] = float(cand.corr(base))
     tail = _tail_mask(base)
@@ -215,6 +218,11 @@ _WINDOW_STATS = {"d_vol": "Volatility", "d_sharpe": "Sharpe", "d_cagr": "CAGR",
                  "d_sortino": "Sortino", "d_calmar": "Calmar"}
 
 
+def geo_excess(a: float, b: float) -> float:
+    """(1 + a) / (1 + b) - 1: the geometric excess of return a over b."""
+    return float((1 + a) / (1 + b) - 1) if a == a and b == b and b > -1 else np.nan
+
+
 def _np_stats(r: np.ndarray, rf: np.ndarray) -> Dict[str, float]:
     """The window statistics of `qbt.metrics`, same formulas, on arrays
     (population moments, geometric annualisation, base point included in
@@ -233,9 +241,10 @@ def _np_stats(r: np.ndarray, rf: np.ndarray) -> Dict[str, float]:
     return {"Volatility": sd * np.sqrt(PPY), "CAGR": ann,
             "Sharpe": (ann - rfa) / (sd * np.sqrt(PPY)) if sd > M.RISKLESS_SD else np.nan,
             "Sortino": (ann - rfa) / (down * np.sqrt(PPY)) if down > M.RISKLESS_SD else np.nan,
-            "Max drawdown": mdd, "Calmar": ann / abs(mdd) if mdd < 0 else np.nan,
+            "Max drawdown": mdd, "Calmar": (ann - rfa) / abs(mdd) if mdd < 0 else np.nan,
             "Ulcer index": float(np.sqrt(((dd * 100) ** 2).mean())),
-            "CVaR 95% (monthly)": float(tail.mean()) if len(tail) else v}
+            # a positive loss, as in qbt.metrics.summary
+            "CVaR 95% (monthly)": -(float(tail.mean()) if len(tail) else v)}
 
 
 def _np_coef(y: np.ndarray, X: np.ndarray) -> float:
@@ -271,7 +280,9 @@ def rolling_share(key: Optional[str], better: str, center: float, cand: pd.Serie
     for end in range(window, len(idx) + 1, step):
         sl = slice(end - window, end)
         cw, bw, nw = c[sl], b[sl], n[sl]
-        if key in _WINDOW_STATS:
+        if key == "d_cagr":
+            v = geo_excess(_np_stats(nw, rf[sl])["CAGR"], _np_stats(bw, rf[sl])["CAGR"])
+        elif key in _WINDOW_STATS:
             name = _WINDOW_STATS[key]
             v = _np_stats(nw, rf[sl])[name] - _np_stats(bw, rf[sl])[name]
         elif key == "corr_to_portfolio":

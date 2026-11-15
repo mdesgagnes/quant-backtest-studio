@@ -53,8 +53,9 @@ def main():
                        "Evidence": detail})
 
     # 1. USMV / SPLV: lower volatility and downside capture than SPY
-    rv = E.run(E.Request("balanced", "lower_volatility", ["SPY", "USMV", "SPLV", "RSP", "QQQ"]),
-               cfg, b, reg)
+    # These checks are about each fund against its sleeve benchmark (SPY).
+    rv = E.run(E.Request("balanced", "lower_volatility", ["SPY", "USMV", "SPLV", "RSP", "QQQ"],
+                         benchmark="sleeve"), cfg, b, reg)
     vol = {c: r.standalone["Volatility"] for c, r in rv.results.items()}
     dc = {c: r.relative["Downside capture"] for c, r in rv.results.items()}
     for c in ("USMV", "SPLV"):

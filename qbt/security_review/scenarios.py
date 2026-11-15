@@ -88,12 +88,19 @@ def build_regimes(rules: Dict[str, Dict], inputs: Dict[str, Optional[pd.Series]]
     return out
 
 
+def _ann(r: pd.Series) -> float:
+    g = float((1 + r).prod())
+    return g ** (12 / len(r)) - 1 if len(r) and g > 0 else np.nan
+
+
 def regime_table(cand: pd.Series, base: pd.Series, new: pd.Series, weight: float,
                  regimes: Dict[str, pd.Series], rules: Dict[str, Dict]) -> pd.DataFrame:
-    """For each regime and its opposite: months, the candidate's average
-    monthly return and annualised volatility, its contribution to the new
-    portfolio (weight x average return) and the change in the portfolio's
-    average monthly return."""
+    """For each regime and its opposite: months, the candidate's annualised
+    return and volatility, its contribution to the new portfolio (weight x
+    average monthly return), the portfolio's annualised return without and
+    with it, and the geometric excess of with over without. Annualised
+    returns link the regime's months geometrically (CIPM), as the Backtest's
+    regime table does."""
     rows = []
     idx = cand.dropna().index.intersection(base.dropna().index).intersection(new.dropna().index)
     for key, lab in regimes.items():
@@ -103,14 +110,16 @@ def regime_table(cand: pd.Series, base: pd.Series, new: pd.Series, weight: float
             mask = (lab == state) & lab.notna()
             n = int(mask.sum())
             c, b, nw = cand[idx][mask], base[idx][mask], new[idx][mask]
+            ok = n >= 12                       # never annualise less than a year
+            ab, an = _ann(b) if ok else np.nan, _ann(nw) if ok else np.nan
             rows.append({
                 "Regime": name, "Key": key if state else f"not_{key}", "Months": n,
-                "Candidate avg monthly return": float(c.mean()) if n else np.nan,
+                "Candidate ann. return": _ann(c) if ok else np.nan,
                 "Candidate volatility (ann.)": float(c.std(ddof=0) * np.sqrt(12)) if n > 2 else np.nan,
                 "Contribution to portfolio (monthly)": float(weight * c.mean()) if n else np.nan,
-                "Portfolio avg monthly return, without": float(b.mean()) if n else np.nan,
-                "Portfolio avg monthly return, with": float(nw.mean()) if n else np.nan,
-                "Change in portfolio avg monthly return": float((nw - b).mean()) if n else np.nan,
+                "Portfolio ann. return, without": ab,
+                "Portfolio ann. return, with": an,
+                "Change in portfolio ann. return": (1 + an) / (1 + ab) - 1 if ok else np.nan,
             })
     return pd.DataFrame(rows)
 
@@ -189,7 +198,8 @@ def stress_table(cand: str, daily: Dict[str, pd.Series], base_w: Dict[str, float
             "Candidate max drawdown": _mdd(cp),
             "Portfolio return, without": float(pb.iloc[-1] - 1),
             "Portfolio return, with": float(pn.iloc[-1] - 1),
-            "Change in portfolio return": float(pn.iloc[-1] - pb.iloc[-1]),
+            # geometric excess of with over without (CIPM)
+            "Change in portfolio return": float(pn.iloc[-1] / pb.iloc[-1] - 1),
             "Portfolio max drawdown, without": _mdd(pb),
             "Portfolio max drawdown, with": _mdd(pn),
             "Candidate correlation to portfolio (daily)": float(rc.corr(rb)) if len(rc) > 3 else np.nan,

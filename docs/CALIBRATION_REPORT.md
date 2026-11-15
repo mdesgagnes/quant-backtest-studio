@@ -13,6 +13,8 @@ From `tests/test_security_review.py`: hand-computed metric values on small serie
 | `test_worst_12m_hand_computed` | PASS |
 | `test_ols_exact_line` | PASS |
 | `test_standalone_matches_existing_metrics` | PASS |
+| `test_standalone_is_the_backtest_summary` | PASS |
+| `test_relative_is_geometric_and_withholds_beta_below_r2_floor` | PASS |
 | `test_numpy_window_stats_match_pandas_versions` | PASS |
 | `test_relative_scaled_benchmark_calibration` | PASS |
 | `test_relative_drawdown_hand_computed` | PASS |
@@ -49,8 +51,19 @@ From `tests/test_security_review.py`: hand-computed metric values on small serie
 | `test_common_alignment_uses_shared_months` | PASS |
 | `test_sweep_covers_all_profiles` | PASS |
 | `test_export_has_every_sheet_and_every_metric` | PASS |
+| `test_parse_ken_french_monthly_section_only` | PASS |
+| `test_fund_info_is_cached` | PASS |
+| `test_factor_frame_prefers_ken_french` | PASS |
+| `test_costs_shown_and_break_ties_between_equivalents` | PASS |
+| `test_uploaded_stream_is_a_copy_and_converts_usd` | PASS |
+| `test_stress_falls_back_to_month_ends_for_streams` | PASS |
+| `test_any_base_and_no_objective` | PASS |
+| `test_objective_adds_a_verdict_to_the_summary` | PASS |
+| `test_default_benchmark_is_the_portfolio` | PASS |
+| `test_returns_added_are_geometric_excess` | PASS |
+| `test_full_report_has_the_backtest_workbook` | PASS |
 
-**41 of 41 passed.**
+**54 of 54 passed.**
 
 ## 2. Real-data sanity checks (expected direction)
 
@@ -65,10 +78,10 @@ From `tests/test_security_review.py`: hand-computed metric values on small serie
 | XSB.TO smaller 2022 loss than XLB.TO | ret(XSB) > ret(XLB) | PASS | -5.62% vs -25.02% |
 | DBMF positive in 2022 while Balanced negative | cand > 0 and portfolio < 0 | PASS | DBMF +44.32%, Balanced -15.35% |
 | KMLM positive in 2022 while Balanced negative | cand > 0 and portfolio < 0 | PASS | KMLM +62.66%, Balanced -15.35% |
-| Adding IEF lowers Balanced volatility | d_vol < 0 | PASS | -0.74 pts over 2003-10 to 2026-10 |
-| Adding TLT lowers Balanced volatility | d_vol < 0 | PASS | -0.51 pts over 2003-10 to 2026-10 |
+| Adding IEF lowers Balanced volatility | d_vol < 0 | PASS | -0.74 pts over 2003-05 to 2026-10 |
+| Adding TLT lowers Balanced volatility | d_vol < 0 | PASS | -0.52 pts over 2003-05 to 2026-10 |
 | US equity ETFs get different scores | score range > 0.3 | PASS | SPLV +0.21, USMV +0.18, SPY -0.26, RSP -0.30, QQQ -0.63 |
-| XBB.TO and ZAG.TO flagged functionally equivalent | flagged | PASS | XBB.TO~ZAG.TO (raw correlation 0.994) |
+| XBB.TO and ZAG.TO flagged functionally equivalent | flagged | PASS | XBB.TO~ZAG.TO (excess-return correlation 0.981) |
 | ZWC.TO distribution flagged (option writing) | flag present | PASS | Distributions include option writing: yield overstates income earned. 3 of 9 stress windows have no data for this comparison. |
 | DBMF low correlation to Balanced | corr < 0.3 | PASS | -0.37 |
 

@@ -21,6 +21,14 @@ Every judgment call made on `feature/security-decision-engine`, why, and how to 
 **Decision.** Inputs in the order: securities, what to add them to (benchmark, blend, uploaded portfolio or profile), how much, optional objective. The result opens with one sentence per security and portfolio and one summary table; every other table sits behind Details and in the workbook. Sentences only for up to 4 results.
 **Why.** The question is "what does this security do to my portfolio", against whatever portfolio the PM has; the profiles are one possible portfolio, not the starting point. The scored list of every metric was the noise. **Change it.** `report.summary_sections` (the summary) and `ui.render` (the order).
 
+### The portfolio is the benchmark
+**Decision.** Relative statistics, factor regression, excess correlation and Fund Review compare each security with the portfolio it is added to, unless the user picks the sleeve benchmark or a ticker.
+**Why.** The question is what the security does to that portfolio; comparing USMV with SPY while the portfolio is XIC.TO answered a different question. The calibration script keeps the sleeve benchmark explicitly, since its checks are about each fund against its sleeve. **Change it.** `Request.benchmark` (None, "sleeve" or a ticker).
+
+### One measurement code path with the Backtest
+**Decision.** `stats.standalone` calls `qbt.metrics.summary`; the full Excel report is built by `excel_export.workbook_from_returns`, the Backtest's own return-stream export, with the portfolio with the security as the series and the portfolio without it as the benchmark.
+**Why.** Two implementations of the same statistic drift apart (Calmar without the risk-free, CVaR with the opposite sign, arithmetic regime averages); one code path cannot. A test checks the figures are identical.
+
 ### Objective optional
 **Decision.** With no objective, no verdict or score is shown; the engine still scores every objective (the first stands in internally for the ranking and robustness tables, which are hidden).
 **Why.** A verdict needs a stated goal; without one, facts are more honest than a default score.

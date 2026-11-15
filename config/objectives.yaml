@@ -37,10 +37,10 @@ metrics:
   d_sharpe:           {better: higher, center: 0.0,  scale: 0.10,  label: "Change in portfolio Sharpe"}
   d_sortino:          {better: higher, center: 0.0,  scale: 0.15,  label: "Change in portfolio Sortino"}
   d_calmar:           {better: higher, center: 0.0,  scale: 0.10,  label: "Change in portfolio Calmar"}
-  d_cagr:             {better: higher, center: 0.0,  scale: 0.005, label: "Change in portfolio CAGR"}
+  d_cagr:             {better: higher, center: 0.0,  scale: 0.005, label: "Excess return of the portfolio with it (geometric, a year)"}
   d_mdd:              {better: higher, center: 0.0,  scale: 0.020, label: "Change in portfolio max drawdown"}
   d_ulcer:            {better: lower,  center: 0.0,  scale: 1.0,   label: "Change in portfolio ulcer index"}
-  d_cvar:             {better: higher, center: 0.0,  scale: 0.005, label: "Change in portfolio monthly 95% CVaR"}
+  d_cvar:             {better: lower,  center: 0.0,  scale: 0.005, label: "Change in portfolio monthly 95% CVaR (a loss)"}
   d_worst_12m:        {better: higher, center: 0.0,  scale: 0.020, label: "Change in portfolio worst 12 months"}
   d_div_ratio:        {better: higher, center: 0.0,  scale: 0.05,  label: "Change in diversification ratio"}
   corr_to_portfolio:  {better: lower,  center: 0.5,  scale: 0.5,   label: "Candidate correlation to the portfolio"}
@@ -51,8 +51,8 @@ metrics:
   d_prob_dd30:        {better: lower,  center: 0.0,  scale: 0.05,  label: "Change in probability of a 30% drawdown"}
   d_max_underwater:   {better: lower,  center: 0.0,  scale: 6.0,   label: "Change in longest time underwater (months)"}
   d_underwater_share: {better: lower,  center: 0.0,  scale: 0.05,  label: "Change in share of months underwater"}
-  up_capture:         {better: higher, center: 1.0,  scale: 0.20,  label: "Upside capture vs sleeve benchmark"}
-  down_capture:       {better: lower,  center: 1.0,  scale: 0.20,  label: "Downside capture vs sleeve benchmark"}
+  up_capture:         {better: higher, center: 1.0,  scale: 0.20,  label: "Upside capture vs the benchmark"}
+  down_capture:       {better: lower,  center: 1.0,  scale: 0.20,  label: "Downside capture vs the benchmark"}
   d_up_month_return:  {better: higher, center: 0.0,  scale: 0.002, label: "Change in portfolio return in its up months"}
   d_regime_high_inflation:     {better: higher, center: 0.0, scale: 0.002, label: "Change in portfolio return, high-inflation months"}
   cand_regime_high_inflation:  {better: higher, center: 0.0, scale: 0.010, label: "Candidate return, high-inflation months"}

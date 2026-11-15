@@ -17,7 +17,7 @@ from .engine import Review
 
 Section = Tuple[str, str, pd.DataFrame, str]
 
-SHEETS = ["Summary", "Verdict", "Ranking", "Fund Review", "Sleeve Comparison", "Diversification",
+SHEETS = ["Summary", "Verdict", "Ranking", "Fund Review", "Relative to Benchmark", "Diversification",
           "Portfolio Impact", "Scenarios", "Regimes", "Factor Exposures", "Robustness",
           "Profile Sweep", "Methodology", "Series"]
 
@@ -27,9 +27,10 @@ RATIO = '0.00'
 INT = '0'
 MONEY = '#,##0'
 
-_PCT_ROWS = {"CAGR", "Volatility", "Max drawdown", "CVaR 95% (monthly)", "Worst month",
+_PCT_ROWS = {"Total return", "CAGR", "Volatility", "Max drawdown", "VaR 95% (monthly)",
+             "CVaR 95% (monthly)", "% positive months", "Best month", "Worst month",
              "Worst 12 months", "Risk-free (annual)", "Distribution yield (trailing 12m)",
-             "Expense ratio"}
+             "Expense ratio", "Return a year (CAGR)"}
 _MONEY_ROWS = {"Assets (AUM)", "Average daily value traded"}
 _INT_ROWS = {"Months", "Longest underwater (months)", "Recovery from max drawdown (months)"}
 
@@ -154,21 +155,23 @@ def sleeve_sections(rv: Review) -> List[Section]:
         rows.append(row)
     if not rows:
         return []
-    df = _cols(pd.DataFrame(rows), pct=["Active return", "Tracking error", "Relative drawdown",
-                                        "Hit rate in benchmark down months"],
-               ratio=["Information ratio", "Beta", "Correlation", "Upside capture",
+    df = _cols(pd.DataFrame(rows), pct=["Excess return (geometric, ann.)", "Tracking error",
+                                        "Relative drawdown", "Hit rate in benchmark down months"],
+               ratio=["Information ratio", "R\u00b2", "Beta", "Correlation", "Upside capture",
                       "Downside capture", "Upside beta", "Downside beta"])
-    return [("Sleeve Comparison", "Within-sleeve statistics vs the sleeve benchmark", df,
-             "Monthly, CAD. Capture ratios: geometric mean in benchmark up (down) months over the "
-             "benchmark's.")]
+    return [("Relative to Benchmark", "Each security against the benchmark", df,
+             "Monthly, CAD; the benchmark is the portfolio unless another was chosen. Excess return "
+             "and tracking error are geometric; capture ratios are the geometric mean in the "
+             "benchmark's up (down) months over the benchmark's. Beta is withheld (n/a) below "
+             "R\u00b2 0.70, as in the Backtest.")]
 
 
 def diversification_sections(rv: Review) -> List[Section]:
     out = []
     for title, m, note in (
             ("Correlation of monthly returns", rv.corr, "Includes the profile without the candidate."),
-            ("Excess-return correlation (each vs its sleeve benchmark)", rv.excess_corr,
-             "Separates same-sleeve funds by their active bets."),
+            ("Excess-return correlation (geometric, each vs its benchmark)", rv.excess_corr,
+             "Separates similar funds by their bets relative to the benchmark."),
             ("Crisis correlation (portfolio's worst 10% months)", rv.crisis_corr,
              "Correlation measured only in the profile's worst decile of months.")):
         if m is not None and len(m):
@@ -194,8 +197,8 @@ def impact_sections(rv: Review, cfg: AllConfig) -> List[Section]:
     stats = []
     for c, r in rv.results.items():
         for name in ("CAGR", "Volatility", "Sharpe", "Sortino", "Max drawdown", "Calmar",
-                     "Ulcer index", "CVaR 95% (monthly)", "Worst month", "Worst 12 months",
-                     "Longest underwater (months)"):
+                     "Ulcer index", "VaR 95% (monthly)", "CVaR 95% (monthly)", "Worst month",
+                     "Worst 12 months", "Longest underwater (months)"):
             a, b = r.base_stats.get(name, np.nan), r.new_stats.get(name, np.nan)
             stats.append({"Candidate": c, "Measure": name, "Without": a, "With": b,
                           "Change": b - a if a == a and b == b else np.nan})
@@ -249,9 +252,10 @@ def scenario_sections(rv: Review) -> List[Section]:
     return [("Scenarios", "Historical stress windows",
              _cols(df, pct=pct, ratio=["Candidate correlation to portfolio (daily)"],
                    integer=["Sessions"]),
-             "Close of start date to close of end date, daily, CAD; portfolios bought at target "
-             "weights on the start date and left to drift. 'no data' = history does not cover the "
-             "window (never filled).")]
+             "Close of start date to close of end date, daily, CAD (month-end points for uploaded "
+             "monthly series); portfolios bought at target weights on the start date and left to "
+             "drift. Change = geometric excess of the portfolio with the security over without it. "
+             "'no data' = history does not cover the window (never filled).")]
 
 
 def regime_sections(rv: Review) -> List[Section]:
@@ -260,7 +264,9 @@ def regime_sections(rv: Review) -> List[Section]:
         return []
     pct = [c for c in df.columns if "return" in c or "volatility" in c or "Contribution" in c]
     return [("Regimes", "Regimes (monthly)", _cols(df, pct=pct, integer=["Months"]),
-             "Rules in config/scenarios.yaml. Contribution = weight x candidate average return.")]
+             "Rules in config/scenarios.yaml. Returns are the regime's months linked geometrically "
+             "and annualised (n/a under 12 months); change = geometric excess of with over without. "
+             "Contribution = weight x the security's average monthly return.")]
 
 
 def factor_sections(rv: Review, cfg: AllConfig) -> List[Section]:
@@ -283,7 +289,7 @@ def factor_sections(rv: Review, cfg: AllConfig) -> List[Section]:
     ratio = [c for c in df.columns if c not in ("Candidate", "Months", "Note", "Alpha (annual)")]
     labels = {k: v.get("label", k) for k, v in (cfg.factors.get("factors") or {}).items()}
     src = next((n for n in rv.notes if n.startswith("Factor model:")), "")
-    note = ("Explanatory only. Excess return on the sleeve benchmark's excess return and US "
+    note = ("Explanatory only. Excess return on the benchmark's excess return and US "
             "long-short style factors. " + src + " "
             + ", ".join(f"{k}: {v}" for k, v in labels.items()) + ".")
     return [("Factor Exposures", "Factor / style regression", _cols(df, pct=["Alpha (annual)"],
@@ -308,7 +314,7 @@ def robustness_sections(rv: Review, cfg: AllConfig) -> List[Section]:
         w = w.drop(columns=["Score", "Verdict (before caps)"], errors="ignore")
     if len(w):
         out.append(("Robustness", "Add-weight sensitivity",
-                    _cols(w, pct=["Add weight"], pts=["Change in volatility", "Change in CAGR",
+                    _cols(w, pct=["Add weight"], pts=["Change in volatility", "Excess return (geometric)",
                                                       "Change in max drawdown"],
                           ratio=["Score", "Change in Sharpe"]), ""))
     cons = [{"Candidate": c, **r.consistency} for c, r in rv.results.items()]
@@ -329,7 +335,7 @@ def sweep_sections(sweep: Optional[pd.DataFrame]) -> List[Section]:
         return []
     return [("Profile Sweep", "One candidate across every preset profile",
              _cols(sweep.drop(columns=["Key"], errors="ignore"),
-                   pts=["Change in volatility", "Change in CAGR", "Change in max drawdown"],
+                   pts=["Change in volatility", "Excess return (geometric)", "Change in max drawdown"],
                    ratio=["Score", "Change in Sharpe", "Correlation to portfolio"],
                    integer=["Months"]), "")]
 
@@ -356,12 +362,15 @@ def methodology_sections(rv: Review, cfg: AllConfig) -> List[Section]:
     defs = [
         ("CAGR", "Annualised geometric return, (prod(1+r))^(12/n) - 1."),
         ("Volatility", "Population standard deviation of monthly returns x sqrt(12)."),
-        ("Sharpe / Sortino", "Excess of annualised return over the CAD T-bill, over volatility / downside deviation."),
+        ("Sharpe / Sortino", "Annualised geometric return minus the annualised CAD T-bill, over volatility / downside deviation."),
         ("Max drawdown", "Worst fall from a previous peak of the month-end value path."),
-        ("Calmar", "CAGR / |max drawdown|."),
+        ("Calmar", "(CAGR - annualised CAD T-bill) / |max drawdown| (Bacon)."),
         ("Ulcer index", "Root mean square of drawdowns, in percent."),
-        ("CVaR 95%", "Average of the worst 5% of monthly returns."),
+        ("VaR / CVaR 95%", "5th percentile of monthly returns / average of the months at or below it, both shown as positive losses."),
+        ("Excess return", "Geometric: (1 + r) / (1 + b) - 1, annualised; with vs without the security, or the security vs the benchmark."),
         ("Tracking error", "Population SD of geometric excess returns x sqrt(12)."),
+        ("R\u00b2 rule", "Beta (and up / down beta) withheld below R\u00b2 0.70."),
+        ("Standard", "Every standalone figure comes from qbt.metrics.summary, the function behind the Backtest's statistics: CIPM conventions, nothing annualised under 12 months."),
         ("Capture", "Geometric mean return in benchmark up (down) months over the benchmark's."),
         ("Diversification ratio", "Weighted average holding volatility over portfolio volatility."),
         ("Worst 10% months", "The profile's (without candidate) worst decile of months on the analysis period."),
@@ -433,7 +442,9 @@ def headline(rv: Review, c: str) -> str:
     req = rv.request
     verb = (f"Adding {rv.weight:.0%} {c} to {base_label(rv)}" if req.mode == "add" else
             f"Replacing {req.replace_holding} with {c} in {base_label(rv)}")
-    parts = [f"return {_pts(m['d_cagr'], 'higher', 'lower')} a year",
+    xr = m["d_cagr"]
+    parts = [("return unchanged" if xr == xr and abs(xr) < 5e-5 else
+              f"return {xr * 100:+.2f}% a year (geometric excess)" if xr == xr else "return n/a"),
              f"volatility {_pts(m['d_vol'], 'higher', 'lower')}",
              f"max drawdown {_pts(m['d_mdd'], 'shallower', 'deeper', 1)}",
              f"Sharpe {m['d_sharpe']:+.2f}" if m['d_sharpe'] == m['d_sharpe'] else "Sharpe n/a"]
@@ -450,7 +461,7 @@ def headline(rv: Review, c: str) -> str:
     return text
 
 
-_SUMMARY_PTS = ["Change in return (a year)", "Change in volatility", "Change in max drawdown",
+_SUMMARY_PTS = ["Excess return a year (geometric)", "Change in volatility", "Change in max drawdown",
                 "Change in worst 12 months"]
 
 
@@ -463,7 +474,7 @@ def summary_table(rvs: List[Review]) -> pd.DataFrame:
             row = {"Portfolio": base_label(rv), "Security": c, "Change": change_label(rv),
                    "Months": r.months,
                    "Return a year, with it": r.new_stats.get("CAGR", np.nan),
-                   "Change in return (a year)": m["d_cagr"],
+                   "Excess return a year (geometric)": m["d_cagr"],
                    "Change in volatility": m["d_vol"],
                    "Change in max drawdown": m["d_mdd"],
                    "Change in Sharpe": m["d_sharpe"],
@@ -509,9 +520,9 @@ def summary_sections(rvs: List[Review]) -> List[Section]:
     out: List[Section] = [
         ("Summary", "In one sentence", pd.DataFrame({"Finding": [headline(rv, c) for rv, c in pairs]}), ""),
         ("Summary", "What adding it changes", summary_table(rvs),
-         "Changes are the portfolio with the security minus without it, in percentage points "
-         "(Sharpe and correlation in units). Downside capture below 1: the security fell less than "
-         "the portfolio in the portfolio's down months.")]
+         "Excess return: geometric, (1 + with) / (1 + without) - 1 a year. Other changes: with minus "
+         "without, in percentage points (Sharpe and correlation in units). Downside capture below 1: "
+         "the security fell less than the portfolio in the portfolio's down months.")]
     if len(pairs) == 1:
         rv, c = pairs[0]
         out.append(("Summary", "Before and after", before_after(rv, c), ""))

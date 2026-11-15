@@ -30,6 +30,7 @@ from .bundle import load_bundle, with_streams
 PALETTE = [RED, "#C9B896", "#D08C4E", "#EFE9DE", "#9A9389", "#B01419", "#CBBFA8", "#8C6D4F"]
 BASE_KINDS = ["Benchmark", "Blend", "Uploaded portfolio", "Investor profile"]
 NO_OBJECTIVE = "(none)"
+BENCH_MODES = ["The portfolio (default)", "Each security's sleeve benchmark", "A ticker"]
 
 
 @st.cache_resource(show_spinner=False)
@@ -73,21 +74,57 @@ def _text(df: pd.DataFrame) -> pd.DataFrame:
     return out.astype(object).where(out.notna(), "")
 
 
-def _sortable(df: pd.DataFrame):
-    """A column-formatted table that stays numeric, so clicking a header
-    sorts by value (percentages are shown x100 with a % sign)."""
-    fmt = df.attrs.get("col_fmt") or {}
-    view = df.copy()
-    cc = {}
-    for c, f in fmt.items():
-        if f in (RP.PCT, RP.PTS):
-            view[c] = view[c] * 100
-            cc[c] = st.column_config.NumberColumn(c, format="%+.2f%%" if f == RP.PTS else "%.2f%%")
-        elif f == RP.RATIO:
-            cc[c] = st.column_config.NumberColumn(c, format="%.2f")
-        elif f == RP.INT:
-            cc[c] = st.column_config.NumberColumn(c, format="%d")
-    return view, cc
+# Colours of the Backtest's tables (gain / loss / faint), from the brand file.
+_GOOD, _BAD, _DIM = BRAND["gain"], BRAND["loss"], BRAND["faint"]
+# A rise in these is bad for the investor; everything else, a rise is good.
+_LOWER_IS_BETTER = ("volatility", "ulcer", "cvar", "var 95", "tracking error", "underwater",
+                    "downside capture", "probability", "depletion")
+
+
+def _lower_better(name: str) -> bool:
+    n = str(name).lower()
+    return any(w in n for w in _LOWER_IS_BETTER)
+
+
+def _tone(v, lower_better: bool) -> str:
+    """Teal when the figure helps the investor, rust when it hurts; works on
+    the formatted text ("+0.42%", "-0.60%")."""
+    t = str(v).strip()
+    if t in ("", "n/a", "nan", "None"):
+        return f"color:{_DIM}"
+    try:
+        x = float(t.replace("%", "").replace(",", "").replace("+", ""))
+    except ValueError:
+        return ""
+    if abs(x) < 1e-12:
+        return f"color:{_DIM}"
+    good = (x < 0) if lower_better else (x > 0)
+    return f"color:{_GOOD if good else _BAD}"
+
+
+def _is_change(col: str) -> bool:
+    c = str(col)
+    return c.startswith(("Change in", "Excess return")) or c == "Change"
+
+
+def _styled(df: pd.DataFrame):
+    """The table as the workbook shows it, coloured the way the Backtest
+    colours its tables: every change is teal when it helps the investor and
+    rust when it hurts (a fall in volatility is teal, a fall in return rust)."""
+    txt = _text(df)
+    sty = txt.style
+    if df.attrs.get("row_fmt") and "Change" in txt.columns:
+        names = txt.iloc[:, 0].astype(str).tolist()
+        sty = sty.apply(lambda col: [_tone(v, _lower_better(n)) for v, n in zip(col, names)],
+                        subset=["Change"])
+    for c in txt.columns:
+        if _is_change(c) and c != "Change":
+            lb = _lower_better(c)
+            sty = sty.map(lambda v, lb=lb: _tone(v, lb), subset=[c])
+    first = txt.columns[0] if len(txt.columns) else None
+    if first is not None and first in ("Security", "Candidate", "Portfolio", "Measure"):
+        sty = sty.set_properties(subset=[first], **{"font-weight": "600"})
+    return sty
 
 
 def _show(secs: List[RP.Section]) -> None:
@@ -95,7 +132,7 @@ def _show(secs: List[RP.Section]) -> None:
         if df is None or df.empty:
             continue
         st.markdown(f'<div class="eyebrow">{title}</div>', unsafe_allow_html=True)
-        st.dataframe(_text(df), hide_index=True, width="stretch")
+        st.dataframe(_styled(df), hide_index=True, width="stretch")
         if note:
             st.caption(note)
 
@@ -283,8 +320,15 @@ def _sidebar(cfg: CF.AllConfig):
                          help="Common: every security is judged on the same months (fair "
                               "comparison). Each: a long-history security keeps its full record.")
         currency = st.radio("Uploaded returns are in", ["CAD", "USD"], horizontal=True, key="sr_ccy")
-        bench = st.text_input("Sleeve benchmark override (detail tables; blank = auto)", "",
-                              key="sr_bench").strip().upper()
+        bmode = st.radio("Benchmark for the relative statistics", BENCH_MODES, key="sr_bench_mode",
+                         help="Capture, tracking error, beta, factor regression and the Fund Review "
+                              "comparison. Default: the portfolio the security is added to, so "
+                              "every figure is measured against the same thing.")
+        bench = None
+        if bmode == BENCH_MODES[1]:
+            bench = "sleeve"
+        elif bmode == BENCH_MODES[2]:
+            bench = st.text_input("Ticker", "", key="sr_bench").strip().upper() or None
         sweep_on = st.checkbox("Also run a profile sweep", key="sr_sweep_on",
                                help="The first security across all 7 preset profiles.")
     for m in msgs:
@@ -292,7 +336,7 @@ def _sidebar(cfg: CF.AllConfig):
     run = sb.button("Run", type="primary", width="stretch", key="sr_run")
     return dict(bases=bases, kind=kind, rebalance=None if reb.startswith("(") else reb,
                 objective=None if ok == NO_OBJECTIVE else ok, candidates=cands, uploads=uploads,
-                currency=currency, benchmark=bench or None, mode="add" if mode == "Add" else "replace",
+                currency=currency, benchmark=bench, mode="add" if mode == "Add" else "replace",
                 weight=weight, holding=holding, alignment=align, sweep=sweep_on, run=run)
 
 
@@ -363,7 +407,7 @@ def _run(inp, cfg):
     uploads = inp["uploads"]
     tickers = [t for t in inp["candidates"] if t not in uploads]
     extra = [t for p in inp["bases"] for t in p.weights if t not in uploads]
-    if inp["benchmark"]:
+    if inp["benchmark"] and inp["benchmark"] != "sleeve":
         extra.append(inp["benchmark"])
     try:
         b, reg = _bundle(tuple(sorted(set(tickers + extra + cfg.universe.all_tickers()))))
@@ -381,6 +425,43 @@ def _run(inp, cfg):
         st.error(str(exc))
         st.stop()
     st.session_state["sr_result"] = (rvs, sw)
+
+
+def _deferred(build):
+    """Builds the workbook only when the button is clicked (as the Backtest
+    does); a failure gives a one-line workbook saying why, never a broken
+    download."""
+    def _make():
+        try:
+            return build()
+        except Exception as exc:
+            buf = io.BytesIO()
+            pd.DataFrame({"The workbook could not be built": [str(exc)]}).to_excel(buf, index=False)
+            return buf.getvalue()
+    return _make
+
+
+def _downloads(rvs, cfg, sw, pairs) -> None:
+    if not pairs:
+        return
+    focus = pairs[0]
+    c1, c2 = st.columns([2, 3])
+    if len(pairs) > 1:
+        lab = {f"{c} added to {RP.base_label(rv)}": (rv, c) for rv, c in pairs}
+        focus = lab[c2.selectbox("Report on", list(lab), key="sr_report_focus",
+                                 help="The executive summary and performance sheets are for this "
+                                      "result; every result's tables follow.")]
+    rv, c = focus
+    name = "".join(ch if ch.isalnum() else "_" for ch in f"{c}_in_{RP.base_label(rv)}")[:60]
+    c1.download_button("Full report (Excel)",
+                       _deferred(lambda _r=rvs, _f=focus, _s=sw: X.full_report(_r, cfg, _f, _s)),
+                       f"security_review_{name}.xlsx",
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                       key="sr_xlsx", on_click="ignore", type="primary")
+    st.caption("The workbook opens on a two-page executive summary, then an About sheet indexing "
+               "every table: statistics, CIPM appraisal, trailing periods, calendar years, "
+               "drawdowns, monthly returns and the performance analysis of the portfolio with the "
+               "security against the portfolio without it, followed by every table on this page.")
 
 
 def render() -> None:
@@ -419,19 +500,12 @@ def render() -> None:
         if title == "In one sentence":
             continue
         st.markdown(f'<div class="eyebrow">{title}</div>', unsafe_allow_html=True)
-        if title == "What adding it changes":
-            view, cc = _sortable(df)
-            st.dataframe(view, hide_index=True, width="stretch", column_config=cc)
-        else:
-            st.dataframe(_text(df), hide_index=True, width="stretch")
+        st.dataframe(_styled(df), hide_index=True, width="stretch")
         if note:
             st.caption(note)
 
     _charts(rvs)
-    st.download_button("Download everything (Excel)", X.write_sections(secs),
-                       "security_review.xlsx",
-                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                       key="sr_xlsx")
+    _downloads(rvs, cfg, sw, pairs)
 
     with st.expander("Details: stress windows, regimes, factors, robustness, fund data, methodology"):
         rv = rv0
@@ -442,7 +516,7 @@ def render() -> None:
         for s in RP.sections(rv, cfg, sw if rv is rv0 else None):
             by_sheet.setdefault(s[0], []).append(s)
         tabs = ["Scenarios", "Regimes", "Portfolio Impact", "Diversification", "Factor Exposures",
-                "Fund Review", "Sleeve Comparison", "Robustness", "Verdict", "Ranking",
+                "Fund Review", "Relative to Benchmark", "Robustness", "Verdict", "Ranking",
                 "Profile Sweep", "Charts", "Methodology"]
         names = {"Verdict": "Objectives" if not rv.objective_chosen else "Verdict"}
         tabs = [t for t in tabs if t in by_sheet or t == "Charts"]
