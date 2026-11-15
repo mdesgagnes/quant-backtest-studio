@@ -151,7 +151,8 @@ def full_report(rvs: List[Review], cfg: AllConfig, focus: Optional[Tuple[Review,
         "assumptions": {
             "Question": f"What adding {c} does to {blabel}",
             "Change": RP.change_label(rv) + (", funded pro rata from every holding"
-                                              if rv.request.mode == "add" else ""),
+                                              if rv.request.mode == "add" and not rv.request.fund_from
+                                              else ""),
             "Benchmark": f"{blabel}, the portfolio without {c}",
             "Rebalancing": rv.request.rebalance or rv.profile.rebalance,
             "Period": period,

@@ -76,7 +76,7 @@ def _metric_fmt(key: str) -> str:
 
 def verdict_sections(rv: Review, cfg: AllConfig) -> List[Section]:
     req = rv.request
-    mode = (f"Add {rv.weight:.0%}, funded pro rata from every holding" if req.mode == "add"
+    mode = (f"Add {rv.weight:.0%}, {fund_text(rv)}" if req.mode == "add"
             else f"Replace {req.replace_holding} ({rv.profile.weights.get(req.replace_holding, 0):.0%})")
     info = {"Profile": rv.profile.describe(), "Objective": rv.objective_label,
             "What it asks": rv.objective_description, "Mode": mode,
@@ -412,9 +412,16 @@ def base_label(rv: Review) -> str:
     return rv.profile.describe()
 
 
+def fund_text(rv: Review) -> str:
+    from .engine import funding_label
+    return funding_label(rv.request.fund_from, rv.funded_from)
+
+
 def change_label(rv: Review) -> str:
     req = rv.request
     if req.mode == "add":
+        if req.fund_from:
+            return f"Add {rv.weight:.0%}, {fund_text(rv)}"
         return f"Add {rv.weight:.0%}"
     return f"Replace {req.replace_holding} ({rv.profile.weights.get(req.replace_holding, 0):.0%})"
 
@@ -440,7 +447,8 @@ def headline(rv: Review, c: str) -> str:
     r = rv.results[c]
     m = r.metrics
     req = rv.request
-    verb = (f"Adding {rv.weight:.0%} {c} to {base_label(rv)}" if req.mode == "add" else
+    verb = (f"Adding {rv.weight:.0%} {c} to {base_label(rv)}"
+            + (f", {fund_text(rv)}" if req.fund_from else "") if req.mode == "add" else
             f"Replacing {req.replace_holding} with {c} in {base_label(rv)}")
     xr = m["d_cagr"]
     parts = [("return unchanged" if xr == xr and abs(xr) < 5e-5 else

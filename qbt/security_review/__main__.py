@@ -16,7 +16,9 @@ The request file holds the same inputs as the page:
                                       # or a ticker (default: the portfolio itself)
     objective: lower_volatility       # optional; a key of config/objectives.yaml
     mode: add                         # add | replace
-    weight: 0.10                      # Add mode
+    weight: 0.10                      # Add mode: share of the whole portfolio
+    fund_from: [bonds]                # optional: reduce only these (bonds, equities or
+                                      # tickers), pro rata; default every holding
     replace_holding: VFV.TO           # Replace mode
     alignment: common                 # common | each
     sweep: DBMF                       # optional: also run a profile sweep for this ticker
@@ -91,10 +93,12 @@ def main(argv=None) -> int:
     objective = q.get("objective")
     req = E.Request(bases[0], objective, cands, q.get("benchmark"),
                     q.get("mode", "add"), q.get("weight"), q.get("replace_holding"),
-                    q.get("rebalance"), q.get("alignment", "common"))
+                    q.get("rebalance"), q.get("alignment", "common"),
+                    fund_from=q.get("fund_from"))
     rvs = E.run_many(req, bases, cfg, b, reg)
     sw = (E.sweep(cfg, b, str(q["sweep"]).upper(), objective or next(iter(cfg.objectives.objectives)),
-                  q.get("mode", "add"), q.get("weight"), q.get("replace_holding"), reg)
+                  q.get("mode", "add"), q.get("weight"), q.get("replace_holding"), reg,
+                  fund_from=q.get("fund_from"))
           if q.get("sweep") else None)
     pd.set_option("display.width", 220)
     print()

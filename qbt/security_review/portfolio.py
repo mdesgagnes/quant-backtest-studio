@@ -8,7 +8,7 @@ end of December for "annual", never for "none").
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -54,6 +54,25 @@ def add_weights(base: Dict[str, float], candidate: str, weight: float) -> Dict[s
     if not 0 < weight < 1:
         raise ValueError("The add weight must be between 0 and 1.")
     out = {t: w * (1.0 - weight) for t, w in base.items()}
+    out[candidate] = out.get(candidate, 0.0) + weight
+    return out
+
+
+def fund_weights(base: Dict[str, float], candidate: str, weight: float,
+                 sources: List[str]) -> Dict[str, float]:
+    """Add `candidate` at `weight` (a share of the whole portfolio), taken
+    from `sources` only, pro rata to their weights; every other holding keeps
+    its weight. Raises if the sources hold less than `weight`."""
+    if not 0 < weight < 1:
+        raise ValueError("The add weight must be between 0 and 1.")
+    src = [t for t in dict.fromkeys(sources) if base.get(t, 0) > 0]
+    if not src:
+        raise KeyError("None of the holdings to reduce is in this portfolio.")
+    avail = sum(base[t] for t in src)
+    if weight > avail + 1e-12:
+        raise ValueError(f"Only {avail:.0%} is held in {', '.join(src)}; cannot take {weight:.0%}.")
+    out = {t: w * (1.0 - weight / avail) if t in src else w for t, w in base.items()}
+    out = {t: w for t, w in out.items() if w > 1e-12}
     out[candidate] = out.get(candidate, 0.0) + weight
     return out
 

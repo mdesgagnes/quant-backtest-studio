@@ -27,7 +27,7 @@ from . import stats as S
 from . import verdict as V
 from .bundle import Bundle
 from .config import AllConfig, ConfigError, Profile
-from .portfolio import add_weights, portfolio_returns, replace_weights
+from .portfolio import add_weights, fund_weights, portfolio_returns, replace_weights
 
 CURRENCY_NOTE = ("All returns in CAD. US-listed prices are converted at each day's USD/CAD "
                  "close (Yahoo CAD=X; Fed H.10 history before 2003-09-17); CAD-listed "
@@ -55,6 +55,10 @@ class Request:
     alignment: str = "common"                # common | each
     robustness: bool = True
     rolling_step: int = 1
+    # Add mode: where the add weight comes from. None = every holding, pro
+    # rata. Otherwise a list of holdings and / or groups ("bonds",
+    # "equities"), reduced pro rata to their weights; the rest is untouched.
+    fund_from: Optional[List[str]] = None
 
 
 @dataclass
@@ -112,9 +116,46 @@ class Review:
     cpi_label: str
     objective_chosen: bool = True            # False: the verdict is computed but not the point
     rf: Optional[pd.Series] = None           # monthly risk-free returns used (CAD T-bill)
+    funded_from: Optional[List[str]] = None  # holdings reduced to pay for the addition
 
 
 # ----------------------------------------------------------------------
+GROUPS = {"bonds": "bond", "equities": "equity"}
+GROUP_LABEL = {"bonds": "bonds", "equities": "equities"}
+
+
+def asset_class(cfg: AllConfig, t: str) -> Optional[str]:
+    """'equity', 'bond' or None: the building block's asset class, else the
+    universe sleeve's (a sleeve whose key names bonds or equity)."""
+    blk = cfg.profiles.block_for(t)
+    if blk is not None:
+        return blk.asset_class
+    sl = next((k for k, s in cfg.universe.sleeves.items() if t in s.tickers), "")
+    return "bond" if "bond" in sl else "equity" if "equity" in sl else None
+
+
+def funding_sources(cfg: AllConfig, prof: Profile, fund_from: Optional[List[str]]) -> Optional[List[str]]:
+    """The holdings of `prof` that pay for the addition (None = all, pro rata)."""
+    if not fund_from:
+        return None
+    out = []
+    for f in fund_from:
+        g = GROUPS.get(str(f).lower())
+        if g:
+            out += [t for t in prof.weights if asset_class(cfg, t) == g]
+        elif str(f).upper() in prof.weights:
+            out.append(str(f).upper())
+    return list(dict.fromkeys(out))
+
+
+def funding_label(fund_from: Optional[List[str]], sources: Optional[List[str]] = None) -> str:
+    if not fund_from:
+        return "funded pro rata from every holding"
+    names = [GROUP_LABEL.get(str(f).lower(), str(f).upper()) for f in fund_from]
+    held = f" ({', '.join(sources)})" if sources and any(str(f).lower() in GROUPS for f in fund_from) else ""
+    return "taken from " + " and ".join(names) + held
+
+
 def resolve_profile(cfg: AllConfig, p: Union[str, Profile]) -> Profile:
     if isinstance(p, Profile):
         return p
@@ -246,6 +287,19 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
     if req.mode == "replace" and req.replace_holding not in prof.weights:
         raise ConfigError(f"Replace mode needs a holding of {prof.label}: "
                           f"{', '.join(prof.weights)}.")
+    sources = funding_sources(cfg, prof, req.fund_from) if req.mode == "add" else None
+    if req.mode == "add" and req.fund_from:
+        if not sources:
+            raise ConfigError(f"{prof.describe()} holds none of: {', '.join(req.fund_from)}.")
+        avail = sum(prof.weights[t] for t in sources)
+        if weight > avail + 1e-12:
+            raise ConfigError(f"{prof.describe()} holds only {avail:.0%} in "
+                              f"{', '.join(sources)}: it cannot fund {weight:.0%}.")
+
+    def with_weights(c: str, w: float) -> Dict[str, float]:
+        if req.mode == "replace":
+            return replace_weights(prof.weights, req.replace_holding, c)
+        return fund_weights(prof.weights, c, w, sources) if sources else add_weights(prof.weights, c, w)
     regimes = regimes if regimes is not None else regime_labels(cfg, b)
     ctx = _ctx(cfg, b, regimes)
     F = factor_frame(cfg, b)
@@ -314,8 +368,7 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
         cand = b.monthly[c].reindex(P)
         R = H.reindex(P).copy()
         R[c] = cand
-        new_w = add_weights(prof.weights, c, weight) if req.mode == "add" \
-            else replace_weights(prof.weights, req.replace_holding, c)
+        new_w = with_weights(c, weight)
         wt = weight if req.mode == "add" else prof.weights[req.replace_holding]
         base = portfolio_returns(R, prof.weights, reb)
         new = portfolio_returns(R, new_w, reb)
@@ -345,8 +398,9 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
                 rolling[key] = I.rolling_share(key, spec.better, spec.center, cand, base, new,
                                                ctx, oc.rolling_window, req.rolling_step)
             if req.mode == "add":
-                for w in oc.weight_grid:
-                    nw = add_weights(prof.weights, c, w)
+                cap = sum(prof.weights[t] for t in sources) if sources else 1.0
+                for w in [x for x in oc.weight_grid if x <= cap + 1e-12]:
+                    nw = with_weights(c, w)
                     nn = portfolio_returns(R, nw, reb)
                     mw = I.impact_metrics(cand, base, nn, R, prof.weights, nw, bench, ctx, c)["metrics"]
                     for k2 in ("size_loading",):
@@ -403,7 +457,7 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
                   obj.description if req.objective else "", weight, holdings,
                   holdings[holdings["Spliced months"] > 0].copy(), results, skipped, ranking,
                   components, corr, excorr, crisis, equiv, fund, notes, period,
-                  b.rf_label, b.cpi_label, req.objective is not None, b.rf)
+                  b.rf_label, b.cpi_label, req.objective is not None, b.rf, sources)
 
 
 def run_many(req: Request, bases: List[Union[str, Profile]], cfg: AllConfig, b: Bundle,
@@ -549,7 +603,8 @@ def _fund_review(results, b: Bundle, base_label: str = "Portfolio") -> pd.DataFr
 # ----------------------------------------------------------------------
 def sweep(cfg: AllConfig, b: Bundle, candidate: str, objective: str, mode: str = "add",
           weight: Optional[float] = None, replace_holding: Optional[str] = None,
-          regimes: Optional[Dict[str, pd.Series]] = None, robustness: bool = True) -> pd.DataFrame:
+          regimes: Optional[Dict[str, pd.Series]] = None, robustness: bool = True,
+          fund_from: Optional[List[str]] = None) -> pd.DataFrame:
     """One candidate across every preset profile."""
     regimes = regimes if regimes is not None else regime_labels(cfg, b)
     rows = []
@@ -561,8 +616,14 @@ def sweep(cfg: AllConfig, b: Bundle, candidate: str, objective: str, mode: str =
             row.update({"Verdict": "n/a", "Note": f"{replace_holding} is not held"})
             rows.append(row)
             continue
-        rv = run(Request(k, objective, [candidate], mode=mode, weight=weight,
-                         replace_holding=replace_holding, robustness=robustness), cfg, b, regimes)
+        try:
+            rv = run(Request(k, objective, [candidate], mode=mode, weight=weight,
+                             replace_holding=replace_holding, robustness=robustness,
+                             fund_from=fund_from), cfg, b, regimes)
+        except ConfigError as exc:                # e.g. no bonds to reduce in 100% Equities
+            row.update({"Verdict": "n/a", "Note": str(exc)})
+            rows.append(row)
+            continue
         if candidate not in rv.results:
             row.update({"Verdict": "n/a", "Note": rv.skipped.get(candidate, "")})
             rows.append(row)

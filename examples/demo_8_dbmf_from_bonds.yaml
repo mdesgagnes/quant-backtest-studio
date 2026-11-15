@@ -1,0 +1,10 @@
+# Demo 8: managed futures paid for out of the bond sleeve, not pro rata.
+# Balanced 60/40: 10% DBMF and KMLM taken from bonds (XBB.TO 40% -> 30%), equities untouched.
+candidates: [DBMF, KMLM]
+profile: balanced
+objective: stock_bond_correlation_hedge
+mode: add
+weight: 0.10
+fund_from: [bonds]
+alignment: each
+output: examples/output/demo_8_dbmf_from_bonds.xlsx

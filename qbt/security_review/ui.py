@@ -30,6 +30,8 @@ from .bundle import load_bundle, load_macro, with_streams
 PALETTE = [RED, "#C9B896", "#D08C4E", "#EFE9DE", "#9A9389", "#B01419", "#CBBFA8", "#8C6D4F"]
 BASE_KINDS = ["Benchmark", "Blend", "Uploaded portfolio", "Investor profile"]
 NO_OBJECTIVE = "(none)"
+FUND_ALL, FUND_PICK = "Every holding, pro rata", "Chosen holdings"
+FUND_GROUP = {"bonds": "Bonds", "equities": "Equities"}
 BENCH_MODES = ["The portfolio (default)", "Each security's sleeve benchmark", "A ticker"]
 
 
@@ -302,10 +304,32 @@ def _sidebar(cfg: CF.AllConfig):
     can_replace = len(bases) == 1 and len(bases[0].weights) > 1
     mode = sb.radio("Change", ["Add", "Replace a holding"] if can_replace else ["Add"],
                     horizontal=True, key="sr_mode")
-    weight, holding = None, None
+    weight, holding, fund_from = None, None, None
     if mode == "Add":
-        weight = sb.slider("Add weight, funded pro rata (%)", 1, 40,
+        weight = sb.slider("Add weight (% of the portfolio)", 1, 40,
                            int(round(cfg.objectives.add_weight * 100)), key="sr_w") / 100
+        classes = {E.asset_class(cfg, t) for p in bases for t in p.weights}
+        opts = [FUND_ALL] + [FUND_GROUP[g] for g in ("bonds", "equities")
+                             if E.GROUPS[g] in classes]
+        if len(bases) == 1 and len(bases[0].weights) > 1:
+            opts.append(FUND_PICK)
+        how = sb.selectbox("Funded from", opts, key="sr_fund",
+                           help="Every holding, pro rata: each holding gives up the same share. "
+                                "Bonds / equities: only that part of the portfolio is reduced, pro "
+                                "rata within it. Chosen holdings: only those, pro rata.")
+        if how == FUND_PICK:
+            fund_from = sb.multiselect("Holdings to reduce", list(bases[0].weights), key="sr_fund_pick",
+                                       format_func=lambda t: f"{t} ({bases[0].weights[t]:.0%})") or None
+        elif how != FUND_ALL:
+            fund_from = [next(g for g, lab in FUND_GROUP.items() if lab == how)]
+        if fund_from and len(bases) == 1:
+            src = E.funding_sources(cfg, bases[0], fund_from) or []
+            avail = sum(bases[0].weights[t] for t in src)
+            if src and weight <= avail + 1e-12:
+                sb.caption(" · ".join(f"{t} {bases[0].weights[t]:.0%} → "
+                                      f"{bases[0].weights[t] * (1 - weight / avail):.0%}" for t in src))
+            elif src:
+                sb.warning(f"Only {avail:.0%} is held in {', '.join(src)}.")
     else:
         hs = list(bases[0].weights)
         holding = sb.selectbox("Holding to replace", hs, key="sr_hold",
@@ -346,7 +370,8 @@ def _sidebar(cfg: CF.AllConfig):
     return dict(bases=bases, kind=kind, rebalance=None if reb.startswith("(") else reb,
                 objective=None if ok == NO_OBJECTIVE else ok, candidates=cands, uploads=uploads,
                 currency=currency, benchmark=bench, mode="add" if mode == "Add" else "replace",
-                weight=weight, holding=holding, alignment=align, sweep=sweep_on, run=run)
+                weight=weight, holding=holding, fund_from=fund_from, alignment=align,
+                sweep=sweep_on, run=run)
 
 
 # ----------------------------------------------------------------------
@@ -423,12 +448,14 @@ def _run(inp, cfg):
         b = with_streams(b, uploads, inp["currency"])
         bases = [p if p.custom else p.key for p in inp["bases"]]
         req = E.Request(bases[0], inp["objective"], inp["candidates"], inp["benchmark"], inp["mode"],
-                        inp["weight"], inp["holding"], inp["rebalance"], inp["alignment"])
+                        inp["weight"], inp["holding"], inp["rebalance"], inp["alignment"],
+                        fund_from=inp["fund_from"])
         with st.spinner("Running…"):
             rvs = E.run_many(req, bases, cfg, b, reg)
             first = next((c for rv in rvs for c in rv.results), None)
             sw = (E.sweep(cfg, b, first, inp["objective"] or next(iter(cfg.objectives.objectives)),
-                          inp["mode"], inp["weight"], inp["holding"], reg)
+                          inp["mode"], inp["weight"], inp["holding"], reg,
+                          fund_from=[f for f in (inp["fund_from"] or []) if f in E.GROUPS] or None)
                   if inp["sweep"] and first else None)
     except (CF.ConfigError, KeyError, ValueError) as exc:
         st.error(str(exc))

@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased: `feature/symbol-impact-view` (2026-11-15), third round
+## Unreleased: `feature/symbol-impact-view` (2026-11-15), fourth round
+
+### Added
+- **Funded from.** In Add mode the weight can come from every holding (pro rata, as before), from the **bonds**, from the **equities**, or from **chosen holdings** only, each reduced pro rata within that group while the rest of the portfolio is untouched. The sidebar shows the change (XBB.TO 40% -> 30%). Taking a holding's whole weight is the same as Replace. Works for profiles, blends and several portfolios at once (bonds / equities are resolved per portfolio), in the profile sweep (n/a where the group is not held) and on the command line (`fund_from: [bonds]`). Demo 8: DBMF and KMLM taken from bonds in Balanced. 2 tests.
+
 
 ### Changed
 - **Faster loading.** A run loads prices only for the tickers it needs (about 20 for two ETFs) instead of the whole 44-ticker universe plus those. The T-bill, CPI and Ken French series are loaded once per server (`bundle.load_macro`), not again with every new set of tickers. A data host that does not answer (FRED and the Ken French library on some networks) is remembered for 24 hours (`data/cache/macro/_unreachable.json`) instead of costing a timeout on every load; the timeout is 10 seconds instead of 20. Measured here with prices on disk: price loading for a two-ETF run went from about 20 seconds to 0.5 to 1.2 seconds. The command line loads the same way.

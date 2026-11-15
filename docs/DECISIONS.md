@@ -29,6 +29,10 @@ Every judgment call made on `feature/security-decision-engine`, why, and how to 
 **Decision.** `stats.standalone` calls `qbt.metrics.summary`; the full Excel report is built by `excel_export.workbook_from_returns`, the Backtest's own return-stream export, with the portfolio with the security as the series and the portfolio without it as the benchmark.
 **Why.** Two implementations of the same statistic drift apart (Calmar without the risk-free, CVaR with the opposite sign, arithmetic regime averages); one code path cannot. A test checks the figures are identical.
 
+### A monthly simulator, not the Backtest engine
+**Decision.** The portfolios with and without the security are simulated by `security_review/portfolio.py`: monthly total returns, target weights drifting between rebalance dates, no costs. The Backtest's engine (`qbt/engine.py`) is daily, charges commission, slippage and market impact, earns cash, lags execution and records trades.
+**Why.** The review compares two portfolios that differ by one holding over 10 to 25 years, many times over (every candidate, every rolling window, the add-weight grid, the bootstrap); a daily engine with trades would make a run minutes instead of seconds, and the costs it adds are nearly the same with and without the security, so they barely move the difference. What is shared is the measurement: every statistic comes from `qbt.metrics`, and the Excel report is the Backtest's own. **Limit.** Absolute returns are before costs; a high-turnover or thinly traded addition is better checked in the Backtest workspace.
+
 ### Objective optional
 **Decision.** With no objective, no verdict or score is shown; the engine still scores every objective (the first stands in internally for the ranking and robustness tables, which are hidden).
 **Why.** A verdict needs a stated goal; without one, facts are more honest than a default score.

@@ -799,3 +799,38 @@ def test_only_needed_tickers_are_loaded(world):
     assert "USMV" in need and "XIC.TO" in need          # the security and the profile blocks
     assert "SCHD" not in need                           # universe members nobody asked for
     assert len(need) < len(needed_tickers(cfg, cfg.universe.all_tickers()))
+
+
+def test_fund_weights_reduce_only_the_sources():
+    base = {"XIC.TO": 0.18, "VFV.TO": 0.27, "XEF.TO": 0.12, "XEC.TO": 0.03, "XBB.TO": 0.40}
+    w = P.fund_weights(base, "DBMF", 0.10, ["XBB.TO"])
+    assert w["XBB.TO"] == pytest.approx(0.30) and w["DBMF"] == pytest.approx(0.10)
+    assert all(w[t] == pytest.approx(base[t]) for t in ("XIC.TO", "VFV.TO", "XEF.TO", "XEC.TO"))
+    assert sum(w.values()) == pytest.approx(1.0)
+    w2 = P.fund_weights(base, "GLD", 0.06, ["XIC.TO", "VFV.TO"])          # pro rata within the two
+    assert w2["XIC.TO"] == pytest.approx(0.18 * (1 - 0.06 / 0.45))
+    assert w2["VFV.TO"] == pytest.approx(0.27 * (1 - 0.06 / 0.45))
+    whole = P.fund_weights(base, "DBMF", 0.40, ["XBB.TO"])                 # = replace
+    assert "XBB.TO" not in whole and whole["DBMF"] == pytest.approx(0.40)
+    with pytest.raises(ValueError):
+        P.fund_weights(base, "DBMF", 0.45, ["XBB.TO"])
+
+
+def test_fund_from_groups_and_errors(world):
+    cfg, b, reg = world
+    rv = E.run(E.Request("balanced", None, ["NEGC"], fund_from=["bonds"], robustness=False), cfg, b, reg)
+    w = rv.results["NEGC"].weights_new
+    assert rv.funded_from == ["XBB.TO"] and w["XBB.TO"] == pytest.approx(0.30)
+    assert w["VFV.TO"] == pytest.approx(cfg.profiles.profiles["balanced"].weights["VFV.TO"])
+    assert "taken from bonds (XBB.TO)" in RP.headline(rv, "NEGC")
+    rv = E.run(E.Request("balanced", None, ["NEGC"], fund_from=["equities"]), cfg, b, reg)
+    assert set(rv.funded_from) == {"XIC.TO", "VFV.TO", "XEF.TO", "XEC.TO"}
+    assert rv.results["NEGC"].weights_new["XBB.TO"] == pytest.approx(0.40)
+    assert rv.results["NEGC"].weight_grid["Add weight"].max() <= 0.60   # grid capped at what equities hold
+    with pytest.raises(CF.ConfigError):                                  # no bonds in 100% equities
+        E.run(E.Request("equities_100", None, ["NEGC"], fund_from=["bonds"]), cfg, b, reg)
+    with pytest.raises(CF.ConfigError):                                  # more than the bonds hold
+        E.run(E.Request("balanced", None, ["NEGC"], weight=0.5, fund_from=["bonds"]), cfg, b, reg)
+    sw = E.sweep(cfg, b, "NEGC", "lower_volatility", regimes=reg, robustness=False, fund_from=["bonds"])
+    assert sw.set_index("Key").loc["equities_100", "Verdict"] == "n/a"
+    assert sw.set_index("Key").loc["balanced", "Verdict"] in ("Add", "Consider", "Do not add")
