@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased: `feature/symbol-impact-view` (2026-11-15)
+
+### Changed
+- **The Security review page starts from the security, not the profile.** Inputs, in order: the securities (tickers, or uploaded return streams); what to add them to (a benchmark ticker or several, a blend of tickers, an uploaded portfolio return stream, or one or more investor profiles); how much (Add at a weight, or Replace a holding); and an optional objective.
+- **The result is a summary first**: one sentence per security and portfolio (change in return, volatility, max drawdown and Sharpe, correlation, stress windows helped), one sortable "What adding it changes" table, a before-and-after table when there is a single result, and growth and drawdown charts. Every earlier table is still there, behind **Details** and in the workbook. Sentences are shown only for up to 4 results; beyond that, the table alone.
+- With no objective, no verdict or score is shown; the workbook's Verdict sheet still scores every objective. With an objective, each sentence ends with the verdict, its confidence and the trade-off.
+- The workbook gains a **Summary** sheet first. With several portfolios, each detail table's title names its portfolio.
+- Command line: `benchmarks:`, `blend:`, `profiles:`, `portfolio_returns:`, `candidate_returns:` and `returns_currency:` request keys; `objective:` is optional. Two new demos (6: three securities added to an uploaded portfolio; 7: one security against three benchmarks).
+
+### Added
+- `bundle.with_streams`: uploaded monthly return streams (CAD, or USD converted month by month) used as if they were tickers, on a copy of the price bundle.
+- Stress windows fall back to month-end points when a series has no daily prices; windows shorter than two months are skipped for it (`Basis` column: daily or month-end).
+- `engine.run_many` (the same candidates on several portfolios) and `CandidateResult.vs_base` (beta, capture and correlation against the portfolio itself).
+- 4 tests (uploaded streams and USD conversion, month-end stress fallback, every kind of portfolio with no objective, the verdict in the summary).
+
 ## Unreleased: `feature/security-decision-engine` (2026-11-15)
 
 ### Added

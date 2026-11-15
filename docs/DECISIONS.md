@@ -17,6 +17,18 @@ Every judgment call made on `feature/security-decision-engine`, why, and how to 
 **Decision.** `report.sections(review)` returns every table; the page and the Excel export both render that list.
 **Why.** It guarantees "every metric in the app is in the export, and vice versa" by construction, and a test checks the sheets and every metric key.
 
+### The page starts from the security
+**Decision.** Inputs in the order: securities, what to add them to (benchmark, blend, uploaded portfolio or profile), how much, optional objective. The result opens with one sentence per security and portfolio and one summary table; every other table sits behind Details and in the workbook. Sentences only for up to 4 results.
+**Why.** The question is "what does this security do to my portfolio", against whatever portfolio the PM has; the profiles are one possible portfolio, not the starting point. The scored list of every metric was the noise. **Change it.** `report.summary_sections` (the summary) and `ui.render` (the order).
+
+### Objective optional
+**Decision.** With no objective, no verdict or score is shown; the engine still scores every objective (the first stands in internally for the ranking and robustness tables, which are hidden).
+**Why.** A verdict needs a stated goal; without one, facts are more honest than a default score.
+
+### Uploaded streams in stress windows
+**Decision.** Month-end points, and windows shorter than 45 days skipped, when an uploaded monthly series is involved.
+**Why.** A monthly series has no daily path; a two-week crash measured month end to month end mostly measures the rebound. **Change it.** `min_monthly_days` in `scenarios.stress_table`.
+
 ### Security review is the first workspace
 **Decision.** The sidebar shows Security review first, then Backtest.
 **Why.** It is the purpose of this branch and what you will test first. **Change it.** Reorder `_ALL_WORKSPACES` in `app.py`.

@@ -1,0 +1,10 @@
+# Demo 6: what do three securities do to an uploaded portfolio return stream?
+# No objective: the facts only. The sample is 35% XIC.TO / 25% VFV.TO / 40% XBB.TO,
+# rebalanced monthly, last 120 months (examples/sample_portfolio_returns.csv).
+candidates: [USMV, GLD, DBMF]
+portfolio_returns: sample_portfolio_returns.csv
+returns_currency: CAD
+mode: add
+weight: 0.10
+alignment: each
+output: examples/output/demo_6_symbol_vs_portfolio.xlsx

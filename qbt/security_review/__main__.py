@@ -4,9 +4,15 @@
 
 The request file holds the same inputs as the page:
 
-    profile: balanced                 # a key of config/profiles.yaml
-    objective: lower_volatility       # a key of config/objectives.yaml
     candidates: [USMV, SPLV, SPY]
+    candidate_returns: my_fund.csv    # optional: return streams analysed as securities
+    # What to add them to: one of these (several items are compared separately)
+    profile: balanced                 # a key of config/profiles.yaml (or profiles: [a, b])
+    benchmarks: [XIC.TO, VFV.TO]      # each ticker on its own
+    blend: {XIC.TO: 60, XBB.TO: 40}   # one blend of tickers (blend_name: optional label)
+    portfolio_returns: my_portfolio.csv   # uploaded portfolio return stream(s)
+    returns_currency: CAD             # CAD | USD, for uploaded files
+    objective: lower_volatility       # optional; a key of config/objectives.yaml
     mode: add                         # add | replace
     weight: 0.10                      # Add mode
     replace_holding: VFV.TO           # Replace mode
@@ -14,8 +20,9 @@ The request file holds the same inputs as the page:
     sweep: DBMF                       # optional: also run a profile sweep for this ticker
     output: examples/output/demo.xlsx # optional; default next to the request file
 
-It prints the ranking and each verdict's rationale, and writes the same
-Excel workbook the page offers.
+File paths are relative to the request file. It prints one sentence per
+security and portfolio, the summary table, and writes the same Excel
+workbook the page offers.
 """
 from __future__ import annotations
 
@@ -26,10 +33,35 @@ import warnings
 import pandas as pd
 import yaml
 
+from .. import returns_input as RI
 from . import config as CF
 from . import engine as E
 from . import export as X
-from .bundle import load_bundle
+from . import report as RP
+from .bundle import load_bundle, with_streams
+
+
+def _streams(path: str):
+    with open(path, "rb") as fh:
+        raw, meta = RI.load_return_stream(fh.read(), path)
+    df, rep = RI.prepare_returns(raw, "auto", meta)
+    out = {}
+    for c in df.columns:
+        s = df[c].dropna()
+        if rep.frequency != "monthly":
+            s = RI.compound_to(s.to_frame(), "Monthly").iloc[:, 0]
+        out[str(c).strip().upper()] = s
+    return out
+
+
+def _bases(q, streams):
+    if q.get("benchmarks"):
+        return [CF.custom_profile(str(t).upper(), {str(t).upper(): 1.0}) for t in q["benchmarks"]]
+    if q.get("blend"):
+        return [CF.custom_profile(q.get("blend_name", "Blend"), q["blend"])]
+    if q.get("portfolio_returns"):
+        return [CF.custom_profile(k, {k: 1.0}) for k in streams["portfolio"]]
+    return list(q.get("profiles") or [q.get("profile", "balanced")])
 
 
 def main(argv=None) -> int:
@@ -42,35 +74,35 @@ def main(argv=None) -> int:
     with open(path, "r", encoding="utf-8") as fh:
         q = yaml.safe_load(fh) or {}
     cfg = CF.load_all()
-    cands = [str(c).upper() for c in q.get("candidates") or []]
+    here = os.path.dirname(os.path.abspath(path))
+    streams = {k: _streams(os.path.join(here, q[f])) for k, f in
+               (("portfolio", "portfolio_returns"), ("candidate", "candidate_returns")) if q.get(f)}
+    uploads = {n: s for d in streams.values() for n, s in d.items()}
+    cands = [str(c).upper() for c in q.get("candidates") or []] + list(streams.get("candidate", {}))
     if q.get("sweep"):
         cands = list(dict.fromkeys(cands + [str(q["sweep"]).upper()]))
-    b = load_bundle(cfg, cands + cfg.universe.all_tickers())
+    bases = _bases(q, streams)
+    held = [t for p in bases if isinstance(p, CF.Profile) for t in p.weights]
+    b = load_bundle(cfg, [t for t in cands + held if t not in uploads] + cfg.universe.all_tickers())
+    b = with_streams(b, uploads, q.get("returns_currency", "CAD"))
     reg = E.regime_labels(cfg, b)
-    req = E.Request(q["profile"], q["objective"], cands if cands else [], q.get("benchmark"),
+    objective = q.get("objective")
+    req = E.Request(bases[0], objective, cands, q.get("benchmark"),
                     q.get("mode", "add"), q.get("weight"), q.get("replace_holding"),
                     q.get("rebalance"), q.get("alignment", "common"))
-    rv = E.run(req, cfg, b, reg) if q.get("candidates") else None
-    sw = E.sweep(cfg, b, str(q["sweep"]).upper(), q["objective"], q.get("mode", "add"),
-                 q.get("weight"), q.get("replace_holding"), reg) if q.get("sweep") else None
-    if rv is None and sw is not None:
-        rv = E.run(E.Request(q["profile"], q["objective"], [str(q["sweep"]).upper()],
-                             mode=q.get("mode", "add"), weight=q.get("weight"),
-                             replace_holding=q.get("replace_holding")), cfg, b, reg)
-    pd.set_option("display.width", 200)
-    print(f"\n{rv.profile.describe()} | {rv.objective_label} | {rv.period}\n")
-    print(rv.ranking.to_string(index=False))
-    for c in rv.ranking["Candidate"]:
-        r = rv.results[c]
-        print(f"\n{c}: {r.decision['verdict']} (confidence {r.decision['confidence']}, "
-              f"score {r.decision['composite']:+.2f})")
-        for f in r.rationale["facts"]:
-            print("  - " + f)
-        print("  Trade-off: " + r.rationale["tradeoff"])
-        for cv in r.rationale["caveats"]:
-            print("  Caveat: " + cv)
-    if rv.equivalents:
-        print("\nFunctionally equivalent: " + "; ".join(f"{e['A']} ~ {e['B']}" for e in rv.equivalents))
+    rvs = E.run_many(req, bases, cfg, b, reg)
+    sw = (E.sweep(cfg, b, str(q["sweep"]).upper(), objective or next(iter(cfg.objectives.objectives)),
+                  q.get("mode", "add"), q.get("weight"), q.get("replace_holding"), reg)
+          if q.get("sweep") else None)
+    pd.set_option("display.width", 220)
+    print()
+    for rv in rvs:
+        for c in rv.results:
+            print("- " + RP.headline(rv, c))
+        for c, why in rv.skipped.items():
+            print(f"- {c} not analysed against {RP.base_label(rv)}: {why}")
+    print()
+    print(RP.summary_table(rvs).to_string(index=False))
     if sw is not None:
         print("\nProfile sweep:")
         print(sw[["Profile", "Verdict", "Confidence", "Score", "Change in volatility",
@@ -78,7 +110,7 @@ def main(argv=None) -> int:
     out = q.get("output") or os.path.splitext(path)[0] + ".xlsx"
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "wb") as fh:
-        fh.write(X.workbook(rv, cfg, sw))
+        fh.write(X.write_sections(RP.all_sections(rvs, cfg, sw)))
     print(f"\nWorkbook: {out}")
     return 0
 

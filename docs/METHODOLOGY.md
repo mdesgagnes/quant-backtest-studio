@@ -8,6 +8,7 @@ How the Security review reaches a verdict. Every number below is set in `config/
 - **Currency.** Base currency CAD. A US-listed price is multiplied by that day's USD/CAD close (Yahoo `CAD=X`, CAD per USD; before 2003-09-17 the Fed H.10 series stored in `data/fx/USDCAD_history.csv`). The rate may be carried forward up to 5 sessions to meet a price date, never backward. CAD-listed securities are not converted: a CAD-listed fund holding foreign assets keeps its own hedging policy (XEF.TO is unhedged, so its CAD return already includes the currency).
 - **Monthly returns.** Month-end adjusted price to month-end adjusted price. The month in progress is dropped. A security's first, partial month is dropped. A month with no price is a gap (NaN), and the following month's return is NaN too: a return never spans two months and is never filled.
 - **Daily data** is used only inside stress windows (section 6).
+- **Uploaded return streams** (a portfolio, or a security) are read by `qbt/returns_input.py` (any date column, percent or decimal, CSV or Excel). Daily or weekly returns are compounded to calendar months. A USD stream is converted month by month: (1 + r) x (1 + change in CAD per USD) - 1. A stream has no daily prices and no fund data (costs, yield).
 - **Risk-free.** Canadian 3-month T-bill, monthly average (Bank of Canada Valet `V122531`); each month earns the yield known at its start. If unreachable: 0, and the Methodology sheet says so.
 - **Cache.** `data/cache/prices/<TICKER>.csv`, refreshed when older than 3 days; macro series in `data/cache/macro/` (7 days). A failed download falls back to a stale copy, with a note.
 
@@ -40,6 +41,8 @@ Equity portion: Canadian 30%, US 45%, international 20%, EM 5%. Bond portion: XB
 **Custom profiles.** Any tickers and weights (typed or from a CSV/Excel file with two columns, ticker and weight); weights are normalised to 1. A custom holding that matches a building-block ticker uses that block's proxy; any other is used on its own history only. Saved custom profiles go to `config/profiles_custom.yaml`.
 
 ## 3. Analysis period and the two portfolios
+
+**The portfolio** ("without") is any one of: a benchmark ticker (100% that ticker), a blend of tickers, an uploaded portfolio return stream (one holding: the stream itself), or a preset or saved investor profile. Several can be given; each is a separate review with the same securities and settings.
 
 - **Analysis period** (default "common"): the months in which every candidate, every sleeve benchmark and every profile holding have a return. Option "each": each candidate on its own overlap with the profile and its benchmark (used by the scenario matrix).
 - **Without** = the profile. **With** = Add mode: the candidate at weight w (default 10%), every holding scaled by (1 - w); Replace mode: the named holding's whole weight goes to the candidate. Both are simulated with the same rebalancing rule from the same first month.
@@ -113,6 +116,8 @@ Limitation: the bootstrap only reshuffles the analysis period; a short or unusua
 
 ## 5. Objectives and verdict rules
 
+The objective is optional. Without one, the page and the summary show only the measured changes; every objective is still scored in the workbook's Verdict sheet.
+
 Each objective in `config/objectives.yaml` is a weighted list of metrics. For each metric: `score = clip(direction x (value - centre) / scale, -1, +1)` (direction +1 when higher is better). Composite = weighted average of the scores that have a value (missing ones are dropped and the weights renormalised; the share dropped is reported).
 
 | Objective | Metrics (weight) | Rolling metric |
@@ -150,6 +155,8 @@ Each objective in `config/objectives.yaml` is a weighted list of metrics. For ea
 From `config/scenarios.yaml`: GFC 2007-10-09 to 2009-03-09; Euro crisis 2011-04-29 to 2011-10-03; 2015-16 oil/China 2015-05-21 to 2016-02-11; Q4 2018 2018-09-20 to 2018-12-24; COVID 2020-02-19 to 2020-03-23; 2022 rate shock 2022-01-03 to 2022-10-14; March 2023 regional banks 2023-03-08 to 2023-03-24; August 2024 yen carry unwind 2024-07-16 to 2024-08-05; April 2025 tariffs 2025-04-02 to 2025-04-08.
 
 Daily, CAD. Return from the close of the start date to the close of the end date. Both portfolios are bought at target weights on the start date and left to drift (rebalancing inside a few weeks would be fiction). Reported: candidate return and max drawdown, portfolio return with and without, the change, portfolio max drawdown with and without, and the candidate's daily correlation with the portfolio. A window that the candidate (or a holding, after splicing) does not fully cover is **no data**, never filled.
+
+**Uploaded streams.** When the security or a holding is an uploaded monthly stream, the whole comparison for that window uses month-end values: from the last month end on or before the start date to the first month end on or after the end date (`Basis` = month-end). Windows shorter than 45 days (COVID, March 2023, August 2024, April 2025) are skipped for it, since a month-end figure would mostly measure the recovery.
 
 ## 7. Regimes (monthly)
 

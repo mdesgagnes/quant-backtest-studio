@@ -7,7 +7,7 @@ once for the whole universe; the app calls it per run (cached).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
@@ -41,9 +41,16 @@ class Bundle:
     info_fetcher: Optional[D.InfoFetcher] = None
     fetch_info: bool = True
     _info: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    # Uploaded return streams: monthly only, no daily prices, no fund data.
+    streams: Dict[str, str] = field(default_factory=dict)        # name -> description
+
+    def is_monthly_only(self, t: str) -> bool:
+        return t in self.streams
 
     def info(self, t: str) -> Dict[str, float]:
         """Expense ratio, AUM and average trading volume (yfinance, cached)."""
+        if t in self.streams:
+            return {}
         if t not in self._info:
             self._info[t] = D.fund_info(t, self.cache_dir, self.info_fetcher)                 if (self.fetch_info or self.info_fetcher) else {}
         return self._info[t]
@@ -71,6 +78,52 @@ class Bundle:
             r, _ = D.splice(prim, prox)
             self.spliced_daily[key] = (1 + r).cumprod() if len(r) else r
         return self.spliced_daily[key]
+
+
+def stream_returns(r: pd.Series, currency: str, usdcad_m: pd.Series) -> pd.Series:
+    """An uploaded monthly return series in CAD, indexed by calendar month end.
+    USD streams are converted with the month's change in CAD per USD."""
+    r = pd.Series(r, dtype=float).dropna().sort_index()
+    r.index = pd.DatetimeIndex(r.index).to_period("M").to_timestamp("M")
+    r = r[~r.index.duplicated(keep="last")]
+    if currency.upper() == "USD":
+        fx = usdcad_m.reindex(r.index)
+        if fx.isna().any():
+            raise ValueError("USD/CAD is missing for part of the uploaded period.")
+        r = (1 + r) * (1 + fx) - 1
+    elif currency.upper() != "CAD":
+        raise ValueError("Uploaded returns must be in CAD or USD.")
+    return r
+
+
+def with_streams(b: Bundle, streams: Dict[str, pd.Series], currency: str = "CAD") -> Bundle:
+    """A copy of `b` that also holds uploaded monthly return streams, as if
+    they were tickers. The original bundle (shared by the app's cache) is
+    not modified. A stream's "daily" price is its month-end value path, so
+    stress windows fall back to month-end points for it."""
+    if not streams:
+        return b
+    monthly = b.monthly.copy()
+    usd_m = b.usd_monthly.copy()
+    daily, flags, yields, descr = dict(b.daily_px), dict(b.flags), dict(b.yields), dict(b.streams)
+    for name, r in streams.items():
+        cad = stream_returns(r, currency, b.usdcad_m)
+        if len(cad) < 2:
+            raise ValueError(f"{name}: fewer than two monthly returns.")
+        monthly = monthly.reindex(monthly.index.union(cad.index))
+        monthly[name] = cad
+        usd_m = usd_m.reindex(usd_m.index.union(cad.index))
+        usd_m[name] = stream_returns(r, "CAD", b.usdcad_m)
+        start = cad.index[0] - pd.offsets.MonthEnd(1)
+        lvl = pd.concat([pd.Series([1.0], index=[start]), (1 + cad).cumprod()])
+        daily[name] = lvl
+        flags[name] = [f"{name} is an uploaded monthly return stream: stress windows use month-end "
+                       f"points and windows shorter than two months are skipped."]
+        yields[name] = {}
+        descr[name] = f"uploaded, {currency.upper()}, {cad.index[0]:%Y-%m} to {cad.index[-1]:%Y-%m}"
+    return replace(b, monthly=monthly.sort_index(), usd_monthly=usd_m.sort_index(), daily_px=daily,
+                   flags=flags, yields=yields, streams=descr, spliced_monthly={}, spliced_daily={},
+                   _info=dict(b._info))
 
 
 def needed_tickers(cfg: AllConfig, candidates: Iterable[str] = (),

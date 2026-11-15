@@ -615,3 +615,80 @@ def test_costs_shown_and_break_ties_between_equivalents(world):
     assert rv.fund_review.loc["Expense ratio", "SPY"] == pytest.approx(0.000945)
     assert any("Thin trading" in f for f in rv.results["SPYCLONE"].flags)
     assert rv.ranking.set_index("Candidate").loc["SPY", "Expense ratio"] == pytest.approx(0.000945)
+
+
+# ----------------------------------------------------------------------
+# Symbol-first view: any base portfolio, uploaded streams, optional objective
+# ----------------------------------------------------------------------
+def test_uploaded_stream_is_a_copy_and_converts_usd(world):
+    from qbt.security_review.bundle import with_streams
+    cfg, b, _ = world
+    s = b.monthly["USMV"].dropna().iloc[-60:]
+    b2 = with_streams(b, {"MY FUND": s}, "CAD")
+    assert "MY FUND" not in b.monthly.columns and "MY FUND" in b2.monthly.columns
+    assert b2.monthly["MY FUND"].dropna().equals(s.rename("MY FUND"))
+    assert b2.info("MY FUND") == {} and b2.is_monthly_only("MY FUND")
+    # USD: (1 + r)(1 + change in CAD per USD) - 1
+    b3 = with_streams(b, {"US FUND": s}, "USD")
+    fx = b.usdcad_m.reindex(s.index)
+    assert b3.monthly["US FUND"].dropna().values == pytest.approx(((1 + s) * (1 + fx) - 1).values)
+    with pytest.raises(ValueError):
+        with_streams(b, {"X": s}, "EUR")
+
+
+def test_stress_falls_back_to_month_ends_for_streams():
+    idx = pd.bdate_range("2021-12-01", "2023-01-31")
+    px = pd.Series(np.linspace(100, 80, len(idx)), index=idx)
+    me = px.groupby(px.index.to_period("M")).last()
+    me.index = me.index.to_timestamp("M")
+    wins = [CF.StressWindow("long", "Long", "2022-01-03", "2022-10-14"),
+            CF.StressWindow("short", "Short", "2022-03-08", "2022-03-24")]
+    t = SC.stress_table("S", {"A": px, "S": me}, {"A": 1.0}, {"A": 0.9, "S": 0.1}, wins,
+                        monthly_only={"S"}).set_index("Key")
+    assert t.loc["long", "Status"] == "ok" and t.loc["long", "Basis"] == "month-end"
+    # month end on or before 2022-01-03 is 2021-12-31; on or after 2022-10-14 is 2022-10-31
+    exp = me.loc["2022-10-31"] / me.loc["2021-12-31"] - 1
+    assert t.loc["long", "Candidate return"] == pytest.approx(exp)
+    assert t.loc["short", "Status"].startswith("no data (monthly series")
+    d = SC.stress_table("A", {"A": px}, {"A": 1.0}, {"A": 1.0}, wins).set_index("Key")
+    assert d.loc["short", "Status"] == "ok" and d.loc["short", "Basis"] == "daily"
+
+
+def test_any_base_and_no_objective(world):
+    from qbt.security_review.bundle import with_streams
+    cfg, b, reg = world
+    port = (0.6 * b.monthly["XIC.TO"] + 0.4 * b.monthly["XBB.TO"]).dropna().iloc[-120:]
+    b2 = with_streams(b, {"MY PORTFOLIO": port})
+    bases = [CF.custom_profile("XIC.TO", {"XIC.TO": 1}),
+             CF.custom_profile("Blend", {"XIC.TO": 60, "XBB.TO": 40}),
+             CF.custom_profile("MY PORTFOLIO", {"MY PORTFOLIO": 1}), "balanced"]
+    rvs = E.run_many(E.Request("balanced", None, ["USMV", "NEGC"], robustness=False),
+                     bases, cfg, b2, reg)
+    assert [rv.profile.label for rv in rvs][:3] == ["XIC.TO", "Blend", "MY PORTFOLIO"]
+    assert all(not rv.objective_chosen for rv in rvs)
+    # the hedge lowers volatility whatever it is added to
+    assert all(rv.results["NEGC"].metrics["d_vol"] < 0 for rv in rvs)
+    # an uploaded portfolio gives the same answer as the blend it was built from
+    blend, up = rvs[1].results["NEGC"], rvs[2].results["NEGC"]
+    common = up.series.index.intersection(blend.series.index)
+    assert up.series["Portfolio without"].reindex(common).values == pytest.approx(
+        (0.6 * b.monthly["XIC.TO"] + 0.4 * b.monthly["XBB.TO"]).reindex(common).values)
+    tab = RP.summary_table(rvs)
+    assert len(tab) == 8 and "Verdict" not in tab.columns and "Portfolio" in tab.columns
+    h = RP.headline(rvs[0], "NEGC")
+    assert h.startswith("Adding 10% NEGC to XIC.TO") and "volatility" in h and "For " not in h
+    secs = RP.all_sections(rvs, cfg)
+    assert secs[0][0] == "Summary"
+    assert not any(t.endswith("Verdict and rationale") for _, t, _, _ in secs)
+    assert not any(sh == "Ranking" for sh, _, _, _ in secs)
+    assert X.write_sections(secs)[:2] == b"PK"
+
+
+def test_objective_adds_a_verdict_to_the_summary(world):
+    cfg, b, reg = world
+    rv = E.run(E.Request("balanced", "lower_volatility", ["USMV"], robustness=False), cfg, b, reg)
+    tab = RP.summary_table([rv])
+    assert "Verdict" in tab.columns and "Portfolio" not in tab.columns
+    assert 'For "Lower volatility"' in RP.headline(rv, "USMV")
+    ba = [s for s in RP.summary_sections([rv]) if s[1] == "Before and after"]
+    assert len(ba) == 1 and list(ba[0][2]["Measure"])[0] == "Return a year (CAGR)"

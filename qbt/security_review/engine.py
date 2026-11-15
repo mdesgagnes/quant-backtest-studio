@@ -40,7 +40,7 @@ SOURCE_NOTE = ("Total returns from Yahoo Finance 'Adj Close' (distributions and 
 @dataclass
 class Request:
     profile: Union[str, Profile]
-    objective: str
+    objective: Optional[str]                 # None: impact only, no verdict shown
     candidates: List[str]
     benchmark: Optional[str] = None          # override for every candidate
     mode: str = "add"                        # add | replace
@@ -79,6 +79,7 @@ class CandidateResult:
     new_stats: Dict[str, float]
     series: pd.DataFrame                     # candidate, benchmark, base, new (monthly)
     costs: Dict[str, float] = field(default_factory=dict)   # expense ratio, AUM, volume
+    vs_base: Dict[str, float] = field(default_factory=dict)  # beta, capture... against the base
 
 
 @dataclass
@@ -104,6 +105,7 @@ class Review:
     period: str
     rf_label: str
     cpi_label: str
+    objective_chosen: bool = True            # False: the verdict is computed but not the point
 
 
 # ----------------------------------------------------------------------
@@ -224,9 +226,12 @@ def _period(series: List[pd.Series]) -> pd.DatetimeIndex:
 def run(req: Request, cfg: AllConfig, b: Bundle,
         regimes: Optional[Dict[str, pd.Series]] = None) -> Review:
     oc = cfg.objectives
-    if req.objective not in oc.objectives:
+    if req.objective is not None and req.objective not in oc.objectives:
         raise ConfigError(f"Unknown objective '{req.objective}'.")
-    obj = oc.objectives[req.objective]
+    # With no objective, every objective is still scored (Verdict sheet) and the
+    # first one stands in for the internal ranking; the page does not show it.
+    okey = req.objective or next(iter(oc.objectives))
+    obj = oc.objectives[okey]
     prof = resolve_profile(cfg, req.profile)
     reb = req.rebalance or prof.rebalance
     weight = float(req.weight if req.weight is not None else oc.add_weight)
@@ -302,7 +307,8 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
         base_by_c[c] = base
         imp = I.impact_metrics(cand, base, new, R, prof.weights, new_w, bench, ctx, c)
         metrics = imp["metrics"]
-        st = SC.stress_table(c, {**daily, c: b.daily_px[c]}, prof.weights, new_w, windows)
+        st = SC.stress_table(c, {**daily, c: b.daily_px[c]}, prof.weights, new_w, windows,
+                             b.streams)
         for _, r in st.iterrows():
             metrics[f"d_scen_{r['Key']}"] = r.get("Change in portfolio return", np.nan) \
                 if r.get("Status") == "ok" else np.nan
@@ -329,7 +335,8 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
                     mw = I.impact_metrics(cand, base, nn, R, prof.weights, nw, bench, ctx, c)["metrics"]
                     for k2 in ("size_loading",):
                         mw[k2] = metrics.get(k2, np.nan)
-                    stw = SC.stress_table(c, {**daily, c: b.daily_px[c]}, prof.weights, nw, windows)
+                    stw = SC.stress_table(c, {**daily, c: b.daily_px[c]}, prof.weights, nw,
+                                          windows, b.streams)
                     for _, r in stw.iterrows():
                         mw[f"d_scen_{r['Key']}"] = r.get("Change in portfolio return", np.nan) \
                             if r.get("Status") == "ok" else np.nan
@@ -337,7 +344,7 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
                     for k, o in oc.objectives.items():
                         sc = V.score(o, mw, oc.metrics)["composite"]
                         wverdicts.setdefault(k, {})[w] = V.raw_verdict(o, sc)
-                        if k == req.objective:
+                        if k == okey:
                             row.update({"Score": sc, "Verdict (before caps)": V.raw_verdict(o, sc)})
                     row.update({"Change in volatility": mw["d_vol"], "Change in CAGR": mw["d_cagr"],
                                 "Change in max drawdown": mw["d_mdd"], "Change in Sharpe": mw["d_sharpe"]})
@@ -345,7 +352,7 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
 
         covered = float((st["Status"] == "ok").mean()) if len(st) and "Status" in st else np.nan
         objs, decs = _decide_all(cfg, metrics, len(P), rolling, wverdicts, covered)
-        dec = decs[req.objective]
+        dec = decs[okey]
         scen_ok = st[st["Status"] == "ok"] if "Status" in st else st.iloc[0:0]
         consistency = {
             "Stress windows covered": int(len(scen_ok)),
@@ -363,19 +370,33 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
             c, bench_of[c], bench_of[c] or f"{prof.label} profile", len(P), P[0], P[-1], new_w,
             metrics, dec, rat, objs, S.standalone(cand, b.rf), imp["relative"], fe, reg, st,
             imp["sim"], rolling, pd.DataFrame(wgrid_rows), consistency, flags,
-            imp["base_stats"], imp["new_stats"], series, b.info(c))
+            imp["base_stats"], imp["new_stats"], series, b.info(c),
+            S.relative(cand, base, b.rf))
 
-    ranking, components = _ranking(results, req.objective)
+    ranking, components = _ranking(results, okey)
     corr, excorr, crisis, equiv = _matrices(results, b, bench_of, base_by_c)
     for e in equiv:
         e.update(_cost_compare(b, e["A"], e["B"]))
     fund = _fund_review(results, b)
     period = (f"{common[0]:%Y-%m} to {common[-1]:%Y-%m} ({len(common)} months, common to all)"
               if req.alignment == "common" and len(common) else "each candidate's own overlap")
-    return Review(req, prof, req.objective, obj.label, obj.description, weight, holdings,
+    if b.streams:
+        notes.append("Uploaded return streams: " + "; ".join(f"{k} ({v})" for k, v in b.streams.items())
+                     + ". Month-end points are used in stress windows that involve them.")
+    return Review(req, prof, okey, obj.label if req.objective else "No objective (impact only)",
+                  obj.description if req.objective else "", weight, holdings,
                   holdings[holdings["Spliced months"] > 0].copy(), results, skipped, ranking,
                   components, corr, excorr, crisis, equiv, fund, notes, period,
-                  b.rf_label, b.cpi_label)
+                  b.rf_label, b.cpi_label, req.objective is not None)
+
+
+def run_many(req: Request, bases: List[Union[str, Profile]], cfg: AllConfig, b: Bundle,
+             regimes: Optional[Dict[str, pd.Series]] = None) -> List[Review]:
+    """The same candidates added to several bases (benchmarks, blends,
+    uploaded portfolios or profiles), one review per base."""
+    from dataclasses import replace as _r
+    regimes = regimes if regimes is not None else regime_labels(cfg, b)
+    return [run(_r(req, profile=p), cfg, b, regimes) for p in bases]
 
 
 def _flags(cfg: AllConfig, b: Bundle, c: str, P: pd.DatetimeIndex, holdings: pd.DataFrame,

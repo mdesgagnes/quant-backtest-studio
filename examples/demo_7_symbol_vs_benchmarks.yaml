@@ -1,0 +1,8 @@
+# Demo 7: one security against a group of benchmarks, each compared separately,
+# judged against an objective.
+candidates: [ZLB.TO]
+benchmarks: [XIC.TO, VFV.TO, XBB.TO]
+objective: lower_volatility
+mode: add
+weight: 0.10
+output: examples/output/demo_7_symbol_vs_benchmarks.xlsx

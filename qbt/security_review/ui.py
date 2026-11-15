@@ -1,28 +1,35 @@
 """Streamlit page for the Security review. Thin by design: it collects the
-inputs, calls `engine.run` / `engine.sweep`, and renders `report.sections`
-(the same tables the Excel export writes). No calculation lives here.
+inputs, calls `engine.run_many` / `engine.sweep`, and renders
+`report.all_sections` (the same tables the Excel export writes). No
+calculation lives here.
+
+The page answers one question: what does adding this security (or return
+stream) do to a portfolio? The portfolio can be a benchmark ticker, a blend
+of tickers, an uploaded portfolio return stream or an investor profile; the
+summary comes first and every detail table sits behind "Details".
 """
 from __future__ import annotations
 
 import io
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from .. import returns_input as RI
 from ..brand import BRAND, RED
 from . import config as CF
 from . import engine as E
 from . import export as X
 from . import report as RP
-from .bundle import load_bundle
+from .bundle import load_bundle, with_streams
 
 # Red, then the sand / gold family: no blue (house colour scheme).
 PALETTE = [RED, "#C9B896", "#D08C4E", "#EFE9DE", "#9A9389", "#B01419", "#CBBFA8", "#8C6D4F"]
-VERDICT_COLOUR = {"Add": BRAND["gain"], "Consider": "#C9B896", "Do not add": BRAND["loss"]}
-CUSTOM = "Custom…"
+BASE_KINDS = ["Benchmark", "Blend", "Uploaded portfolio", "Investor profile"]
+NO_OBJECTIVE = "(none)"
 
 
 @st.cache_resource(show_spinner=False)
@@ -66,12 +73,29 @@ def _text(df: pd.DataFrame) -> pd.DataFrame:
     return out.astype(object).where(out.notna(), "")
 
 
+def _sortable(df: pd.DataFrame):
+    """A column-formatted table that stays numeric, so clicking a header
+    sorts by value (percentages are shown x100 with a % sign)."""
+    fmt = df.attrs.get("col_fmt") or {}
+    view = df.copy()
+    cc = {}
+    for c, f in fmt.items():
+        if f in (RP.PCT, RP.PTS):
+            view[c] = view[c] * 100
+            cc[c] = st.column_config.NumberColumn(c, format="%+.2f%%" if f == RP.PTS else "%.2f%%")
+        elif f == RP.RATIO:
+            cc[c] = st.column_config.NumberColumn(c, format="%.2f")
+        elif f == RP.INT:
+            cc[c] = st.column_config.NumberColumn(c, format="%d")
+    return view, cc
+
+
 def _show(secs: List[RP.Section]) -> None:
     for _, title, df, note in secs:
         if df is None or df.empty:
             continue
         st.markdown(f'<div class="eyebrow">{title}</div>', unsafe_allow_html=True)
-        st.dataframe(_text(df), hide_index=True, use_container_width=True)
+        st.dataframe(_text(df), hide_index=True, width="stretch")
         if note:
             st.caption(note)
 
@@ -87,7 +111,7 @@ def _fig(height=340, title="") -> go.Figure:
 
 
 # ----------------------------------------------------------------------
-# Sidebar
+# Inputs
 # ----------------------------------------------------------------------
 def _parse_weights(text: str) -> Dict[str, float]:
     out = {}
@@ -113,24 +137,83 @@ def _weights_file(up) -> Dict[str, float]:
     return w
 
 
+def _streams(up) -> Tuple[Dict[str, pd.Series], List[str]]:
+    """Monthly return streams from an uploaded file: one per numeric column.
+    Daily or weekly returns are compounded to calendar months."""
+    raw, meta = RI.load_return_stream(up.getvalue(), up.name)
+    df, rep = RI.prepare_returns(raw, "auto", meta)
+    msgs = list(rep.warnings)
+    out = {}
+    for c in df.columns:
+        s = df[c].dropna()
+        if rep.frequency != "monthly":
+            s = RI.compound_to(s.to_frame(), "Monthly").iloc[:, 0]
+            msgs.append(f"{c}: {rep.frequency} returns compounded to months.")
+        out[str(c).strip().upper()] = s
+    return out, msgs
+
+
+def _ticker_list(text: str) -> List[str]:
+    return [t.strip().upper() for t in text.replace(";", ",").replace(" ", ",").split(",") if t.strip()]
+
+
 def _sidebar(cfg: CF.AllConfig):
     sb = st.sidebar
-    sb.markdown('<div class="eyebrow">1. Investor profile</div>', unsafe_allow_html=True)
-    presets = [k for k, p in cfg.profiles.profiles.items() if not p.custom]
-    saved = [k for k, p in cfg.profiles.profiles.items() if p.custom]
-    keys = presets + saved + [CUSTOM]
-    label = {k: cfg.profiles.profiles[k].describe() if k in cfg.profiles.profiles else k for k in keys}
-    label[CUSTOM] = "Custom (enter or upload weights)"
-    pk = sb.selectbox("Profile", keys, index=keys.index("balanced") if "balanced" in keys else 0,
-                      format_func=lambda k: label[k], key="sr_profile")
-    profile: Optional[CF.Profile] = cfg.profiles.profiles.get(pk)
-    if pk == CUSTOM:
+    uploads: Dict[str, pd.Series] = {}
+    msgs: List[str] = []
+
+    # 1. What to analyse ------------------------------------------------
+    sb.markdown('<div class="eyebrow">1. Securities to analyse</div>', unsafe_allow_html=True)
+    sleeves = cfg.universe.sleeves
+    universe = cfg.universe.all_tickers()
+    st.session_state.setdefault("sr_cands", ["USMV"])
+    with sb.expander("Pick a whole sleeve"):
+        fill = st.selectbox("Sleeve", ["(keep my picks)"] + list(sleeves),
+                            format_func=lambda k: sleeves[k].label if k in sleeves else k, key="sr_fill")
+    if fill != st.session_state.get("_sr_fill_applied"):
+        st.session_state["_sr_fill_applied"] = fill
+        if fill in sleeves:
+            st.session_state["sr_cands"] = list(sleeves[fill].tickers)
+    extra_now = [t for t in st.session_state["sr_cands"] if t not in universe]
+    cands = sb.multiselect("From the universe", universe + extra_now, key="sr_cands",
+                           format_func=lambda t: f"{t} ({cfg.universe.sleeve_of(t).label})"
+                           if cfg.universe.sleeve_of(t) else t)
+    typed = sb.text_input("Or type tickers", "", key="sr_typed",
+                          help="Any Yahoo Finance symbol, comma-separated: .TO for Toronto listings.")
+    cands = list(dict.fromkeys(cands + _ticker_list(typed)))
+    up_c = sb.file_uploader("Or upload return streams (CSV or Excel)", type=["csv", "xlsx", "xls"],
+                            key="sr_cand_file",
+                            help="A date column and one column of returns per stream; each column "
+                                 "is analysed as a security.")
+    if up_c is not None:
+        try:
+            s, m = _streams(up_c)
+            uploads.update(s)
+            msgs += m
+            cands += [k for k in s if k not in cands]
+        except Exception as exc:
+            sb.error(f"Could not read the returns file: {exc}")
+
+    # 2. What to add it to ------------------------------------------------
+    sb.markdown('<div class="eyebrow">2. Add it to</div>', unsafe_allow_html=True)
+    kind = sb.radio("Portfolio", BASE_KINDS, key="sr_kind", horizontal=False,
+                    captions=["One or more tickers, each compared separately",
+                              "Tickers and weights", "Your portfolio's own return history",
+                              "The firm's preset profiles"])
+    bases: List[CF.Profile] = []
+    presets = list(cfg.profiles.profiles)
+    if kind == "Benchmark":
+        picks = sb.multiselect("Benchmark(s)", universe, default=["XIC.TO"], key="sr_bench_pick")
+        picks = list(dict.fromkeys(picks + _ticker_list(sb.text_input("Or type tickers", "",
+                                                                      key="sr_bench_typed"))))
+        bases = [CF.custom_profile(t, {t: 1.0}) for t in picks]
+    elif kind == "Blend":
         how = sb.radio("Weights from", ["Type them", "Upload a file"], horizontal=True, key="sr_cust_how")
         w: Dict[str, float] = {}
         if how == "Type them":
-            txt = sb.text_area("One holding per line: ticker weight", "XIC.TO 30\nVFV.TO 30\nXBB.TO 40",
-                               key="sr_cust_txt", height=110)
-            w = _parse_weights(txt)
+            w = _parse_weights(sb.text_area("One holding per line: ticker weight",
+                                            "XIC.TO 30\nVFV.TO 30\nXBB.TO 40",
+                                            key="sr_cust_txt", height=110))
         else:
             up = sb.file_uploader("CSV or Excel: ticker, weight", type=["csv", "xlsx", "xls"],
                                   key="sr_cust_file")
@@ -139,196 +222,235 @@ def _sidebar(cfg: CF.AllConfig):
                     w = _weights_file(up)
                 except Exception as exc:
                     sb.error(f"Could not read the file: {exc}")
-        name = sb.text_input("Name", "My portfolio", key="sr_cust_name")
+        name = sb.text_input("Name", "My blend", key="sr_cust_name")
         try:
-            profile = CF.custom_profile(name, w)
-            sb.caption(" · ".join(f"{t} {x:.0%}" for t, x in profile.weights.items()))
+            p = CF.custom_profile(name, w)
+            sb.caption(" · ".join(f"{t} {x:.0%}" for t, x in p.weights.items()))
             if sb.button("Save as a profile", key="sr_cust_save"):
-                path = CF.save_custom_profile(profile)
+                path = CF.save_custom_profile(p)
                 _config.clear()
                 sb.success(f"Saved to {path}.")
+            bases = [p]
         except CF.ConfigError as exc:
             sb.warning(str(exc))
-            profile = None
-    reb_default = profile.rebalance if profile else cfg.profiles.rebalance_default
-    reb = sb.selectbox("Rebalancing", list(CF.REBALANCE_OPTIONS),
-                       index=list(CF.REBALANCE_OPTIONS).index(reb_default), key="sr_reb")
+    elif kind == "Uploaded portfolio":
+        up_b = sb.file_uploader("Portfolio returns (CSV or Excel)", type=["csv", "xlsx", "xls"],
+                                key="sr_base_file",
+                                help="A date column and one column of returns per portfolio; each "
+                                     "column is compared separately.")
+        if up_b is not None:
+            try:
+                s, m = _streams(up_b)
+                uploads.update(s)
+                msgs += m
+                bases = [CF.custom_profile(k, {k: 1.0}) for k in s]
+            except Exception as exc:
+                sb.error(f"Could not read the returns file: {exc}")
+    else:
+        keys = sb.multiselect("Profile(s)", presets, default=["balanced"] if "balanced" in presets else [],
+                              format_func=lambda k: cfg.profiles.profiles[k].describe(), key="sr_profiles")
+        bases = [cfg.profiles.profiles[k] for k in keys]
 
-    sb.markdown('<div class="eyebrow">2. Objective</div>', unsafe_allow_html=True)
-    objs = list(cfg.objectives.objectives)
-    ok = sb.selectbox("Objective", objs, format_func=lambda k: cfg.objectives.objectives[k].label,
-                      key="sr_obj")
-    sb.caption(cfg.objectives.objectives[ok].description)
-
-    sb.markdown('<div class="eyebrow">3. Candidates</div>', unsafe_allow_html=True)
-    sleeves = cfg.universe.sleeves
-    fill = sb.selectbox("Fill with a sleeve", ["(keep my picks)"] + list(sleeves),
-                        format_func=lambda k: sleeves[k].label if k in sleeves else k, key="sr_fill")
-    if fill != st.session_state.get("_sr_fill_applied"):
-        st.session_state["_sr_fill_applied"] = fill
-        if fill in sleeves:
-            st.session_state["sr_cands"] = list(sleeves[fill].tickers)
-    st.session_state.setdefault("sr_cands", ["USMV", "SPLV", "QUAL", "SPY"])
-    universe = cfg.universe.all_tickers()
-    extra_now = [t for t in st.session_state["sr_cands"] if t not in universe]
-    cands = sb.multiselect("From the universe", universe + extra_now, key="sr_cands",
-                           format_func=lambda t: f"{t} ({cfg.universe.sleeve_of(t).label})"
-                           if cfg.universe.sleeve_of(t) else t)
-    typed = sb.text_input("Or type tickers (comma-separated)", "", key="sr_typed",
-                          help="Any Yahoo Finance symbol: .TO for Toronto listings.")
-    cands = list(dict.fromkeys(cands + [t.strip().upper() for t in typed.split(",") if t.strip()]))
-
-    sb.markdown('<div class="eyebrow">4. Sleeve benchmark</div>', unsafe_allow_html=True)
-    auto = sorted({cfg.universe.benchmark_for(c) or "profile" for c in cands})
-    sb.caption("Auto: " + (", ".join(auto) if auto else "n/a") + " (each candidate's sleeve).")
-    bench = sb.text_input("Override for every candidate (blank = auto)", "", key="sr_bench").strip().upper()
-
-    sb.markdown('<div class="eyebrow">5. Add or replace</div>', unsafe_allow_html=True)
-    mode = sb.radio("Mode", ["Add", "Replace"], horizontal=True, key="sr_mode")
+    # 3. How much ---------------------------------------------------------
+    sb.markdown('<div class="eyebrow">3. How much</div>', unsafe_allow_html=True)
+    can_replace = len(bases) == 1 and len(bases[0].weights) > 1
+    mode = sb.radio("Change", ["Add", "Replace a holding"] if can_replace else ["Add"],
+                    horizontal=True, key="sr_mode")
     weight, holding = None, None
     if mode == "Add":
-        weight = sb.slider("Add weight (funded pro rata)", 1, 40,
+        weight = sb.slider("Add weight, funded pro rata (%)", 1, 40,
                            int(round(cfg.objectives.add_weight * 100)), key="sr_w") / 100
-    elif profile:
-        hs = list(profile.weights)
+    else:
+        hs = list(bases[0].weights)
         holding = sb.selectbox("Holding to replace", hs, key="sr_hold",
-                               format_func=lambda t: f"{t} ({profile.weights[t]:.0%})")
+                               format_func=lambda t: f"{t} ({bases[0].weights[t]:.0%})")
+
+    # 4. Objective (optional) ----------------------------------------------
+    sb.markdown('<div class="eyebrow">4. Objective (optional)</div>', unsafe_allow_html=True)
+    objs = [NO_OBJECTIVE] + list(cfg.objectives.objectives)
+    ok = sb.selectbox("Judge it against", objs, key="sr_obj",
+                      format_func=lambda k: "None: just show what changes" if k == NO_OBJECTIVE
+                      else cfg.objectives.objectives[k].label)
+    if ok != NO_OBJECTIVE:
+        sb.caption(cfg.objectives.objectives[ok].description + " Adds a verdict to each result.")
+
     with sb.expander("Advanced"):
+        reb = st.selectbox("Rebalancing", ["(each portfolio's own)"] + list(CF.REBALANCE_OPTIONS),
+                           key="sr_reb", help="Blends, benchmarks and uploads default to quarterly.")
         align = st.radio("Analysis period", ["common", "each"], key="sr_align",
-                         format_func=lambda a: "Common to all candidates" if a == "common"
-                         else "Each candidate's own history",
-                         help="Common: every candidate is judged on the same months (fair ranking). "
-                              "Each: a long-history candidate keeps its full record.")
+                         format_func=lambda a: "Common to all securities" if a == "common"
+                         else "Each security's own history",
+                         help="Common: every security is judged on the same months (fair "
+                              "comparison). Each: a long-history security keeps its full record.")
+        currency = st.radio("Uploaded returns are in", ["CAD", "USD"], horizontal=True, key="sr_ccy")
+        bench = st.text_input("Sleeve benchmark override (detail tables; blank = auto)", "",
+                              key="sr_bench").strip().upper()
         sweep_on = st.checkbox("Also run a profile sweep", key="sr_sweep_on",
-                               help="The first candidate across all 7 preset profiles.")
-    run = sb.button("Run review", type="primary", use_container_width=True, key="sr_run")
-    return dict(profile=profile, rebalance=reb, objective=ok, candidates=cands,
-                benchmark=bench or None, mode=mode.lower(), weight=weight, holding=holding,
-                alignment=align, sweep=sweep_on, run=run)
+                               help="The first security across all 7 preset profiles.")
+    for m in msgs:
+        sb.caption(m)
+    run = sb.button("Run", type="primary", width="stretch", key="sr_run")
+    return dict(bases=bases, kind=kind, rebalance=None if reb.startswith("(") else reb,
+                objective=None if ok == NO_OBJECTIVE else ok, candidates=cands, uploads=uploads,
+                currency=currency, benchmark=bench or None, mode="add" if mode == "Add" else "replace",
+                weight=weight, holding=holding, alignment=align, sweep=sweep_on, run=run)
 
 
 # ----------------------------------------------------------------------
-# Page
+# Results
 # ----------------------------------------------------------------------
-def _card(c: str, r: E.CandidateResult) -> str:
-    d = r.decision
-    col = VERDICT_COLOUR.get(d["verdict"], BRAND["muted"])
-    facts = "".join(f"<li>{f}</li>" for f in r.rationale["facts"])
-    return (f'<div style="border:1px solid {BRAND["rule"]};border-top:3px solid {col};'
-            f'background:{BRAND["panel"]};padding:.7rem .9rem;margin-bottom:.6rem;">'
-            f'<div style="display:flex;justify-content:space-between;align-items:baseline;">'
-            f'<span style="font-size:1.15rem;font-weight:600;">{c}</span>'
-            f'<span style="color:{col};font-weight:700;font-size:1.05rem;">{d["verdict"]}</span></div>'
-            f'<div style="color:{BRAND["muted"]};font-size:.8rem;">Score {d["composite"]:+.2f} · '
-            f'Confidence {d["confidence"]} · {r.months} months · vs {r.benchmark_label}</div>'
-            f'<ul style="margin:.4rem 0 .3rem 1rem;font-size:.85rem;">{facts}</ul>'
-            f'<div style="font-size:.85rem;"><b>Trade-off.</b> {r.rationale["tradeoff"]}</div></div>')
-
-
-def _charts(rv: E.Review) -> None:
-    if not rv.results:
+def _charts(rvs: List[E.Review]) -> None:
+    pairs = [(rv, c) for rv in rvs for c in rv.results]
+    if not pairs:
         return
-    fig = _fig(360, "Growth of 1: profile with each candidate (CAD)")
-    first = next(iter(rv.results.values()))
-    base = first.series["Portfolio without"].dropna()
-    fig.add_scatter(x=base.index, y=(1 + base).cumprod(), name="Profile without",
-                    line=dict(color=BRAND["muted"], width=2, dash="dot"))
-    for i, (c, r) in enumerate(rv.results.items()):
-        s = r.series["Portfolio with"].dropna()
-        fig.add_scatter(x=s.index, y=(1 + s).cumprod(), name=f"with {c}",
-                        line=dict(color=PALETTE[i % len(PALETTE)], width=1.6))
-    st.plotly_chart(fig, use_container_width=True)
-    fig = _fig(300, "Drawdown of the profile with each candidate")
-    eq = (1 + base).cumprod()
-    fig.add_scatter(x=eq.index, y=eq / eq.cummax() - 1, name="Profile without",
-                    line=dict(color=BRAND["muted"], dash="dot"))
-    for i, (c, r) in enumerate(rv.results.items()):
+    if len(rvs) == 1 and len(pairs) <= 5:
+        chosen = pairs
+    else:
+        lab = {f"{c} added to {RP.base_label(rv)}": (rv, c) for rv, c in pairs}
+        pick = st.selectbox("Chart", list(lab), key="sr_chart_pick")
+        chosen = [lab[pick]]
+    fig = _fig(340, "Growth of 1 (CAD)")
+    fig2 = _fig(260, "Drawdown")
+    seen = set()
+    for i, (rv, c) in enumerate(chosen):
+        r = rv.results[c]
+        base = r.series["Portfolio without"].dropna()
+        if id(rv) not in seen:
+            seen.add(id(rv))
+            eq = (1 + base).cumprod()
+            name = RP.base_label(rv)
+            fig.add_scatter(x=eq.index, y=eq, name=name, line=dict(color=BRAND["muted"], width=2, dash="dot"))
+            fig2.add_scatter(x=eq.index, y=eq / eq.cummax() - 1, name=name,
+                             line=dict(color=BRAND["muted"], dash="dot"))
         e = (1 + r.series["Portfolio with"].dropna()).cumprod()
-        fig.add_scatter(x=e.index, y=e / e.cummax() - 1, name=f"with {c}",
-                        line=dict(color=PALETTE[i % len(PALETTE)], width=1.4))
-    fig.update_yaxes(tickformat=".0%")
-    st.plotly_chart(fig, use_container_width=True)
-    st_rows = [(c, r.stress) for c, r in rv.results.items()]
-    fig = _fig(320, "Stress windows: change in profile return from adding each candidate")
-    for i, (c, t) in enumerate(st_rows):
+        lbl = f"with {c}" if len(rvs) == 1 else f"{RP.base_label(rv)} with {c}"
+        fig.add_scatter(x=e.index, y=e, name=lbl, line=dict(color=PALETTE[i % len(PALETTE)], width=1.8))
+        fig2.add_scatter(x=e.index, y=e / e.cummax() - 1, name=lbl,
+                         line=dict(color=PALETTE[i % len(PALETTE)], width=1.4))
+    fig2.update_yaxes(tickformat=".0%")
+    c1, c2 = st.columns([3, 2])
+    c1.plotly_chart(fig, width="stretch")
+    c2.plotly_chart(fig2, width="stretch")
+
+
+def _detail_charts(rv: E.Review) -> None:
+    fig = _fig(320, "Stress windows: change in portfolio return")
+    for i, (c, r) in enumerate(rv.results.items()):
+        t = r.stress
         ok = t[t["Status"] == "ok"] if "Status" in t else t
         if len(ok):
             fig.add_bar(x=ok["Window"], y=ok["Change in portfolio return"], name=c,
                         marker_color=PALETTE[i % len(PALETTE)])
     fig.update_yaxes(tickformat=".1%")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     obj = _config().objectives.objectives[rv.objective_key]
-    if obj.rolling_metric:
+    if rv.objective_chosen and obj.rolling_metric:
         fig = _fig(300, f"Rolling 36-month {obj.rolling_metric} (with minus without)")
         for i, (c, r) in enumerate(rv.results.items()):
             s = r.rolling.get(obj.rolling_metric, {}).get("series")
             if s is not None and len(s):
                 fig.add_scatter(x=s.index, y=s, name=c, line=dict(color=PALETTE[i % len(PALETTE)]))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
+
+
+def _run(inp, cfg):
+    if not inp["bases"]:
+        st.error("Choose the portfolio to add the securities to.")
+        st.stop()
+    if not inp["candidates"]:
+        st.error("Pick at least one security.")
+        st.stop()
+    uploads = inp["uploads"]
+    tickers = [t for t in inp["candidates"] if t not in uploads]
+    extra = [t for p in inp["bases"] for t in p.weights if t not in uploads]
+    if inp["benchmark"]:
+        extra.append(inp["benchmark"])
+    try:
+        b, reg = _bundle(tuple(sorted(set(tickers + extra + cfg.universe.all_tickers()))))
+        b = with_streams(b, uploads, inp["currency"])
+        bases = [p if p.custom else p.key for p in inp["bases"]]
+        req = E.Request(bases[0], inp["objective"], inp["candidates"], inp["benchmark"], inp["mode"],
+                        inp["weight"], inp["holding"], inp["rebalance"], inp["alignment"])
+        with st.spinner("Running…"):
+            rvs = E.run_many(req, bases, cfg, b, reg)
+            first = next((c for rv in rvs for c in rv.results), None)
+            sw = (E.sweep(cfg, b, first, inp["objective"] or next(iter(cfg.objectives.objectives)),
+                          inp["mode"], inp["weight"], inp["holding"], reg)
+                  if inp["sweep"] and first else None)
+    except (CF.ConfigError, KeyError, ValueError) as exc:
+        st.error(str(exc))
+        st.stop()
+    st.session_state["sr_result"] = (rvs, sw)
 
 
 def render() -> None:
     cfg = _config()
     st.markdown('<div class="masthead"><div><h1>Security review</h1>'
-                '<div class="sub">Does this security solve a real problem for this investor, '
-                'and which candidate solves it best?</div></div></div>', unsafe_allow_html=True)
+                '<div class="sub">What does adding this security do to the portfolio?</div>'
+                '</div></div>', unsafe_allow_html=True)
     inp = _sidebar(cfg)
     if inp["run"]:
-        if not inp["profile"]:
-            st.error("Define the custom profile's weights first.")
-            st.stop()
-        if not inp["candidates"]:
-            st.error("Pick at least one candidate.")
-            st.stop()
-        extra = list(inp["profile"].weights) + ([inp["benchmark"]] if inp["benchmark"] else [])
-        try:
-            b, reg = _bundle(tuple(sorted(set(inp["candidates"] + extra + cfg.universe.all_tickers()))))
-            req = E.Request(inp["profile"] if inp["profile"].custom else inp["profile"].key,
-                            inp["objective"], inp["candidates"], inp["benchmark"], inp["mode"],
-                            inp["weight"], inp["holding"], inp["rebalance"], inp["alignment"])
-            with st.spinner("Running the review…"):
-                rv = E.run(req, cfg, b, reg)
-                sw = E.sweep(cfg, b, next(iter(rv.results)), inp["objective"], inp["mode"],
-                             inp["weight"], inp["holding"], reg) if inp["sweep"] and rv.results else None
-        except (CF.ConfigError, KeyError, ValueError) as exc:
-            st.error(str(exc))
-            st.stop()
-        st.session_state["sr_result"] = (rv, sw)
+        _run(inp, cfg)
     res = st.session_state.get("sr_result")
     if not res:
-        st.markdown('<div class="note">Pick a profile, an objective and one or more candidates in the '
-                    'sidebar, then press <b>Run review</b>. The first run downloads prices for the '
-                    'whole universe (about 30 seconds); later runs read the disk cache.</div>',
-                    unsafe_allow_html=True)
+        st.markdown('<div class="note">Pick one or more securities (or upload return streams), '
+                    'choose what to add them to (a benchmark, a blend, your portfolio\'s returns '
+                    'or a profile), then press <b>Run</b>. The first run downloads prices '
+                    '(about 30 seconds); later runs read the disk cache.</div>', unsafe_allow_html=True)
         return
-    rv, sw = res
-    secs = RP.sections(rv, cfg, sw)
-    st.markdown(f'<div class="eyebrow">{rv.profile.describe()} · {rv.objective_label} · '
-                f'{rv.period}</div>', unsafe_allow_html=True)
-    if rv.skipped:
-        st.markdown('<div class="flag">Skipped: ' + "; ".join(f"{k}: {v}" for k, v in rv.skipped.items())
-                    + '</div>', unsafe_allow_html=True)
-    ranked = [c for c in rv.ranking["Candidate"]] if len(rv.ranking) else []
-    cols = st.columns(min(3, max(1, len(ranked))))
-    for i, c in enumerate(ranked):
-        with cols[i % len(cols)]:
-            st.markdown(_card(c, rv.results[c]), unsafe_allow_html=True)
-    st.download_button("Download the full comparison (Excel)", X.write_sections(secs),
-                       f"security_review_{rv.profile.key}_{rv.objective_key}.xlsx",
+    rvs, sw = res
+    secs = RP.all_sections(rvs, cfg, sw)
+    summ = [s for s in secs if s[0] == "Summary"]
+    pairs = [(rv, c) for rv in rvs for c in rv.results]
+    rv0 = rvs[0]
+    ctx = [RP.change_label(rv0) if len({RP.change_label(r) for r in rvs}) == 1 else "",
+           rv0.objective_label if rv0.objective_chosen else "",
+           rv0.period if rv0.request.alignment == "common" else "each security's own history"]
+    st.markdown(f'<div class="eyebrow">{" · ".join(x for x in ctx if x)}</div>', unsafe_allow_html=True)
+
+    if pairs and len(pairs) <= 4:
+        for rv, c in pairs:
+            st.markdown(f'<div class="note" style="margin-bottom:.5rem;">{RP.headline(rv, c)}</div>',
+                        unsafe_allow_html=True)
+    elif pairs:
+        st.caption(f"{len(pairs)} results: one row each below. Click a column header to sort.")
+
+    for _, title, df, note in summ:
+        if title == "In one sentence":
+            continue
+        st.markdown(f'<div class="eyebrow">{title}</div>', unsafe_allow_html=True)
+        if title == "What adding it changes":
+            view, cc = _sortable(df)
+            st.dataframe(view, hide_index=True, width="stretch", column_config=cc)
+        else:
+            st.dataframe(_text(df), hide_index=True, width="stretch")
+        if note:
+            st.caption(note)
+
+    _charts(rvs)
+    st.download_button("Download everything (Excel)", X.write_sections(secs),
+                       "security_review.xlsx",
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        key="sr_xlsx")
-    by_sheet: Dict[str, List[RP.Section]] = {}
-    for s in secs:
-        by_sheet.setdefault(s[0], []).append(s)
-    tabs = ["Verdict", "Ranking", "Fund Review", "Sleeve Comparison", "Portfolio Impact",
-            "Scenarios", "Regimes", "Robustness", "Factor Exposures", "Diversification",
-            "Profile Sweep", "Charts", "Methodology"]
-    tabs = [t for t in tabs if t in by_sheet or t == "Charts"]
-    for t, tab in zip(tabs, st.tabs(tabs)):
-        with tab:
-            if t == "Charts":
-                _charts(rv)
-                st.caption("Chart data: the Series sheet of the Excel export.")
-                _show(by_sheet.get("Series", []))
-            else:
-                _show(by_sheet[t])
+
+    with st.expander("Details: stress windows, regimes, factors, robustness, fund data, methodology"):
+        rv = rv0
+        if len(rvs) > 1:
+            lab = {RP.base_label(r): r for r in rvs}
+            rv = lab[st.selectbox("Portfolio", list(lab), key="sr_detail_base")]
+        by_sheet: Dict[str, List[RP.Section]] = {}
+        for s in RP.sections(rv, cfg, sw if rv is rv0 else None):
+            by_sheet.setdefault(s[0], []).append(s)
+        tabs = ["Scenarios", "Regimes", "Portfolio Impact", "Diversification", "Factor Exposures",
+                "Fund Review", "Sleeve Comparison", "Robustness", "Verdict", "Ranking",
+                "Profile Sweep", "Charts", "Methodology"]
+        names = {"Verdict": "Objectives" if not rv.objective_chosen else "Verdict"}
+        tabs = [t for t in tabs if t in by_sheet or t == "Charts"]
+        for t, tab in zip(tabs, st.tabs([names.get(t, t) for t in tabs])):
+            with tab:
+                if t == "Charts":
+                    _detail_charts(rv)
+                    st.caption("Chart data: the Series sheet of the Excel export.")
+                    _show(by_sheet.get("Series", []))
+                else:
+                    _show(by_sheet[t])

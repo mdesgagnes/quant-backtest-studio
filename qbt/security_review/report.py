@@ -17,7 +17,7 @@ from .engine import Review
 
 Section = Tuple[str, str, pd.DataFrame, str]
 
-SHEETS = ["Verdict", "Ranking", "Fund Review", "Sleeve Comparison", "Diversification",
+SHEETS = ["Summary", "Verdict", "Ranking", "Fund Review", "Sleeve Comparison", "Diversification",
           "Portfolio Impact", "Scenarios", "Regimes", "Factor Exposures", "Robustness",
           "Profile Sweep", "Methodology", "Series"]
 
@@ -85,15 +85,16 @@ def verdict_sections(rv: Review, cfg: AllConfig) -> List[Section]:
             "Skipped": "; ".join(f"{k}: {v}" for k, v in rv.skipped.items()) or "none"}
     out: List[Section] = [("Verdict", "Request", _kv(info), "")]
     rows = []
-    for c, r in rv.results.items():
+    for c, r in (rv.results.items() if rv.objective_chosen else []):
         d = r.decision
         rows.append({"Candidate": c, "Verdict": d["verdict"], "Confidence": d["confidence"],
                      "Score": d["composite"], "Benchmark": r.benchmark_label, "Months": r.months,
                      "Deciding facts": " | ".join(r.rationale["facts"]),
                      "Main trade-off": r.rationale["tradeoff"],
                      "Caveats": " | ".join(r.rationale["caveats"]) or "none"})
-    out.append(("Verdict", "Verdict and rationale", _cols(pd.DataFrame(rows), ratio=["Score"],
-                                                          integer=["Months"]), ""))
+    if rows:
+        out.append(("Verdict", "Verdict and rationale", _cols(pd.DataFrame(rows), ratio=["Score"],
+                                                              integer=["Months"]), ""))
     if rv.results:
         tab = {}
         for c, r in rv.results.items():
@@ -115,6 +116,8 @@ def verdict_sections(rv: Review, cfg: AllConfig) -> List[Section]:
 
 
 def ranking_sections(rv: Review) -> List[Section]:
+    if not rv.objective_chosen:
+        return []
     out = [("Ranking", f"Ranking for: {rv.objective_label}",
             _cols(rv.ranking.copy(), ratio=["Score", "Unclipped score"], integer=["Rank", "Months"],
                   pct=["Expense ratio"]),
@@ -301,6 +304,8 @@ def robustness_sections(rv: Review, cfg: AllConfig) -> List[Section]:
                     _cols(pd.DataFrame(rows), pct=["Share of windows improved"], integer=["Windows"]),
                     "Step one month. 'Improved' = on the good side of the metric's centre."))
     w = _stack(rv, "weight_grid")
+    if len(w) and not rv.objective_chosen:
+        w = w.drop(columns=["Score", "Verdict (before caps)"], errors="ignore")
     if len(w):
         out.append(("Robustness", "Add-weight sensitivity",
                     _cols(w, pct=["Add weight"], pts=["Change in volatility", "Change in CAGR",
@@ -337,10 +342,11 @@ def methodology_sections(rv: Review, cfg: AllConfig) -> List[Section]:
                 "Before a holding's own first monthly return, its proxy's CAD return is used."))
     obj = cfg.objectives.objectives[rv.objective_key]
     cat = cfg.objectives.metrics
-    rows = [{"Metric": k, "Label": cat[k].label, "Weight": w / sum(obj.weights.values()),
+    rows = [] if not rv.objective_chosen else [{"Metric": k, "Label": cat[k].label, "Weight": w / sum(obj.weights.values()),
              "Better": cat[k].better, "Centre": cat[k].center, "Scale (full credit)": cat[k].scale}
             for k, w in obj.weights.items()]
-    out.append(("Methodology", f"Objective definition: {obj.label}",
+    if rows:
+        out.append(("Methodology", f"Objective definition: {obj.label}",
                 _cols(pd.DataFrame(rows), pct=["Weight"]),
                 f"Add if score >= {obj.add:+.2f}; Consider if >= {obj.consider:+.2f}; else Do not add. "
                 "score_i = clip(direction x (value - centre) / scale, -1, 1). Guardrails: "
@@ -388,3 +394,141 @@ def sections(rv: Review, cfg: AllConfig, sweep: Optional[pd.DataFrame] = None) -
             + scenario_sections(rv) + regime_sections(rv) + factor_sections(rv, cfg)
             + robustness_sections(rv, cfg) + sweep_sections(sweep)
             + methodology_sections(rv, cfg) + series_sections(rv))
+
+
+# ----------------------------------------------------------------------
+# Summary: what adding the security does to the portfolio
+# ----------------------------------------------------------------------
+def base_label(rv: Review) -> str:
+    return rv.profile.describe()
+
+
+def change_label(rv: Review) -> str:
+    req = rv.request
+    if req.mode == "add":
+        return f"Add {rv.weight:.0%}"
+    return f"Replace {req.replace_holding} ({rv.profile.weights.get(req.replace_holding, 0):.0%})"
+
+
+def _pts(v: float, up: str, down: str, digits: int = 2) -> str:
+    if v != v:
+        return "n/a"
+    if abs(v) < 0.5 * 10 ** -(digits + 2):
+        return "unchanged"
+    return f"{abs(v) * 100:.{digits}f} pts {up if v > 0 else down}"
+
+
+def _stress_hits(r) -> Tuple[int, int]:
+    st = r.stress
+    if st is None or not len(st) or "Status" not in st:
+        return 0, 0
+    ok = st[st["Status"] == "ok"]
+    return int((ok["Change in portfolio return"] > 0).sum()), int(len(ok))
+
+
+def headline(rv: Review, c: str) -> str:
+    """One sentence: what adding `c` does to the base portfolio."""
+    r = rv.results[c]
+    m = r.metrics
+    req = rv.request
+    verb = (f"Adding {rv.weight:.0%} {c} to {base_label(rv)}" if req.mode == "add" else
+            f"Replacing {req.replace_holding} with {c} in {base_label(rv)}")
+    parts = [f"return {_pts(m['d_cagr'], 'higher', 'lower')} a year",
+             f"volatility {_pts(m['d_vol'], 'higher', 'lower')}",
+             f"max drawdown {_pts(m['d_mdd'], 'shallower', 'deeper', 1)}",
+             f"Sharpe {m['d_sharpe']:+.2f}" if m['d_sharpe'] == m['d_sharpe'] else "Sharpe n/a"]
+    hit, n = _stress_hits(r)
+    tail = f"Correlation to the portfolio {m['corr_to_portfolio']:.2f}"
+    if n:
+        tail += f"; it helped in {hit} of {n} stress windows"
+    text = (f"{verb} ({r.start:%Y-%m} to {r.end:%Y-%m}, {r.months} months): "
+            + ", ".join(parts) + ". " + tail + ".")
+    if rv.objective_chosen:
+        d = r.decision
+        text += (f' For "{rv.objective_label}": {d["verdict"]} (confidence '
+                 f"{d['confidence']}). {r.rationale['tradeoff']}")
+    return text
+
+
+_SUMMARY_PTS = ["Change in return (a year)", "Change in volatility", "Change in max drawdown",
+                "Change in worst 12 months"]
+
+
+def summary_table(rvs: List[Review]) -> pd.DataFrame:
+    rows = []
+    for rv in rvs:
+        for c, r in rv.results.items():
+            m, vb = r.metrics, r.vs_base
+            hit, n = _stress_hits(r)
+            row = {"Portfolio": base_label(rv), "Security": c, "Change": change_label(rv),
+                   "Months": r.months,
+                   "Return a year, with it": r.new_stats.get("CAGR", np.nan),
+                   "Change in return (a year)": m["d_cagr"],
+                   "Change in volatility": m["d_vol"],
+                   "Change in max drawdown": m["d_mdd"],
+                   "Change in Sharpe": m["d_sharpe"],
+                   "Change in worst 12 months": m["d_worst_12m"],
+                   "Correlation to portfolio": m["corr_to_portfolio"],
+                   "Downside capture of portfolio": vb.get("Downside capture", np.nan),
+                   "Stress windows helped": f"{hit} of {n}" if n else "n/a"}
+            if rv.objective_chosen:
+                row.update({"Verdict": r.decision["verdict"], "Confidence": r.decision["confidence"]})
+            rows.append(row)
+    df = pd.DataFrame(rows)
+    if len({rv.request.mode for rv in rvs}) == 1 and len({change_label(rv) for rv in rvs}) == 1:
+        df = df.drop(columns=["Change"], errors="ignore")
+    if df["Portfolio"].nunique() == 1 if len(df) else False:
+        df = df.drop(columns=["Portfolio"])
+    return _cols(df, pct=["Return a year, with it"], pts=_SUMMARY_PTS,
+                 ratio=["Change in Sharpe", "Correlation to portfolio", "Downside capture of portfolio"],
+                 integer=["Months"])
+
+
+_BEFORE_AFTER = ["CAGR", "Volatility", "Sharpe", "Max drawdown", "Worst 12 months",
+                 "Longest underwater (months)"]
+
+
+def before_after(rv: Review, c: str) -> pd.DataFrame:
+    r = rv.results[c]
+    rows = []
+    for name in _BEFORE_AFTER:
+        a, b = r.base_stats.get(name, np.nan), r.new_stats.get(name, np.nan)
+        rows.append({"Measure": "Return a year (CAGR)" if name == "CAGR" else name,
+                     "Portfolio": a, f"With {c}": b, "Change": b - a if a == a and b == b else np.nan})
+    df = pd.DataFrame(rows)
+    df.attrs["row_fmt"] = [PCT if m in _PCT_ROWS else INT if m in _INT_ROWS else RATIO
+                           for m in _BEFORE_AFTER]
+    df.attrs["fmt_cols"] = [2, 3, 4]
+    return df
+
+
+def summary_sections(rvs: List[Review]) -> List[Section]:
+    pairs = [(rv, c) for rv in rvs for c in rv.results]
+    if not pairs:
+        return []
+    out: List[Section] = [
+        ("Summary", "In one sentence", pd.DataFrame({"Finding": [headline(rv, c) for rv, c in pairs]}), ""),
+        ("Summary", "What adding it changes", summary_table(rvs),
+         "Changes are the portfolio with the security minus without it, in percentage points "
+         "(Sharpe and correlation in units). Downside capture below 1: the security fell less than "
+         "the portfolio in the portfolio's down months.")]
+    if len(pairs) == 1:
+        rv, c = pairs[0]
+        out.append(("Summary", "Before and after", before_after(rv, c), ""))
+    skipped = [(base_label(rv), k, v) for rv in rvs for k, v in rv.skipped.items()]
+    if skipped:
+        out.append(("Summary", "Not analysed",
+                    pd.DataFrame(skipped, columns=["Portfolio", "Security", "Reason"]), ""))
+    return out
+
+
+def all_sections(rvs: List[Review], cfg: AllConfig, sweep: Optional[pd.DataFrame] = None) -> List[Section]:
+    """Summary first, then every detail table. With several portfolios, each
+    detail table's title starts with the portfolio it belongs to."""
+    out = summary_sections(rvs)
+    for i, rv in enumerate(rvs):
+        det = sections(rv, cfg, sweep if i == 0 else None)
+        if len(rvs) > 1:
+            det = [(sh, f"{base_label(rv)}: {t}", df, n) for sh, t, df, n in det]
+        out += det
+    return out

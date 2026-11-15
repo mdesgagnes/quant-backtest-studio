@@ -15,7 +15,7 @@ A month with no input data has no label (NaN), so it counts in neither state.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -136,8 +136,26 @@ def _mdd(path: pd.Series) -> float:
     return float((path / path.cummax() - 1).min())
 
 
+def _window_monthly(px: pd.Series, w: StressWindow) -> Optional[pd.Series]:
+    """Month-end values from the last month end on or before the start to
+    the first month end on or after the end (used when a series has no daily
+    prices). None if the series does not cover both."""
+    px = px.dropna()
+    if px.empty:
+        return None
+    me = px.groupby(px.index.to_period("M")).last()
+    me.index = me.index.to_timestamp("M")
+    s, e = pd.Timestamp(w.start), pd.Timestamp(w.end)
+    first = me[me.index <= s]
+    last = me[me.index >= e]
+    if first.empty or last.empty:
+        return None
+    return me.loc[first.index[-1]:last.index[0]]
+
+
 def stress_table(cand: str, daily: Dict[str, pd.Series], base_w: Dict[str, float],
-                 new_w: Dict[str, float], windows: List[StressWindow]) -> pd.DataFrame:
+                 new_w: Dict[str, float], windows: List[StressWindow],
+                 monthly_only: Iterable[str] = (), min_monthly_days: int = 45) -> pd.DataFrame:
     """One row per window: candidate return and max drawdown, portfolio
     with and without, and the candidate's daily correlation with the
     portfolio. Windows the candidate (or a holding) does not cover are
@@ -146,7 +164,14 @@ def stress_table(cand: str, daily: Dict[str, pd.Series], base_w: Dict[str, float
     hold = sorted(set(base_w) | set(new_w) - {cand})
     for w in windows:
         row = {"Window": w.name, "Key": w.key, "Start": w.start, "End": w.end}
-        cut = {t: _window(daily[t], w) if t in daily else None for t in hold + [cand]}
+        monthly = bool(set(monthly_only) & set(hold + [cand]))
+        row["Basis"] = "month-end" if monthly else "daily"
+        if monthly and (pd.Timestamp(w.end) - pd.Timestamp(w.start)).days < min_monthly_days:
+            row["Status"] = "no data (monthly series; window shorter than two months)"
+            rows.append(row)
+            continue
+        cut_fn = _window_monthly if monthly else _window
+        cut = {t: cut_fn(daily[t], w) if t in daily else None for t in hold + [cand]}
         if any(cut[t] is None for t in hold + [cand]):
             missing = [t for t in hold + [cand] if cut[t] is None]
             row.update({"Status": "no data (" + ", ".join(missing) + ")"})
@@ -159,7 +184,7 @@ def stress_table(cand: str, daily: Dict[str, pd.Series], base_w: Dict[str, float
         cp = cal[cand] / cal[cand].iloc[0]
         rc, rb = cp.pct_change().dropna(), pb.pct_change().dropna()
         row.update({
-            "Status": "ok", "Sessions": int(len(cal) - 1),
+            "Status": "ok", "Sessions": int(len(cal) - 1) if not monthly else np.nan,
             "Candidate return": float(cp.iloc[-1] - 1),
             "Candidate max drawdown": _mdd(cp),
             "Portfolio return, without": float(pb.iloc[-1] - 1),
