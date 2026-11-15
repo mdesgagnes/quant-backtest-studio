@@ -368,3 +368,143 @@ def rf_monthly(index: pd.DatetimeIndex, tbill_pct: Optional[pd.Series]) -> pd.Se
     y = tbill_pct.copy()
     y.index = y.index.to_period("M").to_timestamp("M")
     return M.rf_from_yield(y, index)
+
+
+# ----------------------------------------------------------------------
+# Fund costs and liquidity (yfinance)
+# ----------------------------------------------------------------------
+InfoFetcher = Callable[[str], Dict[str, float]]
+INFO_MAX_AGE_DAYS = 30.0
+
+
+def yahoo_fund_info(ticker: str) -> Dict[str, float]:
+    """Expense ratio, assets and trading volume from yfinance.
+
+    Expense ratio: `Ticker.funds_data.fund_operations` "Annual Report Expense
+    Ratio" (a decimal), else `Ticker.info["netExpenseRatio"]` (in percent).
+    Liquidity: average daily volume x last price (quote currency)."""
+    import yfinance as yf
+    tk = yf.Ticker(ticker)
+    out: Dict[str, float] = {}
+    try:
+        fo = tk.funds_data.fund_operations
+        if fo is not None and "Annual Report Expense Ratio" in fo.index:
+            v = float(fo.loc["Annual Report Expense Ratio"].iloc[0])
+            if v == v:
+                out["expense_ratio"] = v
+    except Exception:
+        pass
+    try:
+        info = tk.info or {}
+    except Exception:
+        info = {}
+    if "expense_ratio" not in out and info.get("netExpenseRatio") is not None:
+        out["expense_ratio"] = float(info["netExpenseRatio"]) / 100.0
+    if info.get("totalAssets"):
+        out["aum"] = float(info["totalAssets"])
+    vol = info.get("averageVolume")
+    px = info.get("regularMarketPrice") or info.get("previousClose")
+    if vol:
+        out["avg_volume"] = float(vol)
+        if px:
+            out["avg_dollar_volume"] = float(vol) * float(px)
+    return out
+
+
+def fund_info(ticker: str, cache_dir: Optional[str] = CACHE_DIR,
+              fetcher: Optional[InfoFetcher] = None,
+              max_age_days: float = INFO_MAX_AGE_DAYS) -> Dict[str, float]:
+    """Cost and liquidity for one ticker, cached on disk for 30 days.
+    Empty when unavailable (an index, a stock, or no network)."""
+    p = os.path.join(cache_dir, "info", ticker.replace("^", "_") + ".json") if cache_dir else None
+    if p and os.path.exists(p) and (time.time() - os.path.getmtime(p)) / 86400 <= max_age_days:
+        with open(p, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    try:
+        out = (fetcher or yahoo_fund_info)(ticker)
+    except Exception:
+        out = {}
+    if p and out:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(out, fh)
+    elif p and os.path.exists(p):
+        with open(p, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    return out
+
+
+# ----------------------------------------------------------------------
+# Ken French data library (direct CSV, no extra dependency)
+# ----------------------------------------------------------------------
+KF_URL = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/{name}_CSV.zip"
+KF_FILES = ("F-F_Research_Data_5_Factors_2x3", "F-F_Momentum_Factor")
+
+
+def fetch_bytes_cached(url: str, name: str, cache_dir: Optional[str] = CACHE_DIR,
+                       max_age_days: float = 7.0, timeout: float = 20.0) -> Optional[bytes]:
+    p = os.path.join(cache_dir, "macro", name) if cache_dir else None
+    if p and os.path.exists(p) and (time.time() - os.path.getmtime(p)) / 86400 <= max_age_days:
+        with open(p, "rb") as fh:
+            return fh.read()
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        data = urllib.request.urlopen(req, timeout=timeout).read()
+        if p:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as fh:
+                fh.write(data)
+        return data
+    except Exception:
+        if p and os.path.exists(p):
+            with open(p, "rb") as fh:
+                return fh.read()
+        return None
+
+
+def parse_ken_french_csv(text: str) -> pd.DataFrame:
+    """The monthly table of a Ken French CSV: rows keyed YYYYMM, values in
+    percent, until the first blank line or annual section. Returns decimals
+    indexed by month end."""
+    rows, cols, started = [], None, False
+    for line in text.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if not started:
+            if len(parts) > 1 and parts[0] == "" and all(parts[1:]):
+                cols = parts[1:]
+            elif cols and len(parts[0]) == 6 and parts[0].isdigit():
+                started = True
+            else:
+                continue
+        if started:
+            if not (len(parts[0]) == 6 and parts[0].isdigit()):
+                break
+            rows.append(parts)
+    if not rows or not cols:
+        return pd.DataFrame()
+    idx = pd.PeriodIndex([r[0][:4] + "-" + r[0][4:] for r in rows], freq="M").to_timestamp("M")
+    vals = [[float(x) if x not in ("", "-99.99", "-999") else np.nan for x in r[1:len(cols) + 1]]
+            for r in rows]
+    return pd.DataFrame(vals, index=idx, columns=cols) / 100.0
+
+
+def ken_french_factors(cache_dir: Optional[str] = CACHE_DIR) -> Tuple[Optional[pd.DataFrame], str]:
+    """Fama-French 5 factors and momentum (US, monthly, decimals), or
+    (None, reason) when the library cannot be reached and is not cached."""
+    import zipfile
+    frames = []
+    for name in KF_FILES:
+        data = fetch_bytes_cached(KF_URL.format(name=name), f"{name}_CSV.zip", cache_dir)
+        if not data:
+            return None, "Ken French data library unreachable: ETF factor proxies used."
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                text = z.read(z.namelist()[0]).decode("latin-1")
+        except Exception:
+            return None, "Ken French file unreadable: ETF factor proxies used."
+        df = parse_ken_french_csv(text)
+        df.columns = [c.strip() for c in df.columns]
+        frames.append(df)
+    out = pd.concat(frames, axis=1, sort=True)
+    return out, (f"Ken French data library (5 factors 2x3 and momentum), to "
+                 f"{out.dropna().index[-1]:%Y-%m}")

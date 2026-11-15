@@ -442,8 +442,11 @@ def world(tmp_path_factory):
         return {t: frames[t] for t in tickers if t in frames}
     cfg = CF.load_all()
     cache = str(tmp_path_factory.mktemp("cache"))
+    costs = {"SPY": {"expense_ratio": 0.000945, "avg_dollar_volume": 3e10},
+             "SPYCLONE": {"expense_ratio": 0.0003, "avg_dollar_volume": 5e5}}
     b = load_bundle(cfg, ["USMV", "NEGC", "SPYCLONE", "DBMF", "NOSUCH"], downloader=downloader,
-                    cache_dir=cache, as_of=AS_OF, macro=False)
+                    cache_dir=cache, as_of=AS_OF, macro=False,
+                    info_fetcher=lambda t: costs.get(t, {}))
     return cfg, b, E.regime_labels(cfg, b)
 
 
@@ -550,3 +553,65 @@ def test_export_has_every_sheet_and_every_metric(world):
         assert set(r.metrics) <= keys
     # styling of the backtest export: red bold title, black header
     assert ws["A1"].font.bold and ws["A2"].fill.fgColor.rgb.endswith("1A1A1A")
+
+
+# ----------------------------------------------------------------------
+# Fund costs and Ken French factors
+# ----------------------------------------------------------------------
+KF_SAMPLE = """This file was created by CMPT_ME_BEME_OP_INV_RETS using the 202609 CRSP database.
+
+,Mkt-RF,SMB,HML,RMW,CMA,RF
+196307,   -0.39,   -0.48,   -0.81,    0.64,   -1.15,    0.27
+196308,    5.07,   -0.80,    1.70,    0.40,   -0.38,    0.25
+
+  Annual Factors: January-December
+,Mkt-RF,SMB,HML,RMW,CMA,RF
+1964,   10.00,    1.00,    2.00,    3.00,    4.00,    3.00
+"""
+
+
+def test_parse_ken_french_monthly_section_only():
+    df = D.parse_ken_french_csv(KF_SAMPLE)
+    assert list(df.columns) == ["Mkt-RF", "SMB", "HML", "RMW", "CMA", "RF"]
+    assert list(df.index) == [pd.Timestamp("1963-07-31"), pd.Timestamp("1963-08-31")]
+    assert df.loc["1963-08-31", "Mkt-RF"] == pytest.approx(0.0507)      # percent -> decimal
+
+
+def test_fund_info_is_cached(tmp_path):
+    calls = []
+
+    def fetch(t):
+        calls.append(t)
+        return {"expense_ratio": 0.001}
+    assert D.fund_info("XBB.TO", str(tmp_path), fetch)["expense_ratio"] == 0.001
+    assert D.fund_info("XBB.TO", str(tmp_path), lambda t: {})["expense_ratio"] == 0.001
+    assert calls == ["XBB.TO"]
+    assert D.fund_info("NONE", str(tmp_path), lambda t: (_ for _ in ()).throw(RuntimeError())) == {}
+
+
+def test_factor_frame_prefers_ken_french(world):
+    cfg, b, _ = world
+    assert E.factor_sources(cfg, b)["size"] == "IWM - SPY"            # offline: ETF proxies
+    idx = b.usd_monthly.index
+    b.kf = pd.DataFrame({"SMB": 0.01, "HML": 0.0, "Mom": 0.0, "RMW": 0.0}, index=idx)
+    try:
+        src = E.factor_sources(cfg, b)
+        assert src["size"] == "Ken French SMB" and src["low_vol"] == "USMV - SPY"
+        F = E.factor_frame(cfg, b)
+        assert (F["size"] == 0.01).all()
+        flags = " ".join(E._flags(cfg, b, "SPY", idx[-60:], pd.DataFrame(columns=["Spliced months"]),
+                                  "SPY", pd.DataFrame()))
+        assert "low_vol" in flags and "size" not in flags            # only ETF-proxy legs flagged
+    finally:
+        b.kf = None
+
+
+def test_costs_shown_and_break_ties_between_equivalents(world):
+    cfg, b, reg = world
+    rv = E.run(E.Request("balanced", "lower_volatility", ["SPY", "SPYCLONE"]), cfg, b, reg)
+    eq = rv.equivalents[0]
+    assert "SPYCLONE is cheaper (0.03% vs 0.09% a year)" in eq["Cost and liquidity"]
+    assert "SPY trades more" in eq["Cost and liquidity"]
+    assert rv.fund_review.loc["Expense ratio", "SPY"] == pytest.approx(0.000945)
+    assert any("Thin trading" in f for f in rv.results["SPYCLONE"].flags)
+    assert rv.ranking.set_index("Candidate").loc["SPY", "Expense ratio"] == pytest.approx(0.000945)

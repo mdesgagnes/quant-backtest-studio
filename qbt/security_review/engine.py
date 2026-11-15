@@ -78,6 +78,7 @@ class CandidateResult:
     base_stats: Dict[str, float]
     new_stats: Dict[str, float]
     series: pd.DataFrame                     # candidate, benchmark, base, new (monthly)
+    costs: Dict[str, float] = field(default_factory=dict)   # expense ratio, AUM, volume
 
 
 @dataclass
@@ -168,11 +169,31 @@ def _ctx(cfg: AllConfig, b: Bundle, regimes: Dict[str, pd.Series]) -> I.Context:
                      mkt, spread, b.yields, cfg.objectives.simulation)
 
 
-def factor_frame(cfg: AllConfig, b: Bundle) -> pd.DataFrame:
-    cols = {}
+def factor_sources(cfg: AllConfig, b: Bundle) -> Dict[str, str]:
+    """Where each style factor comes from: a Ken French column, or an ETF spread."""
+    kfmap = cfg.factors.get("ken_french") or {}
+    use_kf = b.kf is not None and str(cfg.factors.get("source", "auto")) != "etf_proxies"
+    out = {}
     for k, spec in (cfg.factors.get("factors") or {}).items():
-        if spec["long"] in b.usd_monthly and spec["short"] in b.usd_monthly:
-            cols[k] = b.usd_monthly[spec["long"]] - b.usd_monthly[spec["short"]]
+        if use_kf and k in kfmap and kfmap[k] in b.kf.columns:
+            out[k] = f"Ken French {kfmap[k]}"
+        else:
+            out[k] = f"{spec['long']} - {spec['short']}"
+    return out
+
+
+def factor_frame(cfg: AllConfig, b: Bundle) -> pd.DataFrame:
+    """Monthly style factors: Ken French columns where mapped and reachable,
+    ETF long-short spreads otherwise (always for low volatility)."""
+    kfmap = cfg.factors.get("ken_french") or {}
+    cols = {}
+    for k, src in factor_sources(cfg, b).items():
+        if src.startswith("Ken French"):
+            cols[k] = b.kf[kfmap[k]]
+        else:
+            spec = cfg.factors["factors"][k]
+            if spec["long"] in b.usd_monthly and spec["short"] in b.usd_monthly:
+                cols[k] = b.usd_monthly[spec["long"]] - b.usd_monthly[spec["short"]]
     return pd.DataFrame(cols)
 
 
@@ -220,7 +241,12 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
     H, holdings = holding_returns(cfg, b, prof.weights)
     holdings.insert(1, "Weight", [prof.weights[t] for t in holdings["Holding"]])
     notes = [SOURCE_NOTE, CURRENCY_NOTE, f"Risk-free: {b.rf_label}.",
-             f"Inflation regime source: {b.cpi_label}.", f"Rebalancing: {reb}."] + list(b.notes)
+             f"Inflation regime source: {b.cpi_label}.", f"Rebalancing: {reb}.",
+             f"Factor model: {b.kf_label or 'ETF proxies'}; "
+             + "; ".join(f"{k} = {v}" for k, v in factor_sources(cfg, b).items()) + ".",
+             "Expense ratios, assets and trading volume: yfinance (fund_operations, info), "
+             "cached 30 days; shown and used to break ties between equivalent funds, not scored "
+             "(adjusted prices are already net of fees)."] + list(b.notes)
 
     skipped: Dict[str, str] = {}
     cands = []
@@ -337,10 +363,12 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
             c, bench_of[c], bench_of[c] or f"{prof.label} profile", len(P), P[0], P[-1], new_w,
             metrics, dec, rat, objs, S.standalone(cand, b.rf), imp["relative"], fe, reg, st,
             imp["sim"], rolling, pd.DataFrame(wgrid_rows), consistency, flags,
-            imp["base_stats"], imp["new_stats"], series)
+            imp["base_stats"], imp["new_stats"], series, b.info(c))
 
     ranking, components = _ranking(results, req.objective)
     corr, excorr, crisis, equiv = _matrices(results, b, bench_of, base_by_c)
+    for e in equiv:
+        e.update(_cost_compare(b, e["A"], e["B"]))
     fund = _fund_review(results, b)
     period = (f"{common[0]:%Y-%m} to {common[-1]:%Y-%m} ({len(common)} months, common to all)"
               if req.alignment == "common" and len(common) else "each candidate's own overlap")
@@ -365,11 +393,17 @@ def _flags(cfg: AllConfig, b: Bundle, c: str, P: pd.DatetimeIndex, holdings: pd.
     if bench is None:
         out.append("No sleeve benchmark: within-sleeve statistics are measured against the profile.")
     out.extend(b.flags.get(c, []))
+    srcs = factor_sources(cfg, b)
     legs = [k for k, sp in (cfg.factors.get("factors") or {}).items()
-            if c in (sp.get("long"), sp.get("short"))]
+            if c in (sp.get("long"), sp.get("short")) and not srcs.get(k, "").startswith("Ken French")]
     if legs:
         out.append(f"{c} is itself a leg of the {', '.join(legs)} factor proxy: those loadings "
                    f"are mechanical, not evidence of a tilt.")
+    inf = b.info(c)
+    adv, floor = inf.get("avg_dollar_volume"), float(cfg.factors.get("min_avg_dollar_volume", 1e6))
+    if adv is not None and adv < floor:
+        out.append(f"Thin trading: average daily value traded about {adv:,.0f} "
+                   f"(below {floor:,.0f}); check spreads before trading.")
     for fl in cfg.universe.income_flags(c):
         out.append(f"Distributions include {fl.replace('_', ' ')}: yield overstates income earned.")
     nd = st[st.get("Status", pd.Series(dtype=str)).astype(str).str.startswith("no data")] if len(st) else st
@@ -390,6 +424,7 @@ def _ranking(results: Dict[str, CandidateResult], objective: str):
         d = r.decision
         rows.append({"Candidate": c, "Score": d["composite"], "Unclipped score": d["unclipped"],
                      "Verdict": d["verdict"],
+                     "Expense ratio": r.costs.get("expense_ratio", np.nan),
                      "Confidence": d["confidence"], "Months": r.months,
                      "Benchmark": r.benchmark_label})
         cc = d["components"].copy()
@@ -424,6 +459,32 @@ def _matrices(results, b: Bundle, bench_of, base_by_c):
     return corr, excorr, crisis, eq
 
 
+def _cost_compare(b: Bundle, a: str, c: str) -> Dict[str, Any]:
+    """Who is cheaper and who trades more, for a functionally equivalent pair."""
+    ia, ic = b.info(a), b.info(c)
+    ea, ec = ia.get("expense_ratio"), ic.get("expense_ratio")
+    va, vc = ia.get("avg_dollar_volume"), ic.get("avg_dollar_volume")
+    out: Dict[str, Any] = {"Expense ratio A": ea, "Expense ratio B": ec}
+    bits = []
+    if ea is not None and ec is not None:
+        if abs(ea - ec) < 5e-6:
+            bits.append(f"same expense ratio ({ea:.2%})")
+        else:
+            lo = a if ea < ec else c
+            bits.append(f"{lo} is cheaper ({min(ea, ec):.2%} vs {max(ea, ec):.2%} a year)")
+    if va and vc:
+        hi = a if va > vc else c
+        bits.append(f"{hi} trades more ({max(va, vc):,.0f} vs {min(va, vc):,.0f} a day)")
+    out["Cost and liquidity"] = "; ".join(bits) if bits else "cost and volume unavailable"
+    return out
+
+
+def _cost_rows(inf: Dict[str, float]) -> Dict[str, float]:
+    return {"Expense ratio": inf.get("expense_ratio", np.nan),
+            "Assets (AUM)": inf.get("aum", np.nan),
+            "Average daily value traded": inf.get("avg_dollar_volume", np.nan)}
+
+
 def _fund_review(results, b: Bundle) -> pd.DataFrame:
     cols = {}
     for c, r in results.items():
@@ -431,12 +492,14 @@ def _fund_review(results, b: Bundle) -> pd.DataFrame:
         y = b.yields.get(c, {})
         st["Distribution yield (trailing 12m)"] = y.get("dist_yield", np.nan)
         st["Distribution variability (CV)"] = y.get("yield_stability", np.nan)
+        st.update(_cost_rows(b.info(c)))
         cols[c] = st
-        if r.benchmark and r.benchmark not in cols:
+        if r.benchmark and r.benchmark not in cols and r.benchmark not in results:
             bs = S.standalone(r.series["Benchmark"], b.rf)
             yb = b.yields.get(r.benchmark, {})
             bs["Distribution yield (trailing 12m)"] = yb.get("dist_yield", np.nan)
             bs["Distribution variability (CV)"] = yb.get("yield_stability", np.nan)
+            bs.update(_cost_rows(b.info(r.benchmark)))
             cols[f"{r.benchmark} (benchmark)"] = bs
     if results:
         r0 = next(iter(results.values()))

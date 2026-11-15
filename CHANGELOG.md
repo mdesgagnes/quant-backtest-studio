@@ -14,7 +14,9 @@
 - **Scripts**: `scripts/calibration.py` (writes `docs/CALIBRATION_REPORT.md`), `scripts/scenario_matrix.py` (writes `docs/SCENARIO_MATRIX.md` and `examples/scenario_matrix.xlsx`).
 - **Disk cache** for downloads (`data/cache/`, git-ignored).
 - **Feature flags** (`config/features.yaml`) for the sidebar workspaces.
-- 41 tests in `tests/test_security_review.py`.
+- **Fund costs and liquidity** from yfinance (expense ratio, AUM, average daily value traded), shown in Fund Review and Ranking, used to say which equivalent fund is cheaper and more liquid, and flagged when trading is thin.
+- **Ken French factors** (SMB, HML, Mom, RMW) read directly from the library's CSV zips when reachable, with the ETF spreads as fallback (`config/factors.yaml: source`).
+- 45 tests in `tests/test_security_review.py`, and one UI test for the hidden workspaces.
 - Docs: `docs/TESTING_GUIDE.md`, `docs/METHODOLOGY.md`, `docs/DECISIONS.md`, `docs/CALIBRATION_REPORT.md`, `docs/SCENARIO_MATRIX.md`, `docs/ARCHITECTURE_AUDIT.md`.
 
 ### Changed

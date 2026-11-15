@@ -25,9 +25,12 @@ PCT = '0.00%;-0.00%;0.00%'
 PTS = '+0.00%;-0.00%;0.00%'
 RATIO = '0.00'
 INT = '0'
+MONEY = '#,##0'
 
 _PCT_ROWS = {"CAGR", "Volatility", "Max drawdown", "CVaR 95% (monthly)", "Worst month",
-             "Worst 12 months", "Risk-free (annual)", "Distribution yield (trailing 12m)"}
+             "Worst 12 months", "Risk-free (annual)", "Distribution yield (trailing 12m)",
+             "Expense ratio"}
+_MONEY_ROWS = {"Assets (AUM)", "Average daily value traded"}
 _INT_ROWS = {"Months", "Longest underwater (months)", "Recovery from max drawdown (months)"}
 
 
@@ -44,7 +47,7 @@ def _cols(df: pd.DataFrame, pct=(), pts=(), ratio=(), integer=()) -> pd.DataFram
 def _rows(df: pd.DataFrame) -> pd.DataFrame:
     """Row-oriented table (measures as rows, in the index): the number
     format follows the row. The index becomes the first column."""
-    fmt = [PCT if i in _PCT_ROWS else INT if i in _INT_ROWS else
+    fmt = [PCT if i in _PCT_ROWS else INT if i in _INT_ROWS else MONEY if i in _MONEY_ROWS else
            (RATIO if i not in ("Start", "End") else None) for i in df.index]
     out = df.reset_index()
     out.attrs["row_fmt"] = fmt
@@ -105,13 +108,16 @@ def verdict_sections(rv: Review, cfg: AllConfig) -> List[Section]:
     if len(eq):
         eq["Conclusion"] = "Functionally equivalent: the choice comes down to cost or liquidity."
         out.append(("Verdict", "Functionally equivalent pairs",
-                    _cols(eq, pct=["Tracking error between them"], integer=["Months"]), ""))
+                    _cols(eq, pct=["Tracking error between them", "Expense ratio A",
+                                   "Expense ratio B"], integer=["Months"]),
+                    "Expense ratio and trading volume from yfinance."))
     return out
 
 
 def ranking_sections(rv: Review) -> List[Section]:
     out = [("Ranking", f"Ranking for: {rv.objective_label}",
-            _cols(rv.ranking.copy(), ratio=["Score", "Unclipped score"], integer=["Rank", "Months"]),
+            _cols(rv.ranking.copy(), ratio=["Score", "Unclipped score"], integer=["Rank", "Months"],
+                  pct=["Expense ratio"]),
             "Composite score in [-1, +1]; ties broken by the unclipped score.")]
     if len(rv.components):
         comp = rv.components.copy()
@@ -273,10 +279,10 @@ def factor_sections(rv: Review, cfg: AllConfig) -> List[Section]:
     df = pd.DataFrame(rows)
     ratio = [c for c in df.columns if c not in ("Candidate", "Months", "Note", "Alpha (annual)")]
     labels = {k: v.get("label", k) for k, v in (cfg.factors.get("factors") or {}).items()}
-    note = ("Explanatory only. Excess return on the sleeve benchmark's excess return and ETF "
-            "long-short spreads: " + "; ".join(f"{k} = {v['long']} - {v['short']}"
-                                               for k, v in (cfg.factors.get('factors') or {}).items())
-            + ". " + ", ".join(f"{k}: {v}" for k, v in labels.items()) + ".")
+    src = next((n for n in rv.notes if n.startswith("Factor model:")), "")
+    note = ("Explanatory only. Excess return on the sleeve benchmark's excess return and US "
+            "long-short style factors. " + src + " "
+            + ", ".join(f"{k}: {v}" for k, v in labels.items()) + ".")
     return [("Factor Exposures", "Factor / style regression", _cols(df, pct=["Alpha (annual)"],
                                                                    ratio=ratio, integer=["Months"]), note)]
 

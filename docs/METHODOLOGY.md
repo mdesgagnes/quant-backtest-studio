@@ -65,6 +65,7 @@ CIPM conventions from `qbt/metrics.py`: population moments, geometric annualisat
 | Worst month, worst 12 months | minimum monthly return; minimum compounded rolling 12-month return |
 | Distribution yield | trailing 12-month distributions / last close (own currency) |
 | Distribution variability | coefficient of variation of the last 5 full calendar years' yields (distributions / average close) |
+| Expense ratio, AUM, average daily value traded | yfinance (`funds_data.fund_operations`, else `info.netExpenseRatio`; `info.totalAssets`; `averageVolume` x last price), cached 30 days. Shown, not scored: adjusted prices are already net of fees |
 
 ### 4b. Within the sleeve (candidate vs its sleeve benchmark)
 Sleeve benchmarks: US equity SPY, Canadian equity XIC.TO, international/EM XEF.TO, Canadian bonds XBB.TO, global/US bonds AGG. Real assets and alternatives have none: the profile is used and flagged.
@@ -82,7 +83,7 @@ Sleeve benchmarks: US equity SPY, Canadian equity XIC.TO, international/EM XEF.T
 | Excess-return correlation | correlation between candidates of their returns minus their own sleeve benchmark |
 
 ### 4c. Factor and style exposures (explanatory only)
-OLS of the candidate's excess return on: market = sleeve benchmark minus T-bill, and five monthly long-short spreads of US ETFs (USD, total return): size IWM-SPY, value IWD-IWF, momentum MTUM-SPY, quality QUAL-SPY, low volatility USMV-SPY. Classical t-stats and R2; at least 36 months, otherwise not run. Alpha shown annualised. A candidate that is itself a leg of a spread is flagged (its loading is mechanical). **Mega-cap tilt**: slope of the candidate's active return on QQQ minus RSP. Limitation: the style spreads are US; for Canadian and international funds they are a rough guide.
+OLS of the candidate's excess return on: market = sleeve benchmark minus T-bill, and five monthly US long-short style factors. With `source: auto` (default) size, value, momentum and quality come from the Ken French data library (SMB, HML, Mom, RMW; read from its CSV zips, cached 7 days) when it can be reached, otherwise from ETF spreads (USD, total return): size IWM-SPY, value IWD-IWF, momentum MTUM-SPY, quality QUAL-SPY. Low volatility is always USMV-SPY (Ken French has none). The source used is printed in the Methodology sheet; on the network this was built on, Ken French was unreachable and the ETF spreads were used. Classical t-stats and R2; at least 36 months, otherwise not run. Alpha shown annualised. A candidate that is itself a leg of an ETF spread is flagged (its loading is mechanical). **Mega-cap tilt**: slope of the candidate's active return on QQQ minus RSP. Limitation: the style spreads are US; for Canadian and international funds they are a rough guide.
 
 ### 4d. Portfolio impact (with minus without, on the analysis period)
 `d_vol`, `d_sharpe`, `d_sortino`, `d_calmar`, `d_cagr`, `d_mdd`, `d_ulcer`, `d_cvar`, `d_worst_12m` (differences of 4a). Plus:
@@ -140,7 +141,7 @@ Each objective in `config/objectives.yaml` is a weighted list of metrics. For ea
 
 **Rationale.** Deciding facts = the 3-4 components with the largest absolute contribution. Main trade-off = the worst-scoring metric outside the objective among CAGR, upside capture, Sharpe, max drawdown, volatility, CVaR and portfolio yield (score <= -0.2); otherwise a failed guardrail; otherwise "no material trade-off". Caveats = caps, confidence reasons and data flags.
 
-**Functionally equivalent.** Two candidates with tracking error between them below 1% a year and either excess-return correlation above 0.95, or, when one of them barely departs from the benchmark (own tracking error below 1%), raw correlation above 0.95. The app says the choice comes down to cost or liquidity.
+**Functionally equivalent.** Two candidates with tracking error between them below 1% a year and either excess-return correlation above 0.95, or, when one of them barely departs from the benchmark (own tracking error below 1%), raw correlation above 0.95. The app says the choice comes down to cost or liquidity and states which of the two is cheaper and which trades more.
 
 **Profile sweep.** The same candidate, objective and mode run on each of the 7 preset profiles.
 
@@ -170,4 +171,4 @@ For each regime and its opposite: months, candidate average monthly return and a
 
 ## 9. Data quality flags
 
-Short overlap (< 36 months: Low; < 60: Moderate); a profile holding spliced inside the analysis period; daily moves above 25%; gaps longer than 10 calendar days; prices unchanged for 10+ sessions; failed downloads; stress windows without data; no sleeve benchmark; factor-leg candidates; distributions from option writing or leverage (from `universe.yaml`); a yield above 5% that exceeds the 5-year total return by more than 2 points (possible return of capital); currency method (always stated).
+Short overlap (< 36 months: Low; < 60: Moderate); a profile holding spliced inside the analysis period; daily moves above 25%; gaps longer than 10 calendar days; prices unchanged for 10+ sessions; failed downloads; stress windows without data; no sleeve benchmark; factor-leg candidates; distributions from option writing or leverage (from `universe.yaml`); a yield above 5% that exceeds the 5-year total return by more than 2 points (possible return of capital); average daily value traded below $1M (thin trading); currency method (always stated).

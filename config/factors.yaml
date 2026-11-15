@@ -1,14 +1,22 @@
 # Factor / style model for the Security review (explanatory only).
 #
-# The Ken French data library was unreachable from the network this was
-# built on, and it has no low-volatility factor. The model therefore uses
-# long-short spreads of US-listed ETFs (total return, USD). A spread of two
-# USD assets carries almost no currency effect, so it can be set against
-# CAD returns. Each factor is `long` minus `short`, monthly.
+# source:
+#   auto        Ken French data library when reachable (read directly from
+#               its CSV zips, cached 7 days), ETF proxies otherwise
+#   ken_french  same as auto (falls back to ETF proxies if unreachable)
+#   etf_proxies always the ETF spreads below
+# Ken French has no low-volatility factor, so low_vol always uses its ETF
+# spread. Factors are US long-short returns in USD; a long-short spread
+# carries almost no currency effect, so it can be set against CAD returns.
 #
 # market: the candidate's sleeve benchmark minus the Canadian T-bill (if the
 # sleeve has no benchmark, the profile's own return is used).
-source: etf_proxies
+source: auto
+ken_french:                   # our factor name -> Ken French column
+  size: SMB
+  value: HML
+  momentum: Mom
+  quality: RMW                # robust minus weak profitability
 factors:
   size:     {long: IWM,  short: SPY, label: "Size (small minus large)"}
   value:    {long: IWD,  short: IWF, label: "Value (value minus growth)"}
@@ -25,3 +33,8 @@ megacap_spread: {long: QQQ, short: RSP, label: "Mega-cap growth minus equal weig
 home_equity: XIC.TO           # correlation to Canadian equity
 usd_market: SPY               # market control in the USD/CAD sensitivity regression
 min_months: 36                # fewer overlapping months: no regression, flagged
+
+# Cost and liquidity (yfinance, cached 30 days). Shown, used to break ties
+# between functionally equivalent funds, and flagged; never scored, because
+# Yahoo's adjusted prices are already net of the fund's fees.
+min_avg_dollar_volume: 1000000   # below this average daily trading value: liquidity flag

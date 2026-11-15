@@ -40,7 +40,8 @@ def _bundle(tickers: tuple):
 # ----------------------------------------------------------------------
 # Formatting
 # ----------------------------------------------------------------------
-_PY = {RP.PCT: "{:.2%}", RP.PTS: "{:+.2%}", RP.RATIO: "{:.2f}", RP.INT: "{:.0f}"}
+_PY = {RP.PCT: "{:.2%}", RP.PTS: "{:+.2%}", RP.RATIO: "{:.2f}", RP.INT: "{:.0f}",
+       RP.MONEY: "{:,.0f}"}
 
 
 def _text(df: pd.DataFrame) -> pd.DataFrame:

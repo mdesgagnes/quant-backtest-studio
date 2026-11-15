@@ -35,6 +35,18 @@ class Bundle:
     as_of: Optional[pd.Timestamp] = None
     spliced_monthly: Dict[str, Tuple[pd.Series, pd.Series, str]] = field(default_factory=dict)
     spliced_daily: Dict[str, pd.Series] = field(default_factory=dict)
+    kf: Optional[pd.DataFrame] = None        # Ken French factors (decimals), if reachable
+    kf_label: str = ""
+    cache_dir: Optional[str] = None
+    info_fetcher: Optional[D.InfoFetcher] = None
+    fetch_info: bool = True
+    _info: Dict[str, Dict[str, float]] = field(default_factory=dict)
+
+    def info(self, t: str) -> Dict[str, float]:
+        """Expense ratio, AUM and average trading volume (yfinance, cached)."""
+        if t not in self._info:
+            self._info[t] = D.fund_info(t, self.cache_dir, self.info_fetcher)                 if (self.fetch_info or self.info_fetcher) else {}
+        return self._info[t]
 
     def has(self, t: str) -> bool:
         return t in self.monthly.columns and self.monthly[t].notna().sum() > 0
@@ -87,7 +99,8 @@ def load_bundle(cfg: AllConfig, candidates: Iterable[str] = (), extra: Iterable[
                 downloader: Optional[D.Downloader] = None,
                 cache_dir: Optional[str] = D.CACHE_DIR,
                 as_of: Optional[pd.Timestamp] = None,
-                macro: bool = True) -> Bundle:
+                macro: bool = True,
+                info_fetcher: Optional[D.InfoFetcher] = None) -> Bundle:
     tickers = needed_tickers(cfg, candidates, extra)
     ps = D.fetch_prices(tickers, downloader=downloader, cache_dir=cache_dir)
     notes = list(ps.notes)
@@ -122,5 +135,9 @@ def load_bundle(cfg: AllConfig, candidates: Iterable[str] = (), extra: Iterable[
         cpi, cpi_label = D.cpi_series(src, cache_dir)
         if cpi is None:
             notes.append(cpi_label + ": the inflation regime is unavailable.")
+    kf, kf_label = (None, "offline: ETF factor proxies used")
+    if macro and str(cfg.factors.get("source", "auto")) in ("auto", "ken_french"):
+        kf, kf_label = D.ken_french_factors(cache_dir)
     return Bundle(mdf, daily_px, udf, fxm, rf, rf_label, raw_px, yields, flags,
-                  ps.failed, notes, cpi, cpi_label, as_of)
+                  ps.failed, notes, cpi, cpi_label, as_of, kf=kf, kf_label=kf_label,
+                  cache_dir=cache_dir, info_fetcher=info_fetcher, fetch_info=macro)
