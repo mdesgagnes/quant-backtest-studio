@@ -1,0 +1,56 @@
+# Candidate universe, grouped by sleeve. Each sleeve has a default benchmark
+# (overridable in the app). Tickers are Yahoo Finance symbols.
+#
+# Optional per-ticker notes:
+#   income_flags: why distributions may overstate the return earned
+#     (option_writing, return_of_capital, leverage).
+# A ticker that fails to download is flagged and skipped, never filled.
+
+sleeves:
+  us_equity:
+    label: US equity
+    benchmark: SPY
+    tickers: [SPY, RSP, QQQ, USMV, SPLV, QUAL, MTUM, VTV, VUG, SCHD, IWM]
+  canadian_equity:
+    label: Canadian equity
+    benchmark: XIC.TO
+    tickers: [XIC.TO, XIU.TO, ZLB.TO, XEI.TO, ZWC.TO]
+  intl_em_equity:
+    label: International / EM equity
+    benchmark: XEF.TO
+    tickers: [XEF.TO, EFA, EFAV, EEM, XEC.TO]
+  canadian_bonds:
+    label: Canadian bonds
+    benchmark: XBB.TO
+    tickers: [XBB.TO, ZAG.TO, XSB.TO, XLB.TO, XRB.TO, ZCS.TO]
+  global_bonds:
+    label: Global / US bonds
+    benchmark: AGG
+    tickers: [AGG, SHY, IEF, TLT, TIP, HYG, LQD]
+  real_assets:
+    label: Real assets
+    benchmark: null           # no natural sleeve benchmark: the profile's own return is used
+    tickers: [GLD, DBC, VNQ, XRE.TO]
+  alternatives:
+    label: Alternatives / diversifiers
+    benchmark: null
+    tickers: [DBMF, KMLM, BTAL, TAIL, RSST, RSSB]
+
+ticker_notes:
+  ZWC.TO:
+    income_flags: [option_writing]
+    note: Covered-call Canadian dividend ETF. Part of the distribution is option premium, not earnings.
+  XEI.TO:
+    income_flags: []
+  SCHD:
+    income_flags: []
+  RSST:
+    income_flags: [leverage]
+    note: Return-stacked (100% US equity + 100% managed futures per $1).
+  RSSB:
+    income_flags: [leverage]
+    note: Return-stacked (100% global equity + 100% US Treasuries per $1).
+  HYG:
+    income_flags: []
+  TAIL:
+    note: Treasuries plus long put options. Expected to bleed in calm markets.

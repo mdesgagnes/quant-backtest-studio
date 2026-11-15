@@ -1,0 +1,86 @@
+# Preset investor profiles for the Security review workspace.
+#
+# Building blocks are defined once and shared by every profile. A profile is
+# an equity / bond split; the equity part is spread across the equity blocks
+# by `equity_mix`, the bond part across the bond blocks by `bond_mix`.
+#
+# History extension: a block may name a longer-history `proxy`. Before the
+# block's own first monthly return, the proxy's return (converted to CAD at
+# each day's USD/CAD rate) is used instead. Every spliced month is flagged in
+# the app and the Excel export (Methodology sheet). Set `proxy: null` to turn
+# splicing off for a block.
+#
+# All prices are Yahoo Finance adjusted closes (dividends reinvested).
+
+base_currency: CAD
+
+rebalancing:
+  default: quarterly          # monthly | quarterly | annual | none
+  options: [monthly, quarterly, annual, none]
+
+building_blocks:
+  canadian_equity:
+    label: Canadian equity
+    ticker: XIC.TO
+    asset_class: equity
+    proxy: EWC                # iShares MSCI Canada (USD, since 1996), converted to CAD
+  us_equity:
+    label: US equity (S&P 500, CAD)
+    ticker: VFV.TO            # Vanguard S&P 500 Index ETF, unhedged, quoted in CAD
+    asset_class: equity
+    proxy: SPY                # SPDR S&P 500 (USD, since 1993), converted to CAD
+  intl_equity:
+    label: International developed equity
+    ticker: XEF.TO
+    asset_class: equity
+    proxy: EFA                # iShares MSCI EAFE (USD, since 2001), converted to CAD
+  em_equity:
+    label: Emerging markets equity
+    ticker: XEC.TO
+    asset_class: equity
+    proxy: EEM                # iShares MSCI Emerging Markets (USD, since 2003), converted to CAD
+  cad_bonds:
+    label: Canadian aggregate bonds
+    ticker: XBB.TO
+    asset_class: bond
+    proxy: null               # XBB.TO history starts in 2000; no proxy needed
+
+equity_mix:
+  canadian_equity: 0.30
+  us_equity: 0.45
+  intl_equity: 0.20
+  em_equity: 0.05
+
+bond_mix:
+  cad_bonds: 1.00
+
+# Order here is the order shown in the app (presets first, Custom last).
+profiles:
+  equities_100:
+    label: 100% Equities
+    equity: 1.00
+    bonds: 0.00
+  max_growth:
+    label: Max Growth
+    equity: 0.80
+    bonds: 0.20
+  growth:
+    label: Growth
+    equity: 0.70
+    bonds: 0.30
+  balanced:
+    label: Balanced
+    equity: 0.60
+    bonds: 0.40
+  conservative:
+    label: Conservative
+    equity: 0.40
+    bonds: 0.60
+  income:
+    label: Income
+    equity: 0.30
+    bonds: 0.70
+  bonds_100:
+    label: 100% Bonds
+    equity: 0.00
+    bonds: 1.00
