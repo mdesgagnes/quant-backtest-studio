@@ -8,3 +8,7 @@ __pycache__/
 .DS_Store
 
 .qbt_lab/
+
+# Security review download cache
+data/cache/
+!examples/*.xlsx
