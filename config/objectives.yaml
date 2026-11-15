@@ -1,0 +1,196 @@
+# Objectives for the Security review decision engine.
+#
+# How a verdict is reached (full detail in docs/METHODOLOGY.md):
+#   1. Every metric in `metrics` is computed for each candidate.
+#   2. Each metric becomes a score between -1 and +1:
+#        score = clip(direction * (value - center) / scale, -1, +1)
+#      direction is +1 when higher is better, -1 when lower is better.
+#      `scale` is the change that earns full credit. Most metrics are
+#      "d_" changes (portfolio WITH the candidate minus portfolio WITHOUT it,
+#      at the add weight), centred on 0.
+#   3. The objective's composite score is the weighted average of its metric
+#      scores (missing metrics are left out and the weights renormalised;
+#      the result says so).
+#   4. Verdict: composite >= add -> Add; >= consider -> Consider; else Do not add.
+#      A failed guardrail caps the verdict at Consider and is reported as the
+#      main trade-off. A weak robustness result also caps it at Consider.
+#
+# Change a weight, scale or threshold here and the app picks it up on the
+# next run. Nothing in the code hard-codes these numbers.
+
+defaults:
+  add_weight: 0.10            # Add mode: weight given to the candidate, funded pro rata
+  verdict:
+    add: 0.30
+    consider: 0.05
+  robustness:
+    min_rolling_share: 0.60   # below this share of 36-month windows, Add is capped at Consider
+    rolling_window_months: 36
+    weight_grid: [0.05, 0.10, 0.20]
+  guardrails:                 # applied to every objective unless it sets its own list
+    - {metric: d_cagr, min: -0.010, text: "gives up more than 1.0% a year of portfolio return"}
+
+# Metric catalogue: direction, centre and scale for the score.
+metrics:
+  d_vol:              {better: lower,  center: 0.0,  scale: 0.010, label: "Change in portfolio volatility"}
+  d_sharpe:           {better: higher, center: 0.0,  scale: 0.10,  label: "Change in portfolio Sharpe"}
+  d_sortino:          {better: higher, center: 0.0,  scale: 0.15,  label: "Change in portfolio Sortino"}
+  d_calmar:           {better: higher, center: 0.0,  scale: 0.10,  label: "Change in portfolio Calmar"}
+  d_cagr:             {better: higher, center: 0.0,  scale: 0.005, label: "Change in portfolio CAGR"}
+  d_mdd:              {better: higher, center: 0.0,  scale: 0.020, label: "Change in portfolio max drawdown"}
+  d_ulcer:            {better: lower,  center: 0.0,  scale: 1.0,   label: "Change in portfolio ulcer index"}
+  d_cvar:             {better: higher, center: 0.0,  scale: 0.005, label: "Change in portfolio monthly 95% CVaR"}
+  d_worst_12m:        {better: higher, center: 0.0,  scale: 0.020, label: "Change in portfolio worst 12 months"}
+  d_div_ratio:        {better: higher, center: 0.0,  scale: 0.05,  label: "Change in diversification ratio"}
+  corr_to_portfolio:  {better: lower,  center: 0.5,  scale: 0.5,   label: "Candidate correlation to the portfolio"}
+  worst10_corr:       {better: lower,  center: 0.5,  scale: 0.5,   label: "Correlation in the portfolio's worst 10% months"}
+  d_tail_return:      {better: higher, center: 0.0,  scale: 0.004, label: "Change in portfolio return in its worst 10% months"}
+  cand_tail_return:   {better: higher, center: 0.0,  scale: 0.030, label: "Candidate return in the portfolio's worst 10% months"}
+  d_prob_dd20:        {better: lower,  center: 0.0,  scale: 0.05,  label: "Change in probability of a 20% drawdown"}
+  d_prob_dd30:        {better: lower,  center: 0.0,  scale: 0.05,  label: "Change in probability of a 30% drawdown"}
+  d_max_underwater:   {better: lower,  center: 0.0,  scale: 6.0,   label: "Change in longest time underwater (months)"}
+  d_underwater_share: {better: lower,  center: 0.0,  scale: 0.05,  label: "Change in share of months underwater"}
+  up_capture:         {better: higher, center: 1.0,  scale: 0.20,  label: "Upside capture vs sleeve benchmark"}
+  down_capture:       {better: lower,  center: 1.0,  scale: 0.20,  label: "Downside capture vs sleeve benchmark"}
+  d_up_month_return:  {better: higher, center: 0.0,  scale: 0.002, label: "Change in portfolio return in its up months"}
+  d_regime_high_inflation:     {better: higher, center: 0.0, scale: 0.002, label: "Change in portfolio return, high-inflation months"}
+  cand_regime_high_inflation:  {better: higher, center: 0.0, scale: 0.010, label: "Candidate return, high-inflation months"}
+  d_regime_rising_yields:      {better: higher, center: 0.0, scale: 0.002, label: "Change in portfolio return, rising-yield months"}
+  cand_regime_rising_yields:   {better: higher, center: 0.0, scale: 0.010, label: "Candidate return, rising-yield months"}
+  d_regime_stock_bond_down:    {better: higher, center: 0.0, scale: 0.003, label: "Change in portfolio return, stock-and-bond-down months"}
+  cand_regime_stock_bond_down: {better: higher, center: 0.0, scale: 0.015, label: "Candidate return, stock-and-bond-down months"}
+  d_scen_rate_shock_2022:      {better: higher, center: 0.0, scale: 0.015, label: "Change in portfolio return, 2022 rate shock"}
+  dist_yield:         {better: higher, center: 0.025, scale: 0.025, label: "Trailing 12-month distribution yield"}
+  yield_stability:    {better: lower,  center: 0.25, scale: 0.25,  label: "Variability of annual distributions (CV)"}
+  d_portfolio_yield:  {better: higher, center: 0.0,  scale: 0.003, label: "Change in portfolio distribution yield"}
+  corr_to_home_equity: {better: lower, center: 0.5,  scale: 0.5,   label: "Correlation to Canadian equity (XIC.TO)"}
+  usd_beta:           {better: higher, center: 0.0,  scale: 0.5,   label: "Sensitivity to USD/CAD (currency exposure)"}
+  megacap_tilt:       {better: lower,  center: 0.0,  scale: 0.3,   label: "Active tilt to mega-cap growth (QQQ minus RSP)"}
+  d_megacap_beta:     {better: lower,  center: 0.0,  scale: 0.02,  label: "Change in portfolio mega-cap tilt"}
+  size_loading:       {better: higher, center: 0.0,  scale: 0.3,   label: "Small-cap tilt (size loading)"}
+  d_depletion_prob:   {better: lower,  center: 0.0,  scale: 0.05,  label: "Change in probability of running out of money"}
+  d_p10_wealth:       {better: higher, center: 0.0,  scale: 0.25,  label: "Change in 10th-percentile ending wealth (x initial)"}
+  d_median_wealth:    {better: higher, center: 0.0,  scale: 0.50,  label: "Change in median ending wealth (x initial)"}
+
+objectives:
+  lower_volatility:
+    label: Lower volatility
+    description: Does adding the security make the portfolio's month-to-month swings smaller, without giving up too much return?
+    weights: {d_vol: 0.5, down_capture: 0.2, d_cvar: 0.3}
+    rolling_metric: d_vol
+    candidate_groups: [us_equity, canadian_equity, global_bonds, alternatives]
+
+  reduce_drawdown:
+    label: Reduce drawdown
+    description: Does it make the portfolio's worst peak-to-trough losses shallower?
+    weights: {d_mdd: 0.5, d_ulcer: 0.25, d_worst_12m: 0.25}
+    rolling_metric: d_mdd
+    candidate_groups: [us_equity, global_bonds, alternatives]
+
+  reduce_risk_of_ruin:
+    label: Reduce risk of ruin
+    description: Does it lower the simulated probability of a 20% or 30% drawdown over the next 10 years?
+    weights: {d_prob_dd20: 0.5, d_prob_dd30: 0.5}
+    rolling_metric: d_mdd
+    candidate_groups: [global_bonds, canadian_bonds, alternatives]
+
+  tail_protection:
+    label: Tail protection
+    description: How does it behave in the existing portfolio's worst months? A good tail hedge rises, or falls less, exactly when the portfolio is hurt.
+    weights: {d_tail_return: 0.4, cand_tail_return: 0.3, worst10_corr: 0.3}
+    rolling_metric: d_tail_return
+    candidate_groups: [global_bonds, alternatives, real_assets]
+
+  upside_participation:
+    label: Upside participation
+    description: Does it help the portfolio keep up in rising markets?
+    weights: {up_capture: 0.4, d_up_month_return: 0.4, d_cagr: 0.2}
+    rolling_metric: d_cagr
+    guardrails:
+      - {metric: d_mdd, min: -0.03, text: "deepens the portfolio's max drawdown by more than 3 points"}
+    candidate_groups: [us_equity, canadian_equity, intl_em_equity]
+
+  diversify_return_sources:
+    label: Diversify return sources
+    description: Is it a genuinely different return stream, including when the portfolio is under stress?
+    weights: {corr_to_portfolio: 0.35, worst10_corr: 0.35, d_div_ratio: 0.30}
+    rolling_metric: corr_to_portfolio
+    candidate_groups: [alternatives, real_assets, intl_em_equity, global_bonds]
+
+  improve_risk_adjusted_return:
+    label: Improve risk-adjusted return
+    description: Does it raise return per unit of risk (Sharpe, Sortino, Calmar)?
+    weights: {d_sharpe: 0.4, d_sortino: 0.3, d_calmar: 0.3}
+    rolling_metric: d_sharpe
+    candidate_groups: [us_equity, canadian_equity, alternatives, global_bonds]
+
+  faster_recovery:
+    label: Faster recovery
+    description: Does it shorten the time the portfolio spends below its previous peak?
+    weights: {d_max_underwater: 0.4, d_underwater_share: 0.3, d_ulcer: 0.3}
+    rolling_metric: d_ulcer
+    candidate_groups: [us_equity, global_bonds, alternatives]
+
+  inflation_protection:
+    label: Inflation protection
+    description: How does it behave in high-inflation months (CPI year-on-year above the threshold in scenarios.yaml)?
+    weights: {d_regime_high_inflation: 0.5, cand_regime_high_inflation: 0.5}
+    rolling_metric: d_regime_high_inflation   # computed on each 36-month window
+    candidate_groups: [real_assets, global_bonds, alternatives, canadian_bonds]
+
+  rising_rate_protection:
+    label: Rising-rate protection
+    description: How does it behave in months when the 10-year yield rises?
+    weights: {d_regime_rising_yields: 0.5, cand_regime_rising_yields: 0.5}
+    rolling_metric: d_regime_rising_yields   # computed on each 36-month window
+    candidate_groups: [canadian_bonds, global_bonds, alternatives]
+
+  stock_bond_correlation_hedge:
+    label: Stock-bond correlation hedge
+    description: Does it help when equities and bonds fall together (as in 2022)?
+    weights: {d_regime_stock_bond_down: 0.35, cand_regime_stock_bond_down: 0.35, d_scen_rate_shock_2022: 0.30}
+    rolling_metric: d_regime_stock_bond_down   # computed on each 36-month window
+    candidate_groups: [alternatives, global_bonds, canadian_bonds, real_assets]
+
+  income_generation:
+    label: Income generation
+    description: Does it raise the portfolio's distribution yield, with stable payouts? Distributions funded by option writing, leverage or return of capital are flagged.
+    weights: {dist_yield: 0.4, yield_stability: 0.2, d_portfolio_yield: 0.4}
+    rolling_metric: d_cagr
+    guardrails:
+      - {metric: d_cagr, min: -0.005, text: "the extra income comes with lower total return (more than 0.5% a year)"}
+    candidate_groups: [canadian_equity, us_equity, canadian_bonds, global_bonds]
+
+  currency_and_home_bias_diversification:
+    label: Currency and home-bias diversification
+    description: Does it reduce dependence on Canadian equities and the Canadian dollar?
+    weights: {corr_to_home_equity: 0.4, usd_beta: 0.3, corr_to_portfolio: 0.3}
+    rolling_metric: corr_to_portfolio
+    candidate_groups: [us_equity, intl_em_equity, global_bonds, real_assets]
+
+  reduce_concentration:
+    label: Reduce concentration
+    description: Does it lower the portfolio's dependence on US mega-cap growth stocks?
+    weights: {megacap_tilt: 0.4, d_megacap_beta: 0.4, size_loading: 0.2}
+    rolling_metric: d_megacap_beta   # computed on each 36-month window
+    candidate_groups: [us_equity, intl_em_equity]
+
+  sequence_risk_decumulation:
+    label: Sequence risk in decumulation
+    description: For a client drawing an income, does it lower the probability of running out of money and protect bad-case ending wealth?
+    weights: {d_depletion_prob: 0.5, d_p10_wealth: 0.3, d_median_wealth: 0.2}
+    rolling_metric: d_mdd
+    candidate_groups: [canadian_bonds, canadian_equity, global_bonds]
+
+# Simulation settings shared by the risk-of-ruin and decumulation metrics.
+simulation:
+  seed: 42
+  n_paths: 2000
+  block_months: 12            # block bootstrap: 12-month blocks keep momentum and volatility clustering
+  ruin:
+    horizon_years: 10
+    drawdown_thresholds: [0.20, 0.30]
+  decumulation:
+    horizon_years: 30
+    withdrawal_rate: 0.04     # of initial wealth per year, paid monthly
+    inflation_indexation: 0.02  # withdrawals grow at this rate per year

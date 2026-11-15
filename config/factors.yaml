@@ -1,0 +1,27 @@
+# Factor / style model for the Security review (explanatory only).
+#
+# The Ken French data library was unreachable from the network this was
+# built on, and it has no low-volatility factor. The model therefore uses
+# long-short spreads of US-listed ETFs (total return, USD). A spread of two
+# USD assets carries almost no currency effect, so it can be set against
+# CAD returns. Each factor is `long` minus `short`, monthly.
+#
+# market: the candidate's sleeve benchmark minus the Canadian T-bill (if the
+# sleeve has no benchmark, the profile's own return is used).
+source: etf_proxies
+factors:
+  size:     {long: IWM,  short: SPY, label: "Size (small minus large)"}
+  value:    {long: IWD,  short: IWF, label: "Value (value minus growth)"}
+  momentum: {long: MTUM, short: SPY, label: "Momentum"}
+  quality:  {long: QUAL, short: SPY, label: "Quality"}
+  low_vol:  {long: USMV, short: SPY, label: "Low volatility"}
+
+# Mega-cap concentration: the candidate's active return (vs its sleeve
+# benchmark) regressed on this spread. Positive = more mega-cap growth than
+# the benchmark; negative = less.
+megacap_spread: {long: QQQ, short: RSP, label: "Mega-cap growth minus equal weight"}
+
+# Reference series used by several metrics.
+home_equity: XIC.TO           # correlation to Canadian equity
+usd_market: SPY               # market control in the USD/CAD sensitivity regression
+min_months: 36                # fewer overlapping months: no regression, flagged
