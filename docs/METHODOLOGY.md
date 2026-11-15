@@ -50,6 +50,8 @@ Equity portion: Canadian 30%, US 45%, international 20%, EM 5%. Bond portion: XB
 
 ## 4. Metrics
 
+**Costs and income of the portfolio.** Weighted MER = sum of target weight x each fund's expense ratio (yfinance `fund_operations` "Annual Report Expense Ratio", else `netExpenseRatio`; cached 30 days). Weighted yield = sum of target weight x each fund's trailing 12-month distributions over its last price. Shown without and with the security; n/a when any holding lacks the figure. The MER is already inside the adjusted prices, so returns are net of it; the figure is shown, not deducted again.
+
 **Standard.** Every standalone figure is taken from `qbt.metrics.summary`, the function behind the Backtest's statistics table, so the two modules report identical numbers for the same series: population moments, geometric annualisation, nothing annualised under 12 months, Sharpe / Sortino / Calmar net of the same CAD T-bill series (Calmar as in Bacon), VaR and CVaR as positive losses. Any return difference is a geometric excess, (1 + r) / (1 + b) - 1. Beta (and up / down beta) is withheld below R² 0.70.
 
 **Benchmark.** Unless another is chosen (Advanced), the benchmark for every relative statistic is the portfolio the security is added to ("without"). The sleeve benchmark of `config/universe.yaml`, or any ticker, can be chosen instead.

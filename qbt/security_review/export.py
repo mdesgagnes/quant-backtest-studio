@@ -105,6 +105,13 @@ def _regimes_for_summary(rv: Review, c: str, cfg: AllConfig, label: str, blabel:
     return pd.DataFrame(rows)
 
 
+def _pair(fd, key: str) -> str:
+    a, b = (fd or {}).get(f"{key} without"), (fd or {}).get(f"{key} with")
+    if a is None or b is None or a != a or b != b:
+        return "n/a"
+    return f"{a:.2%} / {b:.2%}"
+
+
 def full_report(rvs: List[Review], cfg: AllConfig, focus: Optional[Tuple[Review, str]] = None,
                 sweep: Optional[pd.DataFrame] = None) -> bytes:
     """The Backtest-style workbook for one security added to one portfolio
@@ -163,6 +170,8 @@ def full_report(rvs: List[Review], cfg: AllConfig, focus: Optional[Tuple[Review,
                                     "excess; nothing annualised under 12 months; alpha and beta "
                                     "withheld below R² 0.70",
             "Objective": rv.objective_label,
+            "Weighted MER (without / with)": _pair(r.fund_data, "MER"),
+            "Distribution yield (without / with)": _pair(r.fund_data, "Yield"),
         },
         "footer": f"{label} · {now:%Y-%m-%d}",
     }

@@ -18,7 +18,7 @@ conda activate quant
 python -m pytest -q
 ```
 
-Expected: **344 passed** (285 existing + 59 new). Takes about a minute.
+Expected: **345 passed** (285 existing + 60 new). Takes about a minute.
 
 ```bash
 streamlit run app.py
@@ -100,6 +100,7 @@ Open the **Security review** workspace (first in the sidebar). Defaults: USMV, a
 | 17b | Details > **Fund Review** with USMV added to XIC.TO | Columns: USMV, then "XIC.TO, without (period)"; no SPY. Advanced > Benchmark: **Each security's sleeve benchmark** brings back "SPY (benchmark)". |
 | 17c | Look at "What adding it changes" | Teal for changes that help (lower volatility, higher return), rust for those that hurt; the excess return is geometric. |
 | 17d | Investor profile Balanced, security DBMF, **Funded from: Bonds** | The sidebar shows "XBB.TO 40% → 30%"; the sentence reads "taken from bonds (XBB.TO)". **Chosen holdings** with XBB.TO at 15%: "XBB.TO 40% → 25%". Asking for more than the holdings hold shows a warning. |
+| 17e | Same run (Balanced, DBMF from bonds) | "Costs and income of the portfolio": MER about 0.11% without and 0.19% with (DBMF's 0.85% on 10%), yield about 2.3% to 2.5%; the sentence ends with the same figures. With an uploaded portfolio both read n/a. |
 | 17 | Advanced: Uploaded returns are in **USD** | The uploaded stream is converted to CAD month by month (USD/CAD). |
 | 18 | Open **Factor Exposures** | Loadings and t-stats for market, size, value, momentum, quality, low vol; R2; mega-cap tilt. The note under the table names the factor source: Ken French where reachable, otherwise the ETF spreads (with the caveat on factor legs). |
 | 19 | Open **Details > Charts** | Stress-window bars and (with an objective) the rolling metric; the monthly series table under them. Red / sand palette. |

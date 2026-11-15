@@ -89,7 +89,7 @@ def _text(df: pd.DataFrame) -> pd.DataFrame:
 _GOOD, _BAD, _DIM = BRAND["gain"], BRAND["loss"], BRAND["faint"]
 # A rise in these is bad for the investor; everything else, a rise is good.
 _LOWER_IS_BETTER = ("volatility", "ulcer", "cvar", "var 95", "tracking error", "underwater",
-                    "downside capture", "probability", "depletion")
+                    "downside capture", "probability", "depletion", "mer")
 
 
 def _lower_better(name: str) -> bool:

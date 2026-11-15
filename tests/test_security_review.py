@@ -834,3 +834,25 @@ def test_fund_from_groups_and_errors(world):
     sw = E.sweep(cfg, b, "NEGC", "lower_volatility", regimes=reg, robustness=False, fund_from=["bonds"])
     assert sw.set_index("Key").loc["equities_100", "Verdict"] == "n/a"
     assert sw.set_index("Key").loc["balanced", "Verdict"] in ("Add", "Consider", "Do not add")
+
+
+def test_weighted_mer_and_yield(world, monkeypatch):
+    cfg, b, reg = world
+    monkeypatch.setitem(b.yields, "SPY", dict(b.yields["SPY"]))
+    monkeypatch.setitem(b.yields, "SPYCLONE", dict(b.yields["SPYCLONE"]))
+    rv = E.run(E.Request("balanced", None, ["SPYCLONE"], robustness=False), cfg, b, reg)
+    fd = rv.results["SPYCLONE"].fund_data
+    # the fake world has expense ratios only for SPY and SPYCLONE: n/a, never a partial average
+    assert np.isnan(fd["MER without"]) and "XBB.TO" in fd["MER missing"]
+    w = {"SPY": 0.75, "SPYCLONE": 0.25}
+    got = E.weighted_fund_data(b, w)
+    assert got["MER"] == pytest.approx(0.75 * 0.000945 + 0.25 * 0.0003) and got["MER missing"] == []
+    b.yields["SPY"]["dist_yield"], b.yields["SPYCLONE"]["dist_yield"] = 0.012, 0.02
+    assert E.weighted_fund_data(b, w)["Yield"] == pytest.approx(0.75 * 0.012 + 0.25 * 0.02)
+    base = CF.custom_profile("SPY", {"SPY": 1})
+    rv = E.run(E.Request(base, None, ["SPYCLONE"], robustness=False), cfg, b, reg)
+    fd = rv.results["SPYCLONE"].fund_data
+    assert fd["MER with"] == pytest.approx(0.9 * 0.000945 + 0.1 * 0.0003)
+    assert "Weighted MER 0.09% → 0.09%" in RP.headline(rv, "SPYCLONE")
+    t = RP.costs_income_table([rv])
+    assert t["Change in MER"].iloc[0] == pytest.approx(0.1 * (0.0003 - 0.000945))

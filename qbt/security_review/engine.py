@@ -89,6 +89,10 @@ class CandidateResult:
     series: pd.DataFrame                     # candidate, benchmark, base, new (monthly)
     costs: Dict[str, float] = field(default_factory=dict)   # expense ratio, AUM, volume
     vs_base: Dict[str, float] = field(default_factory=dict)  # beta, capture... against the base
+    # Weighted MER and distribution yield of the portfolio, without and with
+    # the security: {"MER without", "MER with", "Yield without", "Yield with",
+    # "MER missing", "Yield missing"}.
+    fund_data: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -433,6 +437,13 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
                        .dropna() > 0).mean()) if len(reg) else np.nan,
         }
         flags = _flags(cfg, b, c, P, holdings, bench_of[c], st, bmode.lower() == "sleeve")
+        fw, fn = weighted_fund_data(b, prof.weights), weighted_fund_data(b, new_w)
+        fdata = {"MER without": fw["MER"], "MER with": fn["MER"],
+                 "Yield without": fw["Yield"], "Yield with": fn["Yield"],
+                 "MER missing": fn["MER missing"], "Yield missing": fn["Yield missing"]}
+        if fn["MER missing"] and len(fn["MER missing"]) < len(new_w):
+            flags.append("No expense ratio for " + ", ".join(fn["MER missing"])
+                         + ": the portfolio's weighted MER is not shown.")
         rat = V.rationale(obj, dec, metrics, oc.metrics, flags, c)
         series = pd.DataFrame({c: cand, "Benchmark": bench, "Portfolio without": base,
                                "Portfolio with": new})
@@ -441,7 +452,7 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
             metrics, dec, rat, objs, S.standalone(cand, b.rf), imp["relative"], fe, reg, st,
             imp["sim"], rolling, pd.DataFrame(wgrid_rows), consistency, flags,
             imp["base_stats"], imp["new_stats"], series, b.info(c),
-            S.relative(cand, base, b.rf))
+            S.relative(cand, base, b.rf), fdata)
 
     ranking, components = _ranking(results, okey)
     corr, excorr, crisis, equiv = _matrices(results, b, bench_of, base_by_c)
@@ -574,6 +585,21 @@ def _cost_rows(inf: Dict[str, float]) -> Dict[str, float]:
     return {"Expense ratio": inf.get("expense_ratio", np.nan),
             "Assets (AUM)": inf.get("aum", np.nan),
             "Average daily value traded": inf.get("avg_dollar_volume", np.nan)}
+
+
+def weighted_fund_data(b: Bundle, weights: Dict[str, float]) -> Dict[str, Any]:
+    """MER (yfinance expense ratio) and trailing 12-month distribution yield
+    of a portfolio, weighted by target weights. A figure is n/a when any
+    holding lacks it (the holdings missing it are listed), so a partial
+    average is never shown as the portfolio's."""
+    out: Dict[str, Any] = {}
+    for key, get in (("MER", lambda t: b.info(t).get("expense_ratio")),
+                     ("Yield", lambda t: b.yields.get(t, {}).get("dist_yield"))):
+        vals = {t: get(t) for t in weights}
+        missing = [t for t, v in vals.items() if v is None or v != v]
+        out[key] = np.nan if missing else float(sum(weights[t] * vals[t] for t in weights))
+        out[f"{key} missing"] = missing
+    return out
 
 
 def _fund_review(results, b: Bundle, base_label: str = "Portfolio") -> pd.DataFrame:

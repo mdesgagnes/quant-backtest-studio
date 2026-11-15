@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased: `feature/symbol-impact-view` (2026-11-15), fourth round
+## Unreleased: `feature/symbol-impact-view` (2026-11-15), fifth round
+
+### Added
+- **Weighted MER and distribution yield of the portfolio, without and with the security.** A "Costs and income of the portfolio" table under the summary, two rows in "Before and after", a clause in each sentence ("Weighted MER 0.11% -> 0.19%; distribution yield 2.32% -> 2.46%") and two lines in the Excel executive summary's assumptions. Weighted by target weights; MER is the expense ratio yfinance reports (cached 30 days), yield the trailing 12-month distributions over the last price. n/a, with a caveat naming the holdings, when any holding has no figure (uploaded streams, stocks, funds Yahoo does not cover): a partial average is never shown. 1 test.
+
 
 ### Added
 - **Funded from.** In Add mode the weight can come from every holding (pro rata, as before), from the **bonds**, from the **equities**, or from **chosen holdings** only, each reduced pro rata within that group while the rest of the portfolio is untouched. The sidebar shows the change (XBB.TO 40% -> 30%). Taking a holding's whole weight is the same as Replace. Works for profiles, blends and several portfolios at once (bonds / equities are resolved per portfolio), in the profile sweep (n/a where the group is not held) and on the command line (`fund_from: [bonds]`). Demo 8: DBMF and KMLM taken from bonds in Balanced. 2 tests.

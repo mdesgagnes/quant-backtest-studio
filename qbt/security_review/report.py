@@ -457,11 +457,20 @@ def headline(rv: Review, c: str) -> str:
              f"max drawdown {_pts(m['d_mdd'], 'shallower', 'deeper', 1)}",
              f"Sharpe {m['d_sharpe']:+.2f}" if m['d_sharpe'] == m['d_sharpe'] else "Sharpe n/a"]
     hit, n = _stress_hits(r)
+    fd = r.fund_data or {}
+    costs = []
+    if fd.get("MER without") == fd.get("MER without") and fd.get("MER with") == fd.get("MER with") \
+            and fd.get("MER with") is not None:
+        costs.append(f"weighted MER {fd['MER without']:.2%} \u2192 {fd['MER with']:.2%}")
+    if fd.get("Yield with") is not None and fd.get("Yield with") == fd.get("Yield with") \
+            and fd.get("Yield without") == fd.get("Yield without"):
+        costs.append(f"distribution yield {fd['Yield without']:.2%} \u2192 {fd['Yield with']:.2%}")
     tail = f"Correlation to the portfolio {m['corr_to_portfolio']:.2f}"
     if n:
         tail += f"; it helped in {hit} of {n} stress windows"
     text = (f"{verb} ({r.start:%Y-%m} to {r.end:%Y-%m}, {r.months} months): "
-            + ", ".join(parts) + ". " + tail + ".")
+            + ", ".join(parts) + ". " + tail + "."
+            + (" " + "; ".join(costs)[0].upper() + "; ".join(costs)[1:] + "." if costs else ""))
     if rv.objective_chosen:
         d = r.decision
         text += (f' For "{rv.objective_label}": {d["verdict"]} (confidence '
@@ -504,21 +513,49 @@ def summary_table(rvs: List[Review]) -> pd.DataFrame:
 
 
 _BEFORE_AFTER = ["CAGR", "Volatility", "Sharpe", "Max drawdown", "Worst 12 months",
-                 "Longest underwater (months)"]
+                 "Longest underwater (months)", "Weighted MER", "Distribution yield (trailing 12m)"]
+_FUND_ROWS = {"Weighted MER": "MER", "Distribution yield (trailing 12m)": "Yield"}
 
 
 def before_after(rv: Review, c: str) -> pd.DataFrame:
     r = rv.results[c]
     rows = []
+    fd = r.fund_data or {}
     for name in _BEFORE_AFTER:
-        a, b = r.base_stats.get(name, np.nan), r.new_stats.get(name, np.nan)
+        if name in _FUND_ROWS:
+            k = _FUND_ROWS[name]
+            a, b = fd.get(f"{k} without", np.nan), fd.get(f"{k} with", np.nan)
+        else:
+            a, b = r.base_stats.get(name, np.nan), r.new_stats.get(name, np.nan)
         rows.append({"Measure": "Return a year (CAGR)" if name == "CAGR" else name,
                      "Portfolio": a, f"With {c}": b, "Change": b - a if a == a and b == b else np.nan})
     df = pd.DataFrame(rows)
-    df.attrs["row_fmt"] = [PCT if m in _PCT_ROWS else INT if m in _INT_ROWS else RATIO
-                           for m in _BEFORE_AFTER]
+    df.attrs["row_fmt"] = [PCT if m in _PCT_ROWS or m in _FUND_ROWS else INT if m in _INT_ROWS
+                           else RATIO for m in _BEFORE_AFTER]
     df.attrs["fmt_cols"] = [2, 3, 4]
     return df
+
+
+def costs_income_table(rvs: List[Review]) -> Optional[pd.DataFrame]:
+    rows = []
+    for rv in rvs:
+        for c, r in rv.results.items():
+            fd = r.fund_data or {}
+            mw, mn = fd.get("MER without", np.nan), fd.get("MER with", np.nan)
+            yw, yn = fd.get("Yield without", np.nan), fd.get("Yield with", np.nan)
+            rows.append({"Portfolio": base_label(rv), "Security": c,
+                         "MER, without": mw, "MER, with it": mn,
+                         "Change in MER": mn - mw if mn == mn and mw == mw else np.nan,
+                         "Yield, without": yw, "Yield, with it": yn,
+                         "Change in yield": yn - yw if yn == yn and yw == yw else np.nan})
+    df = pd.DataFrame(rows)
+    num = df.drop(columns=["Portfolio", "Security"]) if len(df) else df
+    if df.empty or num.isna().all().all():
+        return None
+    if df["Portfolio"].nunique() == 1:
+        df = df.drop(columns=["Portfolio"])
+    return _cols(df, pct=["MER, without", "MER, with it", "Yield, without", "Yield, with it"],
+                 pts=["Change in MER", "Change in yield"])
 
 
 def summary_sections(rvs: List[Review]) -> List[Section]:
@@ -531,6 +568,13 @@ def summary_sections(rvs: List[Review]) -> List[Section]:
          "Excess return: geometric, (1 + with) / (1 + without) - 1 a year. Other changes: with minus "
          "without, in percentage points (Sharpe and correlation in units). Downside capture below 1: "
          "the security fell less than the portfolio in the portfolio's down months.")]
+    ci = costs_income_table(rvs)
+    if ci is not None:
+        out.append(("Summary", "Costs and income of the portfolio", ci,
+                    "Weighted by target weights. MER: the expense ratio yfinance reports for each fund "
+                    "(already inside the adjusted prices, so returns are net of it). Yield: trailing "
+                    "12-month distributions over the last price. n/a when a holding has no figure "
+                    "(an uploaded return stream, a stock or a fund Yahoo does not cover)."))
     if len(pairs) == 1:
         rv, c = pairs[0]
         out.append(("Summary", "Before and after", before_after(rv, c), ""))
