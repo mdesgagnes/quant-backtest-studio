@@ -76,7 +76,8 @@ def _down(level: str) -> str:
 
 
 def confidence(months: int, rolling_share: float, min_share: float,
-               weight_verdicts: Dict[float, str], missing_share: float) -> Dict[str, Any]:
+               weight_verdicts: Dict[float, str], missing_share: float,
+               stress_coverage: float = 1.0, min_coverage: float = 0.5) -> Dict[str, Any]:
     level, why = "High", []
     if months < 36:
         level, why = "Low", [f"only {months} months of overlapping history (< 36)"]
@@ -85,6 +86,9 @@ def confidence(months: int, rolling_share: float, min_share: float,
     if rolling_share == rolling_share and rolling_share < min_share:
         level = _down(level)
         why.append(f"improves the objective in only {rolling_share:.0%} of rolling 36-month windows")
+    if stress_coverage == stress_coverage and stress_coverage < min_coverage:
+        level = _down(level)
+        why.append(f"history covers only {stress_coverage:.0%} of the stress windows")
     vs = set(weight_verdicts.values())
     if "Add" in vs and "Do not add" in vs:
         level = _down(level)
@@ -100,7 +104,8 @@ def confidence(months: int, rolling_share: float, min_share: float,
 
 def decide(obj: Objective, metrics: Dict[str, float], cat: Dict[str, MetricSpec],
            months: int, rolling_share: float, min_share: float,
-           weight_verdicts: Optional[Dict[float, str]] = None) -> Dict[str, Any]:
+           weight_verdicts: Optional[Dict[float, str]] = None,
+           stress_coverage: float = 1.0, min_coverage: float = 0.5) -> Dict[str, Any]:
     sc = score(obj, metrics, cat)
     v0 = raw_verdict(obj, sc["composite"])
     v = v0
@@ -113,7 +118,8 @@ def decide(obj: Objective, metrics: Dict[str, float], cat: Dict[str, MetricSpec]
         v = "Consider"
         caps.append(f"capped at Consider: improves the objective in only {rolling_share:.0%} "
                     f"of rolling windows (minimum {min_share:.0%})")
-    conf = confidence(months, rolling_share, min_share, weight_verdicts or {}, sc["missing_share"])
+    conf = confidence(months, rolling_share, min_share, weight_verdicts or {}, sc["missing_share"],
+                      stress_coverage, min_coverage)
     return {"verdict": v, "raw_verdict": v0, "composite": sc["composite"],
             "unclipped": sc["unclipped"],
             "components": sc["components"], "missing_share": sc["missing_share"],

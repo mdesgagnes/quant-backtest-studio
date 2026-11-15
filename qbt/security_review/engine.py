@@ -177,12 +177,14 @@ def factor_frame(cfg: AllConfig, b: Bundle) -> pd.DataFrame:
 
 
 def _decide_all(cfg: AllConfig, metrics: Dict[str, float], months: int,
-                rolling: Dict[str, Dict[str, Any]], wverdicts: Dict[str, Dict[float, str]]):
+                rolling: Dict[str, Dict[str, Any]], wverdicts: Dict[str, Dict[float, str]],
+                coverage: float = 1.0):
     rows, decs = [], {}
     oc = cfg.objectives
     for k, o in oc.objectives.items():
         rs = rolling.get(o.rolling_metric or "", {}).get("share", np.nan)
-        d = V.decide(o, metrics, oc.metrics, months, rs, oc.min_rolling_share, wverdicts.get(k))
+        d = V.decide(o, metrics, oc.metrics, months, rs, oc.min_rolling_share, wverdicts.get(k),
+                     coverage, oc.min_stress_coverage)
         decs[k] = d
         rows.append({"Objective": o.label, "Key": k, "Verdict": d["verdict"],
                      "Confidence": d["confidence"], "Score": d["composite"],
@@ -315,7 +317,8 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
                                 "Change in max drawdown": mw["d_mdd"], "Change in Sharpe": mw["d_sharpe"]})
                     wgrid_rows.append(row)
 
-        objs, decs = _decide_all(cfg, metrics, len(P), rolling, wverdicts)
+        covered = float((st["Status"] == "ok").mean()) if len(st) and "Status" in st else np.nan
+        objs, decs = _decide_all(cfg, metrics, len(P), rolling, wverdicts, covered)
         dec = decs[req.objective]
         scen_ok = st[st["Status"] == "ok"] if "Status" in st else st.iloc[0:0]
         consistency = {

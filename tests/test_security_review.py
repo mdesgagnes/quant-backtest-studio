@@ -389,6 +389,7 @@ def test_confidence_rules():
     assert V.confidence(120, 0.3, 0.6, {}, 0)["level"] == "Moderate"
     assert V.confidence(120, 0.9, 0.6, {0.05: "Add", 0.2: "Do not add"}, 0)["level"] == "Moderate"
     assert V.confidence(120, 0.9, 0.6, {}, 0.6)["level"] == "Low"
+    assert V.confidence(120, 0.9, 0.6, {}, 0, stress_coverage=4 / 9)["level"] == "Moderate"
 
 
 # ----------------------------------------------------------------------

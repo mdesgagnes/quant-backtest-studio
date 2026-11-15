@@ -116,8 +116,10 @@ def test_assistant_unavailable_without_key(monkeypatch):
     assert not ok and why
 
 
-def test_streamlit_research_workspace_flow(lab_dir):
+def test_streamlit_research_workspace_flow(lab_dir, monkeypatch):
     from streamlit.testing.v1 import AppTest
+    # Research is hidden by config/features.yaml; turn it on for this test.
+    monkeypatch.setenv("QBT_ENABLE_WORKSPACES", "research,markets")
     from qbt.lab import ledger as L
     at = AppTest.from_file(os.path.join(ROOT, "app.py"), default_timeout=240)
     at.session_state["workspace"] = "Research"
@@ -136,10 +138,23 @@ def test_streamlit_research_workspace_flow(lab_dir):
     assert L.list_strategies() and L.trial_count(hid) > 40
 
 
-def test_existing_workspaces_still_render():
+def test_existing_workspaces_still_render(monkeypatch):
     from streamlit.testing.v1 import AppTest
+    # Markets is hidden by config/features.yaml; turn it on so it is still exercised.
+    monkeypatch.setenv("QBT_ENABLE_WORKSPACES", "research,markets")
     for ws in ("Backtest", "Markets"):
         at = AppTest.from_file(os.path.join(ROOT, "app.py"), default_timeout=120)
         at.session_state["workspace"] = ws
         at.run()
         assert not at.exception, (ws, at.exception)
+        assert at.session_state["workspace"] == ws
+
+
+def test_hidden_workspaces_are_not_offered():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(os.path.join(ROOT, "app.py"), default_timeout=120)
+    at.run()
+    assert not at.exception
+    opts = at.sidebar.radio(key="workspace").options
+    assert opts[:2] == ["Security review", "Backtest"]
+    assert "Markets" not in opts and "Research" not in opts

@@ -27,6 +27,7 @@ defaults:
     min_rolling_share: 0.60   # below this share of 36-month windows, Add is capped at Consider
     rolling_window_months: 36
     weight_grid: [0.05, 0.10, 0.20]
+    min_stress_coverage: 0.5  # history covering fewer of the stress windows lowers confidence one level
   guardrails:                 # applied to every objective unless it sets its own list
     - {metric: d_cagr, min: -0.010, text: "gives up more than 1.0% a year of portfolio return"}
 

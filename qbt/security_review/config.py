@@ -256,6 +256,7 @@ class ObjectivesConfig:
     rolling_window: int
     weight_grid: List[float]
     simulation: Dict[str, Any]
+    min_stress_coverage: float = 0.5
 
 
 def load_objectives(folder: Optional[str] = None) -> ObjectivesConfig:
@@ -291,7 +292,8 @@ def load_objectives(folder: Optional[str] = None) -> ObjectivesConfig:
                             float(rob.get("min_rolling_share", 0.6)),
                             int(rob.get("rolling_window_months", 36)),
                             [float(x) for x in rob.get("weight_grid", [0.05, 0.10, 0.20])],
-                            d.get("simulation") or {})
+                            d.get("simulation") or {},
+                            float(rob.get("min_stress_coverage", 0.5)))
 
 
 # ----------------------------------------------------------------------
@@ -320,12 +322,19 @@ def load_factors(folder: Optional[str] = None) -> Dict[str, Any]:
 
 
 def load_features(folder: Optional[str] = None) -> Dict[str, bool]:
+    """Workspace flags from config/features.yaml. The environment variable
+    QBT_ENABLE_WORKSPACES (comma-separated keys, e.g. "markets,research")
+    turns hidden workspaces back on without editing the file (used by tests)."""
     try:
         d = _read("features.yaml", folder)
     except ConfigError:
-        return {}
-    return {k: bool((v or {}).get("enabled", True))
-            for k, v in (d.get("workspaces") or {}).items()}
+        d = {}
+    out = {k: bool((v or {}).get("enabled", True))
+           for k, v in (d.get("workspaces") or {}).items()}
+    for k in os.environ.get("QBT_ENABLE_WORKSPACES", "").split(","):
+        if k.strip():
+            out[k.strip().lower()] = True
+    return out
 
 
 @dataclass
