@@ -179,7 +179,7 @@ objectives:
     label: Sequence risk in decumulation
     description: For a client drawing an income, does it lower the probability of running out of money and protect bad-case ending wealth?
     weights: {d_depletion_prob: 0.5, d_p10_wealth: 0.3, d_median_wealth: 0.2}
-    rolling_metric: d_mdd
+    rolling_metric: d_sortino   # return per unit of downside risk, the window proxy for sequence risk
     candidate_groups: [canadian_bonds, canadian_equity, global_bonds]
 
 # Simulation settings shared by the risk-of-ruin and decumulation metrics.

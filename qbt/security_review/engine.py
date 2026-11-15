@@ -362,6 +362,11 @@ def _flags(cfg: AllConfig, b: Bundle, c: str, P: pd.DatetimeIndex, holdings: pd.
     if bench is None:
         out.append("No sleeve benchmark: within-sleeve statistics are measured against the profile.")
     out.extend(b.flags.get(c, []))
+    legs = [k for k, sp in (cfg.factors.get("factors") or {}).items()
+            if c in (sp.get("long"), sp.get("short"))]
+    if legs:
+        out.append(f"{c} is itself a leg of the {', '.join(legs)} factor proxy: those loadings "
+                   f"are mechanical, not evidence of a tilt.")
     for fl in cfg.universe.income_flags(c):
         out.append(f"Distributions include {fl.replace('_', ' ')}: yield overstates income earned.")
     nd = st[st.get("Status", pd.Series(dtype=str)).astype(str).str.startswith("no data")] if len(st) else st
@@ -380,7 +385,8 @@ def _ranking(results: Dict[str, CandidateResult], objective: str):
     rows, comps = [], []
     for c, r in results.items():
         d = r.decision
-        rows.append({"Candidate": c, "Score": d["composite"], "Verdict": d["verdict"],
+        rows.append({"Candidate": c, "Score": d["composite"], "Unclipped score": d["unclipped"],
+                     "Verdict": d["verdict"],
                      "Confidence": d["confidence"], "Months": r.months,
                      "Benchmark": r.benchmark_label})
         cc = d["components"].copy()
@@ -388,7 +394,10 @@ def _ranking(results: Dict[str, CandidateResult], objective: str):
         comps.append(cc)
     rk = pd.DataFrame(rows)
     if len(rk):
-        rk = rk.sort_values("Score", ascending=False, na_position="last").reset_index(drop=True)
+        # Ties at a capped score (every component at +1 or -1) are broken by
+        # the unclipped score: same weights, no clip.
+        rk = rk.sort_values(["Score", "Unclipped score"], ascending=False,
+                            na_position="last").reset_index(drop=True)
         rk.insert(0, "Rank", range(1, len(rk) + 1))
     return rk, (pd.concat(comps, ignore_index=True) if comps else pd.DataFrame())
 

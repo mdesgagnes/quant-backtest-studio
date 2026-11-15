@@ -143,7 +143,7 @@ def stress_table(cand: str, daily: Dict[str, pd.Series], base_w: Dict[str, float
     portfolio. Windows the candidate (or a holding) does not cover are
     'no data'."""
     rows = []
-    hold = sorted(set(base_w) | set(new_w))
+    hold = sorted(set(base_w) | set(new_w) - {cand})
     for w in windows:
         row = {"Window": w.name, "Key": w.key, "Start": w.start, "End": w.end}
         cut = {t: _window(daily[t], w) if t in daily else None for t in hold + [cand]}

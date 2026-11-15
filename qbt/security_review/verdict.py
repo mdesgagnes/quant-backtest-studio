@@ -31,7 +31,7 @@ def metric_score(spec: MetricSpec, value: float) -> float:
 
 def score(obj: Objective, metrics: Dict[str, float], cat: Dict[str, MetricSpec]) -> Dict[str, Any]:
     rows = []
-    num = den = missing = 0.0
+    num = den = missing = raw = 0.0
     tot = sum(obj.weights.values())
     for k, w in obj.weights.items():
         v = metrics.get(k, np.nan)
@@ -41,10 +41,12 @@ def score(obj: Objective, metrics: Dict[str, float], cat: Dict[str, MetricSpec])
         if s == s:
             num += w * s
             den += w
+            raw += w * cat[k].direction * (v - cat[k].center) / cat[k].scale
         else:
             missing += w
     comp = num / den if den > 0 else np.nan
-    return {"composite": comp, "components": pd.DataFrame(rows),
+    return {"composite": comp, "unclipped": raw / den if den > 0 else np.nan,
+            "components": pd.DataFrame(rows),
             "missing_share": missing / tot if tot else 1.0}
 
 
@@ -113,6 +115,7 @@ def decide(obj: Objective, metrics: Dict[str, float], cat: Dict[str, MetricSpec]
                     f"of rolling windows (minimum {min_share:.0%})")
     conf = confidence(months, rolling_share, min_share, weight_verdicts or {}, sc["missing_share"])
     return {"verdict": v, "raw_verdict": v0, "composite": sc["composite"],
+            "unclipped": sc["unclipped"],
             "components": sc["components"], "missing_share": sc["missing_share"],
             "guardrails_failed": fails, "caps": caps, "confidence": conf["level"],
             "confidence_reasons": conf["reasons"]}
@@ -146,6 +149,13 @@ TRADEOFF_METRICS = ["d_cagr", "up_capture", "d_sharpe", "d_mdd", "d_vol", "d_cva
                     "d_portfolio_yield"]
 
 
+def _short(label: str) -> str:
+    for pre in ("Change in ", "change in "):
+        if label.startswith(pre):
+            label = label[len(pre):]
+    return label[0].lower() + label[1:] if label[:2] != label[:2].upper() else label
+
+
 def rationale(obj: Objective, dec: Dict[str, Any], metrics: Dict[str, float],
               cat: Dict[str, MetricSpec], flags: List[str], candidate: str) -> Dict[str, Any]:
     comp = dec["components"].dropna(subset=["Score"]).copy()
@@ -162,10 +172,14 @@ def rationale(obj: Objective, dec: Dict[str, Any], metrics: Dict[str, float],
         s = metric_score(cat[k], metrics.get(k, np.nan))
         if s == s and s < worst_s:
             worst, worst_s = k, s
-    if worst and worst_s <= -0.2:
-        gain = cat[good[0]].label.lower() if good else "the objective"
-        trade = (f"Improves {gain} but costs on {cat[worst].label.lower()} "
-                 f"({fmt_metric(worst, metrics.get(worst))}).")
+    if worst and worst_s <= -0.2 and good:
+        trade = (f"Helps on {_short(cat[good[0]].label)} but gives up on "
+                 f"{_short(cat[worst].label)} ({fmt_metric(worst, metrics.get(worst))}).")
+    elif worst and worst_s <= -0.2:
+        trade = (f"Does not deliver on {obj.label.lower()}, and also gives up on "
+                 f"{_short(cat[worst].label)} ({fmt_metric(worst, metrics.get(worst))}).")
+    elif not good and (dec["composite"] != dec["composite"] or dec["composite"] < obj.consider):
+        trade = f"Does not deliver on {obj.label.lower()} on this evidence."
     elif dec["guardrails_failed"]:
         trade = "Trade-off: " + "; ".join(dec["guardrails_failed"]) + "."
     else:
