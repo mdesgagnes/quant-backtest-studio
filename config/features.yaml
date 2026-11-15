@@ -1,0 +1,12 @@
+# Workspaces shown in the app's sidebar. `enabled: false` hides a workspace;
+# its code stays in the repository and comes back by setting the flag to
+# true. See docs/DECISIONS.md ("Research and Markets") for the reasoning.
+workspaces:
+  security_review:
+    enabled: true
+  backtest:
+    enabled: true
+  markets:
+    enabled: false
+  research:
+    enabled: false

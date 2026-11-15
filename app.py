@@ -785,9 +785,24 @@ def parse_weights(content: bytes, name: str, sheet: Optional[str]) -> pd.DataFra
 # the other describes a market. Keeping them apart stops the sidebar from
 # holding sixty controls of which forty are irrelevant to what is on screen.
 # ----------------------------------------------------------------------
-WORKSPACES = ["Backtest", "Markets", "Research"]
+# Which workspaces show is set in config/features.yaml (`enabled: false`
+# hides one; its code stays). Markets and Research are hidden by default on
+# this branch: see docs/DECISIONS.md.
+from qbt.security_review.config import load_features as _load_features
+_FEATURES = _load_features()
+_ALL_WORKSPACES = [("Security review", "security_review"), ("Backtest", "backtest"),
+                   ("Markets", "markets"), ("Research", "research")]
+WORKSPACES = [name for name, key in _ALL_WORKSPACES if _FEATURES.get(key, True)] or ["Backtest"]
+if st.session_state.get("workspace") not in WORKSPACES:
+    st.session_state.pop("workspace", None)
 workspace = st.sidebar.radio("Workspace", WORKSPACES, horizontal=True,
                              label_visibility="collapsed", key="workspace")
+
+# The Security review owns its own sidebar and page.
+if workspace == "Security review":
+    from qbt.security_review import ui as sr_ui
+    sr_ui.render()
+    st.stop()
 
 # The Research workspace (qbt/lab) owns its own sidebar and page; nothing
 # below this point runs for it.
