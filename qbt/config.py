@@ -23,7 +23,7 @@ REBALANCE_RULES = {
 @dataclass
 class DataConfig:
     """Where prices come from."""
-    source: str = "yfinance"              # yfinance | upload
+    source: str = "yfinance"              # yfinance | upload | vqc
     tickers: List[str] = field(default_factory=lambda: ["XIC.TO", "ZEB.TO", "XEI.TO"])
     start: str = "2010-01-01"
     end: Optional[str] = None
@@ -163,7 +163,14 @@ class RunConfig:
             errs.append(f"Unknown rebalance frequency: {self.engine.rebalance}")
         if self.engine.execution_lag < 0:
             errs.append("execution_lag must be >= 0 (0 = execution at the signal day's price).")
-        if self.engine.execution_lag == 0:
+        if self.engine.execution_lag == 0 and self.strategy.mode != "external_weights":
+            # For a built-in strategy, lag=0 means the signal and the trade
+            # share the exact same close -- impossible in reality. Imported
+            # weights are different: their dates are whatever the file's
+            # producer already computed as the real execution date (VQC's
+            # export, for instance, is pre-delayed by design), so lag=0 is
+            # frequently the *correct* setting there, not a mistake -- the
+            # Imported target weights section explains this directly instead.
             errs.append("WARNING: execution_lag=0 introduces look-ahead bias.")
         if self.engine.initial_capital <= 0:
             errs.append("Initial capital must be positive.")

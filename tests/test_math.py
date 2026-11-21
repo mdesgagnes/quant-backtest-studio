@@ -642,6 +642,26 @@ def test_compared_strategies_enter_on_the_shared_start():
     assert np.isclose(CMP.return_correlation({"A": e2, "B": l2}).loc["A", "B"], 1.0)
 
 
+def test_contributions_reconcile_through_a_delisting():
+    # A name whose series ends is sold at its last price. That exit realizes
+    # nothing: the ledger must not mark the carried units to zero and book a
+    # total loss, or the contributions stop adding up to the return.
+    px, op, div = _market()
+    px = px.copy()
+    px.loc[px.index[500]:, "A1"] = np.nan
+    w = _weights(px)
+    res = run_backtest(px, w, EngineConfig(execute_at_open=False),
+                       CostConfig(commission_bps=5, slippage_bps=10),
+                       dividends=div, liquidate_on_delist=True,
+                       delistable_assets={"A1"})
+    exits = res.trades[res.trades["Reason"] == "Delisting exit"]
+    assert len(exits) == 1
+    assert (res.contributions.sum(axis=1) - res.returns).abs().max() < 1e-12
+    day = exits["Date"].iloc[0]
+    assert abs(res.contributions.loc[day, "A1"]) < 1e-12
+    assert np.isclose(A.summary(res, None)["Contribution"].sum(), A.total_return(res))
+
+
 if __name__ == "__main__":
     import warnings
     warnings.filterwarnings("ignore")

@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import re
+import zipfile
 from dataclasses import asdict
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
@@ -20,7 +21,7 @@ import streamlit as st
 from qbt.config import (RunConfig, DataConfig, EngineConfig, CostConfig,
                         StrategyConfig, ExogConfig, REBALANCE_RULES)
 from qbt.data import (load_yfinance, load_market_data, clean_prices,
-                      excel_sheet_names, MarketData)
+                      excel_sheet_names, load_file, MarketData)
 from qbt.exog import load_exog, prepare_exog, exog_report, split_roles
 from qbt.external import (load_target_weights, prepare_target_weights,
                           weights_template)
@@ -765,6 +766,14 @@ def parse_price_files(files: tuple) -> "PI.ImportResult":
 
 
 @st.cache_data(show_spinner=False)
+def parse_upload(content: bytes, name: str, sheet: Optional[str]) -> pd.DataFrame:
+    """One wide price-like matrix (CSV, Excel or parquet) -> a dated frame."""
+    buf = io.BytesIO(content)
+    buf.name = name
+    return load_file(buf, sheet)
+
+
+@st.cache_data(show_spinner=False)
 def parse_exog(content: bytes, name: str, sheet: Optional[str]) -> pd.DataFrame:
     buf = io.BytesIO(content)
     buf.name = name
@@ -776,6 +785,54 @@ def parse_weights(content: bytes, name: str, sheet: Optional[str]) -> pd.DataFra
     buf = io.BytesIO(content)
     buf.name = name
     return load_target_weights(buf, sheet)
+
+
+@st.cache_data(show_spinner=False)
+def parse_sectors(content: bytes) -> Dict[str, str]:
+    """A Symbol, Sector table (VQC's sectors.csv) -> {symbol: sector}.
+    Anything unreadable raises; blank sectors are skipped."""
+    df = pd.read_csv(io.BytesIO(content))
+    cols = {str(c).strip().lower(): c for c in df.columns}
+    if "symbol" not in cols or "sector" not in cols:
+        raise ValueError("a sectors file needs a Symbol and a Sector column")
+    df = df[[cols["symbol"], cols["sector"]]].dropna()
+    return {str(a).strip(): str(b).strip() for a, b in zip(df.iloc[:, 0], df.iloc[:, 1])
+            if str(b).strip()}
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def parse_vqc_bundle(content: bytes, name: str) -> Dict[str, Any]:
+    """One .zip with close.csv/open.csv/dividends.csv/weights.csv (VQC's
+    Backtest page "Bundle for the studio" download) -> the frames the
+    VQC-export source needs. A file that isn't present comes back as None.
+    An optional sectors.csv (Symbol, Sector) comes back as a dict, which the
+    Attribution tab uses to group contributions by sector.
+
+    A single multi-sheet .xlsx was tried first and dropped: writing this
+    much data with pandas' to_excel() took well over a minute regardless of
+    engine. A zip of plain CSVs is the same one-file-one-upload convenience
+    at a fraction of the cost on both ends.
+    """
+    out: Dict[str, Optional[pd.DataFrame]] = {
+        "close": None, "open": None, "dividends": None, "weights": None,
+        "sectors": None}
+    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+        names = {n.lower(): n for n in zf.namelist()}
+        if "sectors.csv" in names:
+            try:
+                out["sectors"] = parse_sectors(zf.read(names["sectors.csv"]))
+            except Exception:
+                out["sectors"] = None       # optional: never block a run on it
+        for key, wanted in (("close", "close.csv"), ("open", "open.csv"),
+                            ("dividends", "dividends.csv"), ("weights", "weights.csv")):
+            if wanted not in names:
+                continue
+            data = zf.read(names[wanted])
+            buf = io.BytesIO(data)
+            buf.name = wanted
+            out[key] = (load_target_weights(buf) if key == "weights"
+                       else load_file(buf))
+    return out
 
 
 # ----------------------------------------------------------------------
@@ -1268,10 +1325,10 @@ x0 = loaded.exog if loaded else ExogConfig()
 
 # --- Data ---
 st.sidebar.markdown('<div class="eyebrow">Data</div>', unsafe_allow_html=True)
-SOURCES = ["Yahoo Finance", "File (CSV / Excel)", "Return stream"]
+SOURCES = ["Yahoo Finance", "File (CSV / Excel)", "VQC export", "Return stream"]
 _RS_CUR_OFF = "Off (each in its own currency)"
 _RS_BASES = ["CAD", "USD", "EUR", "GBP", "CHF", "JPY", "AUD"]
-_src_idx = {"yfinance": 0, "upload": 1, "returns": 2}.get(d0.source, 0)
+_src_idx = {"yfinance": 0, "upload": 1, "vqc": 2, "returns": 3}.get(d0.source, 0)
 source = st.sidebar.radio("Source", SOURCES, index=_src_idx,
                           label_visibility="collapsed",
                           help="\u201cReturn stream\u201d skips prices and signals "
@@ -2565,6 +2622,13 @@ def _profile_picker(sel_key: str, target_key: str, universe: bool, label: str) -
 
 
 price_import: Optional["PI.ImportResult"] = None
+prices_raw: Optional[pd.DataFrame] = None
+vqc_open_raw: Optional[pd.DataFrame] = None
+vqc_div_raw: Optional[pd.DataFrame] = None
+vqc_bundle_weights: Optional[pd.DataFrame] = None
+vqc_sectors: Dict[str, str] = {}
+bundle_locked = False
+yahoo_bench_ticker: str = ""
 upload_error = None
 
 if source == "Yahoo Finance":
@@ -2598,6 +2662,102 @@ if source == "Yahoo Finance":
                             min_value=date(1970, 1, 1), max_value=date.today())
     end = col2.date_input("End", value=date.today(),
                           min_value=date(1971, 1, 1), max_value=date.today())
+elif source == "VQC export":
+    st.sidebar.markdown(
+        '<div class="note">From VQC’s Backtest page, under “Export '
+        'market data to a standalone studio instance”: download the '
+        '“Bundle for the studio (.zip)” and upload just that one '
+        'file below. It carries prices, opens, dividends and weights '
+        'together — weights land automatically under Signal too, no '
+        'separate upload needed unless you want a different file there. '
+        'The four individual CSVs (or a wide parquet matrix such as '
+        '<code>vqc.storage</code>’s <code>close_daily.parquet</code>) '
+        'still work under “Or upload individual files” '
+        'below.</div>',
+        unsafe_allow_html=True)
+    sheet = None
+    tickers = []
+    start, end = None, None
+    bundle_up = st.sidebar.file_uploader(
+        "Bundle file (.zip, optional — fills everything below)",
+        type=["zip"], key="vqc_bundle",
+        help="The “Bundle for the studio” download from VQC's "
+             "Backtest page: one zip with close/open/dividends/weights "
+             "CSVs inside. Upload just this instead of the four files below.")
+    if bundle_up is not None:
+        try:
+            parts = parse_vqc_bundle(bundle_up.getvalue(), bundle_up.name)
+            if parts["close"] is None:
+                st.sidebar.error("Bundle file: no close.csv found inside.")
+            elif parts["weights"] is None:
+                st.sidebar.error(
+                    "Bundle file: no weights.csv found inside -- a bundle "
+                    "needs weights to drive a run. Use “Or upload "
+                    "individual files” below instead.")
+            else:
+                prices_raw = parts["close"]
+                tickers = [str(c) for c in prices_raw.columns]
+                vqc_open_raw = parts["open"]
+                vqc_div_raw = parts["dividends"]
+                vqc_bundle_weights = parts["weights"]
+                vqc_sectors = dict(parts["sectors"] or {})
+                bundle_locked = True
+                st.sidebar.markdown(
+                    '<div class="note">From the bundle: '
+                    f'{prices_raw.shape[1]} instruments'
+                    + (', open prices' if parts["open"] is not None else '')
+                    + (', dividends' if parts["dividends"] is not None else '')
+                    + (', sectors' if vqc_sectors else '')
+                    + ', weights. Everything below is driven by the bundle '
+                      '-- only Slippage and Initial capital stay '
+                      'adjustable.</div>', unsafe_allow_html=True)
+        except Exception as exc:
+            upload_error = str(exc)
+
+    with st.sidebar.expander(
+            "Or upload individual files", expanded=bundle_up is None):
+        vqc_prices_up = st.file_uploader(
+            "Prices (price return, required)", type=["csv", "xlsx", "xls", "parquet"], key="vqc_prices")
+        vqc_open_up = st.file_uploader(
+            "Open prices (optional)", type=["csv", "xlsx", "xls", "parquet"], key="vqc_open")
+        vqc_div_up = st.file_uploader(
+            "Dividends per share (optional)", type=["csv", "xlsx", "xls", "parquet"], key="vqc_div")
+        vqc_sec_up = st.file_uploader(
+            "Sectors (optional)", type=["csv"], key="vqc_sectors",
+            help="Symbol, Sector. Lets the Attribution tab group the "
+                 "contributions by sector. The bundle carries this itself.")
+        if vqc_sec_up is not None:
+            try:
+                vqc_sectors = parse_sectors(vqc_sec_up.getvalue())
+            except Exception as exc:
+                st.error(f"Sectors: {exc}")
+        if vqc_prices_up is not None:
+            try:
+                vqc_prices_raw = parse_upload(vqc_prices_up.getvalue(), vqc_prices_up.name, None)
+                tickers = [str(c) for c in vqc_prices_raw.columns]
+                prices_raw = vqc_prices_raw
+            except Exception as exc:
+                upload_error = str(exc)
+            if vqc_open_up is not None:
+                try:
+                    vqc_open_raw = parse_upload(vqc_open_up.getvalue(), vqc_open_up.name, None)
+                except Exception as exc:
+                    st.error(f"Open prices: {exc}")
+            if vqc_div_up is not None:
+                try:
+                    vqc_div_raw = parse_upload(vqc_div_up.getvalue(), vqc_div_up.name, None)
+                except Exception as exc:
+                    st.error(f"Dividends: {exc}")
+    st.sidebar.markdown('<div class="eyebrow">Benchmark (Yahoo Finance)</div>',
+                        unsafe_allow_html=True)
+    yahoo_bench_ticker = st.sidebar.text_input(
+        "Pull a benchmark ticker from Yahoo Finance (optional)",
+        value=st.session_state.get("_yahoo_bench_ticker", ""),
+        help="VQC's export doesn't include an index/ETF benchmark -- e.g. "
+             "XIC.TO. Fetched as total return (dividends reinvested); "
+             "leave blank to compare against nothing or pick a ticker "
+             "already in the price file instead.")
+    st.session_state["_yahoo_bench_ticker"] = yahoo_bench_ticker
 else:
     ups = st.sidebar.file_uploader(
         "Price files", type=["csv", "xlsx", "xls", "xlsm", "txt"],
@@ -2639,11 +2799,17 @@ else:
             "price_template.csv", "text/csv", key="price_tpl")
 
 univ_options = tickers or []
-sel_universe = st.sidebar.multiselect(
-    "Investable universe", univ_options,
-    default=(univ_options if st.session_state.get("_universe_all") else
-             [t for t in (d0.tickers if source == "Yahoo Finance" else univ_options)
-              if t in univ_options] or univ_options))
+if bundle_locked:
+    sel_universe = univ_options
+    st.sidebar.markdown(
+        f'<div class="note">Investable universe: all {len(univ_options)} '
+        'instruments from the bundle.</div>', unsafe_allow_html=True)
+else:
+    sel_universe = st.sidebar.multiselect(
+        "Investable universe", univ_options,
+        default=(univ_options if st.session_state.get("_universe_all") else
+                 [t for t in (d0.tickers if source == "Yahoo Finance" else univ_options)
+                  if t in univ_options] or univ_options))
 
 BLEND = "Blend of several"
 BENCH_STRAT = "Another strategy"
@@ -2748,6 +2914,15 @@ if source == "Yahoo Finance":
              "rebalance. Same cash in, different timing.")
     adjusted = price_mode.startswith("Total")
     use_divs = not adjusted
+    file_convention = None
+elif source == "VQC export":
+    # VQC's own convention, documented in build_market() below: prices are
+    # price-return (split-adjusted, not dividend-adjusted) with dividends
+    # supplied separately and credited on the ex-date. The generic
+    # File-upload fallback below (adjusted=True) is wrong here -- it was
+    # silently turning off dividend crediting for every VQC-export run
+    # regardless of whether a dividends file/bundle was actually uploaded.
+    adjusted, use_divs = False, True
     file_convention = None
 else:
     _conv_keys = list(PI.CONVENTIONS)
@@ -2868,7 +3043,7 @@ elif not base_currency and len(sel_universe) > 1:
 st.sidebar.markdown('<div class="eyebrow">Exogenous series</div>', unsafe_allow_html=True)
 exog_files = st.sidebar.file_uploader(
     "Economic, fundamental, or signal data",
-    type=["csv", "xlsx", "xls", "txt"], accept_multiple_files=True, key="exogup",
+    type=["csv", "xlsx", "xls", "txt", "parquet"], accept_multiple_files=True, key="exogup",
     help="One column per series for macro data; one column per symbol for a "
          "cross-sectional factor. The first sheet of Excel workbooks is used.")
 
@@ -2903,60 +3078,96 @@ exog_columns = list(exog_raw.columns) if exog_raw is not None else []
 
 # --- Signal origin ---
 st.sidebar.markdown('<div class="eyebrow">Signal</div>', unsafe_allow_html=True)
-mode_labels = ["Built-in model", "Imported target weights"]
-mode_label = st.sidebar.radio(
-    "Signal origin", mode_labels,
-    index=1 if s0.mode == "external_weights" else 0,
-    label_visibility="collapsed",
-    help="\u201cImported target weights\u201d replaces the signal generator "
-         "with an allocation file: the engine applies drift, frictions, and "
-         "the execution lag exactly as it would for a built-in model.")
-mode = "external_weights" if mode_label == mode_labels[1] else "builtin"
 
 weights_raw: Optional[pd.DataFrame] = None
 w_normalize = s0.weights_normalize
 w_calendar = s0.weights_calendar
 w_source = ""
 
-if mode == "external_weights":
-    wf = st.sidebar.file_uploader("Target weights file",
-                                  type=["csv", "xlsx", "xls", "txt"], key="wup")
-    if wf is not None:
-        w_source = wf.name
-        wsheet = None
-        if wf.name.lower().endswith((".xlsx", ".xls")):
-            names = excel_sheet_names(io.BytesIO(wf.getvalue()))
-            if len(names) > 1:
-                wsheet = st.sidebar.selectbox("Sheet", names, key="wsheet")
-        try:
-            weights_raw = parse_weights(wf.getvalue(), wf.name, wsheet)
-        except Exception as exc:
-            st.sidebar.error(f"Could not read the file: {exc}")
-    else:
-        st.sidebar.markdown(
-            '<div class="note">A date column, then one column per symbol '
-            'holding the target weight. Long format (date, symbol, weight) '
-            'is also recognized. Fractions or percentages, either works.</div>',
-            unsafe_allow_html=True)
-        st.sidebar.download_button(
-            "CSV template", weights_template(sel_universe or ["XIC.TO", "ZEB.TO"]),
-            "target_weights_template.csv", "text/csv")
-
-    w_normalize = st.sidebar.selectbox(
-        "Row handling", ["None", "Scale to 100%"],
-        index=0 if w_normalize == "None" else 1,
-        help="\u201cNone\u201d respects the file: a row at 80% leaves 20% in "
-             "cash. \u201cScale to 100%\u201d rescales the weights.")
-    w_calendar = st.sidebar.selectbox(
-        "Rebalance calendar", ["File dates", "Engine calendar"],
-        index=0 if w_calendar == "File dates" else 1,
-        help="\u201cFile dates\u201d only trades on the supplied dates. "
-             "\u201cEngine calendar\u201d additionally resets the portfolio "
-             "to the last known weights at every engine checkpoint, "
-             "correcting drift.")
+if bundle_locked:
+    mode = "external_weights"
+    weights_raw = vqc_bundle_weights
+    w_source = "VQC bundle"
+    w_normalize = "None"
+    w_calendar = "File dates"
+    st.sidebar.markdown(
+        '<div class="note">Using weights.csv from the bundle, on its own '
+        'dates, respected as-is (no row scaling). To use a different '
+        'signal, upload a file directly under VQC export\u2019s '
+        '\u201cOr upload individual files\u201d instead of a '
+        'bundle.</div>', unsafe_allow_html=True)
     strategy = None
     strat_key = "external_weights"
     params = {}
+else:
+    mode_labels = ["Built-in model", "Imported target weights"]
+    mode_label = st.sidebar.radio(
+        "Signal origin", mode_labels,
+        index=1 if s0.mode == "external_weights" else 0,
+        label_visibility="collapsed",
+        help="\u201cImported target weights\u201d replaces the signal generator "
+             "with an allocation file: the engine applies drift, frictions, and "
+             "the execution lag exactly as it would for a built-in model.")
+    mode = "external_weights" if mode_label == mode_labels[1] else "builtin"
+
+    if mode == "external_weights":
+        wf = st.sidebar.file_uploader(
+            "Target weights file (leave empty to use the bundle's Weights sheet, "
+            "if one was uploaded under VQC export)"
+            if vqc_bundle_weights is not None else "Target weights file",
+            type=["csv", "xlsx", "xls", "txt", "parquet"], key="wup")
+        if wf is not None:
+            w_source = wf.name
+            wsheet = None
+            if wf.name.lower().endswith((".xlsx", ".xls")):
+                names = excel_sheet_names(io.BytesIO(wf.getvalue()))
+                if len(names) > 1:
+                    wsheet = st.sidebar.selectbox("Sheet", names, key="wsheet")
+            try:
+                weights_raw = parse_weights(wf.getvalue(), wf.name, wsheet)
+            except Exception as exc:
+                st.sidebar.error(f"Could not read the file: {exc}")
+        elif vqc_bundle_weights is not None:
+            weights_raw = vqc_bundle_weights
+            w_source = "VQC bundle"
+            st.sidebar.markdown(
+                '<div class="note">Using weights.csv from the bundle '
+                'uploaded under VQC export. Upload a file above to use a '
+                'different one instead.</div>', unsafe_allow_html=True)
+        else:
+            st.sidebar.markdown(
+                '<div class="note">A date column, then one column per symbol '
+                'holding the target weight. Long format (date, symbol, weight) '
+                'is also recognized. Fractions or percentages, either works.</div>',
+                unsafe_allow_html=True)
+            st.sidebar.download_button(
+                "CSV template", weights_template(sel_universe or ["XIC.TO", "ZEB.TO"]),
+                "target_weights_template.csv", "text/csv")
+
+        w_normalize = st.sidebar.selectbox(
+            "Row handling", ["None", "Scale to 100%"],
+            index=0 if w_normalize == "None" else 1,
+            help="\u201cNone\u201d respects the file: a row at 80% leaves 20% in "
+                 "cash. \u201cScale to 100%\u201d rescales the weights.")
+        w_calendar = st.sidebar.selectbox(
+            "Rebalance calendar", ["File dates", "Engine calendar"],
+            index=0 if w_calendar == "File dates" else 1,
+            help="\u201cFile dates\u201d only trades on the supplied dates. "
+                 "\u201cEngine calendar\u201d additionally resets the portfolio "
+                 "to the last known weights at every engine checkpoint, "
+                 "correcting drift.")
+        st.sidebar.markdown(
+            '<div class="flag">The dates in this file are treated as '
+            '<b>signal</b> dates and shifted forward by \u201cExecution lag '
+            '(days)\u201d in Execution below (default 1). If your file\u2019s '
+            'dates are already the firm trade date \u2014 e.g. VQC\u2019s '
+            'export, where the date column is already the Nth trading day '
+            'after the signal \u2014 set Execution lag to <b>0</b> there, or '
+            'every trade will land one extra session late.</div>',
+            unsafe_allow_html=True)
+        strategy = None
+        strat_key = "external_weights"
+        params = {}
 
 # --- Strategy ---
 strat_keys = sorted(REGISTRY.keys(), key=lambda k: REGISTRY[k].label)
@@ -3233,131 +3444,190 @@ for p in (strategy.params if mode == "builtin" else []):
 # --- Execution and frictions ---
 # Folded by default: these hold steady across runs, while the universe and
 # the signal are what actually get changed between one backtest and the next.
-with st.sidebar.expander("Execution", expanded=False):
-    rb_keys = list(REBALANCE_RULES.keys())
-    rebalance = st.selectbox(
-        "Rebalance", rb_keys, index=rb_keys.index(e0.rebalance),
-        format_func=lambda k: REBALANCE_RULES[k])
+is_vqc = source == "VQC export"
+has_open_data = ((source == "Yahoo Finance")
+                 or (is_vqc and vqc_open_raw is not None)
+                 or (price_import is not None and price_import.has("open")))
+if bundle_locked:
+    # A VQC bundle drives the run: its own dates, no lag, VQC's defaults.
+    # Only the initial capital and the slippage stay adjustable.
+    rebalance, day_rule, day_of_month, weekday, nth, anchor_month = (
+        "M", "last", 15, 4, 1, 12)
+    lag = 0
+    exec_at_open = has_open_data
+    trim_warm = True
+    max_lev = 1.0
+    whole_shares = True
+    cash_sweep, cash_buffer, cash_sweep_thr = "none", 0.01, 0.0
+    comm = 5.0
+    impact_model, impact_bps10, impact_coef = "flat", 0.0, 1.0
+    slip_overrides: Dict[str, float] = {}
+    cash_rate = 0.0
+    mgmt_fee = 0.0
+    fee_pays_frictions = True
+    fx_spread = float(c0.fx_spread_bps)
+    fx_cash_policy = e0.fx_cash
+    fx_cash_rate = float(c0.foreign_cash_rate_pa)
+    with st.sidebar.expander("Execution & frictions", expanded=False):
+        st.markdown(
+            '<div class="note">Bundle-driven: rebalance dates, execution '
+            'lag (0), execution price ('
+            + ('open' if has_open_data else
+               'close -- no open prices in the bundle')
+            + '), whole shares, commission (5bps, VQC\u2019s own default), '
+              'market impact (flat), cash rate (0) and management fee (0) '
+              'all come from the bundle or match VQC\u2019s own defaults. '
+              'Only Slippage and Initial capital are adjustable here.</div>',
+            unsafe_allow_html=True)
+        capital = st.number_input("Initial capital ($)", 1_000, 1_000_000_000,
+                                  int(e0.initial_capital), 10_000)
+        slip = st.number_input(
+            "Slippage, flat component (bps)", 0.0, 500.0,
+            5.0, 5.0, key="slip_bps_bundle",
+            help="Charged on every trade regardless of size. Defaults to "
+                 "5bps, VQC's own default -- set to 0 to match a VQC run "
+                 "you deliberately made frictionless.")
+else:
+    with st.sidebar.expander("Execution", expanded=False):
+        rb_keys = list(REBALANCE_RULES.keys())
+        rebalance = st.selectbox(
+            "Rebalance", rb_keys, index=rb_keys.index(e0.rebalance),
+            format_func=lambda k: REBALANCE_RULES[k])
 
-    # Trading day. The default reproduces the period-end calendar, so
-    # leaving this alone changes nothing.
-    day_rule, day_of_month, weekday, nth = "last", 15, 4, 1
-    anchor_month = int(getattr(e0, "anchor_month", 12))
-    if rebalance != "D":
-        _RULE_LABELS = {
-            "last": "Last trading day", "first": "First trading day",
-            "day": "A day of the month", "nth_weekday": "Nth weekday",
-            "last_weekday": "Last weekday",
-        }
-        _keys = list(_RULE_LABELS)
-        day_rule = st.selectbox(
-            "Trading day", _keys,
-            index=_keys.index(getattr(e0, "day_rule", "last")),
-            format_func=lambda k: _RULE_LABELS[k],
-            help="Which day inside the period the trade happens. A strategy "
-                 "that only works on month-end has been tested on one day "
-                 "out of twenty, not on a month.")
-        if day_rule == "day":
-            day_of_month = st.slider("Day of month", 1, 31,
-                                     int(getattr(e0, "day_of_month", 15)),
-                                     help="Clamped to the month's length, then "
-                                          "moved to the nearest session inside "
-                                          "the same month.")
-        elif day_rule in ("nth_weekday", "last_weekday"):
-            weekday = SCHED.WEEKDAYS.index(st.selectbox(
-                "Weekday", SCHED.WEEKDAYS,
-                index=int(getattr(e0, "weekday", 4))))
-            if day_rule == "nth_weekday":
-                nth = st.selectbox("Which one", [1, 2, 3, 4],
-                                   index=int(getattr(e0, "nth", 1)) - 1,
-                                   format_func=lambda n: ["1st","2nd","3rd","4th"][n-1])
-        if rebalance == "A":
-            anchor_month = SCHED.MONTHS.index(st.selectbox(
-                "Month", SCHED.MONTHS, index=anchor_month - 1,
-                help="Rebalance every year in this month.")) + 1
-        elif rebalance == "Q":
-            _q = {12: "Mar / Jun / Sep / Dec", 1: "Jan / Apr / Jul / Oct",
-                  2: "Feb / May / Aug / Nov"}
-            _qk = list(_q)
-            anchor_month = st.selectbox(
-                "Quarter months", _qk,
-                index=_qk.index(anchor_month) if anchor_month in _qk else 0,
-                format_func=lambda k: _q[k],
-                help="Calendar quarters, or the same cadence started a month "
-                     "or two later.")
-        elif rebalance == "S":
-            _s = {12: "Jun / Dec", 1: "Jan / Jul", 2: "Feb / Aug", 3: "Mar / Sep",
-                  4: "Apr / Oct", 5: "May / Nov"}
-            _sk = list(_s)
-            _a = anchor_month if anchor_month in _sk else (
-                anchor_month - 6 if anchor_month - 6 in _sk else 12)
-            anchor_month = st.selectbox(
-                "Months", _sk, index=_sk.index(_a), format_func=lambda k: _s[k],
-                help="Rebalance twice a year, six months apart: June and "
-                     "December by default.")
-        _preview = SCHED.RebalanceSpec(
-            frequency=rebalance, day_rule=day_rule, day_of_month=day_of_month,
-            weekday=weekday, nth=nth, anchor_month=anchor_month)
-        st.markdown(f'<div class="note">{_preview.label()}</div>',
-                    unsafe_allow_html=True)
-    lag = st.slider("Execution lag (days)", 0, 5, int(e0.execution_lag),
-                    help="1 = signal at the close, executed the next session. "
-                         "0 assumes execution at the price that produced the signal.")
-    exec_price = st.selectbox(
-        "Execution price", ["Close", "Open (marked at the close)"],
-        index=1 if e0.execute_at_open else 0,
-        help="Trading at the open splits the day in two: the overnight move is "
-             "earned on the old weights, the intraday move on the new ones. It is "
-             "the more realistic assumption for an order placed after a "
-             "prior-close signal. Needs opening prices: Yahoo Finance, or "
-             "an Open column in an imported file.")
-    exec_at_open = exec_price.startswith("Open")
-    if exec_at_open and source != "Yahoo Finance" and not (
-            price_import is not None and price_import.has("open")):
-        st.markdown('<div class="flag">The imported file has no opening '
-                    'prices: execution falls back to the close.</div>',
-                    unsafe_allow_html=True)
-    trim_warm = st.checkbox(
-        "Trim the warm-up period", value=bool(e0.trim_warmup),
-        help="Indicators are blind until they have enough history. Those early "
-             "sessions sit in cash and still earn the cash rate, which lifts the "
-             "reported return and dilutes volatility. Trimming starts the record "
-             "on the first day capital is actually at risk, for the strategy and "
-             "the benchmark alike.")
-    capital = st.number_input("Initial capital ($)", 1_000, 1_000_000_000,
-                              int(e0.initial_capital), 10_000)
-    max_lev = st.slider("Max leverage", 0.5, 2.0, float(e0.max_leverage), 0.1)
-    whole_shares = st.checkbox(
-        "Trade whole units only", value=bool(getattr(e0, "whole_shares", False)),
-        help="Rounds every order down to a whole share. Realistic for a "
-             "small account, where indivisibility leaves idle cash and the "
-             "book cannot sit exactly on its targets. Leave off to allow "
-             "fractional units, which most brokers now support.")
+        # Trading day. The default reproduces the period-end calendar, so
+        # leaving this alone changes nothing.
+        day_rule, day_of_month, weekday, nth = "last", 15, 4, 1
+        anchor_month = int(getattr(e0, "anchor_month", 12))
+        if rebalance != "D":
+            _RULE_LABELS = {
+                "last": "Last trading day", "first": "First trading day",
+                "day": "A day of the month", "nth_weekday": "Nth weekday",
+                "last_weekday": "Last weekday",
+            }
+            _keys = list(_RULE_LABELS)
+            day_rule = st.selectbox(
+                "Trading day", _keys,
+                index=_keys.index(getattr(e0, "day_rule", "last")),
+                format_func=lambda k: _RULE_LABELS[k],
+                help="Which day inside the period the trade happens. A strategy "
+                     "that only works on month-end has been tested on one day "
+                     "out of twenty, not on a month.")
+            if day_rule == "day":
+                day_of_month = st.slider("Day of month", 1, 31,
+                                         int(getattr(e0, "day_of_month", 15)),
+                                         help="Clamped to the month's length, then "
+                                              "moved to the nearest session inside "
+                                              "the same month.")
+            elif day_rule in ("nth_weekday", "last_weekday"):
+                weekday = SCHED.WEEKDAYS.index(st.selectbox(
+                    "Weekday", SCHED.WEEKDAYS,
+                    index=int(getattr(e0, "weekday", 4))))
+                if day_rule == "nth_weekday":
+                    nth = st.selectbox("Which one", [1, 2, 3, 4],
+                                       index=int(getattr(e0, "nth", 1)) - 1,
+                                       format_func=lambda n: ["1st","2nd","3rd","4th"][n-1])
+            if rebalance == "A":
+                anchor_month = SCHED.MONTHS.index(st.selectbox(
+                    "Month", SCHED.MONTHS, index=anchor_month - 1,
+                    help="Rebalance every year in this month.")) + 1
+            elif rebalance == "Q":
+                _q = {12: "Mar / Jun / Sep / Dec", 1: "Jan / Apr / Jul / Oct",
+                      2: "Feb / May / Aug / Nov"}
+                _qk = list(_q)
+                anchor_month = st.selectbox(
+                    "Quarter months", _qk,
+                    index=_qk.index(anchor_month) if anchor_month in _qk else 0,
+                    format_func=lambda k: _q[k],
+                    help="Calendar quarters, or the same cadence started a month "
+                         "or two later.")
+            elif rebalance == "S":
+                _s = {12: "Jun / Dec", 1: "Jan / Jul", 2: "Feb / Aug", 3: "Mar / Sep",
+                      4: "Apr / Oct", 5: "May / Nov"}
+                _sk = list(_s)
+                _a = anchor_month if anchor_month in _sk else (
+                    anchor_month - 6 if anchor_month - 6 in _sk else 12)
+                anchor_month = st.selectbox(
+                    "Months", _sk, index=_sk.index(_a), format_func=lambda k: _s[k],
+                    help="Rebalance twice a year, six months apart: June and "
+                         "December by default.")
+            _preview = SCHED.RebalanceSpec(
+                frequency=rebalance, day_rule=day_rule, day_of_month=day_of_month,
+                weekday=weekday, nth=nth, anchor_month=anchor_month)
+            st.markdown(f'<div class="note">{_preview.label()}</div>',
+                        unsafe_allow_html=True)
+        if is_vqc:
+            st.markdown(
+                '<div class="note">Defaults below (lag 0, open execution, whole '
+                'shares, 5bps commission/slippage) match what VQC\u2019s own '
+                'Backtest page uses, so a run here lines up with VQC\u2019s '
+                'inline result for the same weights. Change any of them to '
+                'test different assumptions.</div>', unsafe_allow_html=True)
+        lag = st.slider("Execution lag (days)", 0, 5,
+                        0 if is_vqc else int(e0.execution_lag),
+                        key=f"exec_lag_{source}",
+                        help="1 = signal at the close, executed the next session. "
+                             "0 assumes execution at the price that produced the signal. "
+                             "VQC-export weights already carry a firm trade date, so this "
+                             "defaults to 0 for that source.")
+        exec_price = st.selectbox(
+            "Execution price", ["Close", "Open (marked at the close)"],
+            index=1 if (is_vqc or e0.execute_at_open) else 0,
+            key=f"exec_price_{source}",
+            help="Trading at the open splits the day in two: the overnight move is "
+                 "earned on the old weights, the intraday move on the new ones. It is "
+                 "the more realistic assumption for an order placed after a "
+                 "prior-close signal. Needs opening prices: Yahoo Finance, an "
+                 "Open column in an imported file, or the Open prices "
+                 "under VQC export.")
+        exec_at_open = exec_price.startswith("Open")
+        if exec_at_open and not has_open_data:
+            st.markdown('<div class="flag">No opening prices for this source: '
+                        'execution falls back to the close.</div>',
+                        unsafe_allow_html=True)
+        trim_warm = st.checkbox(
+            "Trim the warm-up period", value=bool(e0.trim_warmup),
+            help="Indicators are blind until they have enough history. Those early "
+                 "sessions sit in cash and still earn the cash rate, which lifts the "
+                 "reported return and dilutes volatility. Trimming starts the record "
+                 "on the first day capital is actually at risk, for the strategy and "
+                 "the benchmark alike.")
+        capital = st.number_input("Initial capital ($)", 1_000, 1_000_000_000,
+                                  int(e0.initial_capital), 10_000)
+        max_lev = st.slider("Max leverage", 0.5, 2.0, float(e0.max_leverage), 0.1)
+        whole_shares = st.checkbox(
+            "Trade whole units only", key=f"whole_shares_{source}",
+            value=True if is_vqc else bool(getattr(e0, "whole_shares", False)),
+            help="Rounds every order down to a whole share. Realistic for a "
+                 "small account, where indivisibility leaves idle cash and the "
+                 "book cannot sit exactly on its targets. Leave off to allow "
+                 "fractional units, which most brokers now support. VQC's own "
+                 "backtest always trades whole shares, so this defaults on for "
+                 "that source.")
 
-    _SWEEP = {"none": "Only at rebalances", "W": "Weekly", "M": "Monthly",
-              "Q": "Quarterly"}
-    cash_sweep = st.selectbox(
-        "Reinvest cash between rebalances", list(_SWEEP),
-        index=list(_SWEEP).index(getattr(e0, "cash_sweep", "none") or "none"),
-        format_func=lambda k: _SWEEP[k],
-        help="Dividends and other cash wait for the next rebalance by "
-             "default. With a schedule, cash above the buffer is put back to "
-             "work at each period end in between: buys only, toward the "
-             "weights the last rebalance targeted, filling the positions "
-             "furthest below target first and never lifting one above it. "
-             "No new signal is read between rebalances.")
-    sw1, sw2 = st.columns(2)
-    cash_buffer = sw1.number_input(
-        "Cash buffer (%)", 0.0, 50.0,
-        float(getattr(e0, "cash_buffer", 0.01)) * 100, 0.25,
-        help="Cash left uninvested after each reinvestment, e.g. to meet "
-             "the management fee without selling.") / 100.0
-    cash_sweep_thr = sw2.number_input(
-        "Or when cash exceeds (%)", 0.0, 100.0,
-        float(getattr(e0, "cash_sweep_threshold", 0.0)) * 100, 0.5,
-        help="Also reinvest, on the next session, whenever cash closes above "
-             "this share of the portfolio. 0 turns the trigger off. Must be "
-             "above the buffer.") / 100.0
+        _SWEEP = {"none": "Only at rebalances", "W": "Weekly", "M": "Monthly",
+                  "Q": "Quarterly"}
+        cash_sweep = st.selectbox(
+            "Reinvest cash between rebalances", list(_SWEEP),
+            index=list(_SWEEP).index(getattr(e0, "cash_sweep", "none") or "none"),
+            format_func=lambda k: _SWEEP[k],
+            help="Dividends and other cash wait for the next rebalance by "
+                 "default. With a schedule, cash above the buffer is put back to "
+                 "work at each period end in between: buys only, toward the "
+                 "weights the last rebalance targeted, filling the positions "
+                 "furthest below target first and never lifting one above it. "
+                 "No new signal is read between rebalances.")
+        sw1, sw2 = st.columns(2)
+        cash_buffer = sw1.number_input(
+            "Cash buffer (%)", 0.0, 50.0,
+            float(getattr(e0, "cash_buffer", 0.01)) * 100, 0.25,
+            help="Cash left uninvested after each reinvestment, e.g. to meet "
+                 "the management fee without selling.") / 100.0
+        cash_sweep_thr = sw2.number_input(
+            "Or when cash exceeds (%)", 0.0, 100.0,
+            float(getattr(e0, "cash_sweep_threshold", 0.0)) * 100, 0.5,
+            help="Also reinvest, on the next session, whenever cash closes above "
+                 "this share of the portfolio. 0 turns the trigger off. Must be "
+                 "above the buffer.") / 100.0
 
 # --- Comparison strategies ---
 # Each runs over the same universe, calendar, execution rules and frictions
@@ -3406,137 +3676,141 @@ with st.sidebar.expander(
             st.markdown('<div class="flag">Add at least one strategy to use '
                         'as the benchmark.</div>', unsafe_allow_html=True)
 
-with st.sidebar.expander("Frictions", expanded=False):
-    comm = st.number_input("Commission (bps)", 0.0, 200.0, float(c0.commission_bps), 1.0,
-                           help="A flat broker fee. Never scaled by trade "
-                                "size or by the market-impact model below -- "
-                                "commission is a fee schedule, not a "
-                                "liquidity cost.")
-    slip = st.number_input(
-        "Slippage, half-spread (bps)", 0.0, 500.0, float(c0.slippage_bps), 5.0,
-        key="slip_bps",
-        help="Half the bid-ask spread, charged on every trade regardless of "
-             "size. For a liquid ETF this is typically 1-5 bps; use the "
-             "per-instrument multiplier below for thinner names. Market "
-             "impact, if selected, is added on top.")
+if not bundle_locked:
+    with st.sidebar.expander("Frictions", expanded=False):
+        comm = st.number_input("Commission (bps)", 0.0, 200.0,
+                               5.0 if is_vqc else float(c0.commission_bps), 1.0,
+                               key=("comm_vqc" if is_vqc else None),
+                               help="A flat broker fee. Never scaled by trade "
+                                    "size or by the market-impact model below -- "
+                                    "commission is a fee schedule, not a "
+                                    "liquidity cost.")
+        slip = st.number_input(
+            "Slippage, half-spread (bps)", 0.0, 500.0,
+            5.0 if is_vqc else float(c0.slippage_bps), 5.0,
+            key=("slip_bps_vqc" if is_vqc else "slip_bps"),
+            help="Half the bid-ask spread, charged on every trade regardless of "
+                 "size. For a liquid ETF this is typically 1-5 bps; use the "
+                 "per-instrument multiplier below for thinner names. Market "
+                 "impact, if selected, is added on top.")
 
-    _IMPACT_OPTS = ["None",
-                    "Square-root law, scaled by volatility (recommended)",
-                    "Square-root, fixed cost at 10% of volume"]
-    _imp0 = {"flat": 0, "sqrt_vol": 1, "sqrt": 2}.get(
-        getattr(c0, "impact_model", "flat"), 0)
-    impact_label = st.selectbox(
-        "Market impact", _IMPACT_OPTS, index=_imp0,
-        help="Real slippage grows with how large an order is relative to "
-             "the instrument's liquidity. The square-root law is the "
-             "best-established empirical result on this (Almgren et al. "
-             "2005; Toth et al. 2011; Bouchaud et al. 2018): impact = Y "
-             "\u00d7 daily volatility \u00d7 \u221a(order \u00f7 average "
-             "daily volume). Scaling by volatility makes the same order cost "
-             "more in a turbulent market than a calm one. The fixed variant "
-             "charges a set cost at 10% of volume regardless of volatility.")
-    impact_model = {0: "flat", 1: "sqrt_vol", 2: "sqrt"}[_IMPACT_OPTS.index(impact_label)]
-    impact_bps10 = float(getattr(c0, "impact_bps_at_10pct_adv", 25.0))
-    impact_coef = float(getattr(c0, "impact_coef", 1.0))
-    if impact_model == "sqrt":
-        impact_bps10 = st.number_input(
-            "Impact at 10% of average daily volume (bps)", 0.0, 500.0,
-            impact_bps10, 5.0,
-            help="The extra cost, on top of the spread, for an order "
-                 "equal to a tenth of the instrument's trailing 20-day "
-                 "average volume. Doubling the order size roughly multiplies "
-                 "this component by \u221a2, not by 2.")
-    elif impact_model == "sqrt_vol":
-        impact_coef = st.number_input(
-            "Impact coefficient Y", 0.0, 5.0, impact_coef, 0.1,
-            help="The constant in the square-root law. Empirical estimates "
-                 "across equity markets sit between about 0.5 and 1; 1 is "
-                 "the conservative end. At Y = 1, an order of 10% of daily "
-                 "volume in a name moving 1% a day costs about 32 bps on top "
-                 "of the spread.")
-    if impact_model != "flat" and source != "Yahoo Finance" and not (
-            price_import is not None and price_import.has("volume")):
-        st.markdown(
-            '<div class="flag">Market impact needs volume data: Yahoo '
-            'Finance, or a Volume column in an imported file. Without it, '
-            'every instrument pays the slippage above alone.</div>',
-            unsafe_allow_html=True)
+        _IMPACT_OPTS = ["None",
+                        "Square-root law, scaled by volatility (recommended)",
+                        "Square-root, fixed cost at 10% of volume"]
+        _imp0 = {"flat": 0, "sqrt_vol": 1, "sqrt": 2}.get(
+            getattr(c0, "impact_model", "flat"), 0)
+        impact_label = st.selectbox(
+            "Market impact", _IMPACT_OPTS, index=_imp0,
+            help="Real slippage grows with how large an order is relative to "
+                 "the instrument's liquidity. The square-root law is the "
+                 "best-established empirical result on this (Almgren et al. "
+                 "2005; Toth et al. 2011; Bouchaud et al. 2018): impact = Y "
+                 "\u00d7 daily volatility \u00d7 \u221a(order \u00f7 average "
+                 "daily volume). Scaling by volatility makes the same order cost "
+                 "more in a turbulent market than a calm one. The fixed variant "
+                 "charges a set cost at 10% of volume regardless of volatility.")
+        impact_model = {0: "flat", 1: "sqrt_vol", 2: "sqrt"}[_IMPACT_OPTS.index(impact_label)]
+        impact_bps10 = float(getattr(c0, "impact_bps_at_10pct_adv", 25.0))
+        impact_coef = float(getattr(c0, "impact_coef", 1.0))
+        if impact_model == "sqrt":
+            impact_bps10 = st.number_input(
+                "Impact at 10% of average daily volume (bps)", 0.0, 500.0,
+                impact_bps10, 5.0,
+                help="The extra cost, on top of the spread, for an order "
+                     "equal to a tenth of the instrument's trailing 20-day "
+                     "average volume. Doubling the order size roughly multiplies "
+                     "this component by \u221a2, not by 2.")
+        elif impact_model == "sqrt_vol":
+            impact_coef = st.number_input(
+                "Impact coefficient Y", 0.0, 5.0, impact_coef, 0.1,
+                help="The constant in the square-root law. Empirical estimates "
+                     "across equity markets sit between about 0.5 and 1; 1 is "
+                     "the conservative end. At Y = 1, an order of 10% of daily "
+                     "volume in a name moving 1% a day costs about 32 bps on top "
+                     "of the spread.")
+        if impact_model != "flat" and source != "Yahoo Finance" and not (
+                price_import is not None and price_import.has("volume")):
+            st.markdown(
+                '<div class="flag">Market impact needs volume data: Yahoo '
+                'Finance, or a Volume column in an imported file. Without it, '
+                'every instrument pays the slippage above alone.</div>',
+                unsafe_allow_html=True)
 
-    _override_text = st.text_area(
-        "Per-instrument slippage multiplier (optional)",
-        value="\n".join(f"{k}: {v:g}" for k, v in
-                        (getattr(c0, "slippage_overrides", {}) or {}).items()),
-        height=70, placeholder="HCAL.TO: 2.5\nWXM.TO: 1.8",
-        help="One per line, TICKER: multiplier. Multiplies the flat "
-             "slippage rate above for that instrument only (2.5 means "
-             "2.5\u00d7 the flat rate). For a name with no volume data, or "
-             "one known to be thinner or deeper than its volume alone "
-             "suggests. Leave blank to use the flat rate everywhere.")
-    slip_overrides: Dict[str, float] = {}
-    for line in _override_text.replace(",", "\n").split("\n"):
-        if ":" not in line:
-            continue
-        k, _, v = line.partition(":")
-        try:
-            slip_overrides[k.strip().upper()] = float(v.strip())
-        except ValueError:
-            continue
+        _override_text = st.text_area(
+            "Per-instrument slippage multiplier (optional)",
+            value="\n".join(f"{k}: {v:g}" for k, v in
+                            (getattr(c0, "slippage_overrides", {}) or {}).items()),
+            height=70, placeholder="HCAL.TO: 2.5\nWXM.TO: 1.8",
+            help="One per line, TICKER: multiplier. Multiplies the flat "
+                 "slippage rate above for that instrument only (2.5 means "
+                 "2.5\u00d7 the flat rate). For a name with no volume data, or "
+                 "one known to be thinner or deeper than its volume alone "
+                 "suggests. Leave blank to use the flat rate everywhere.")
+        slip_overrides: Dict[str, float] = {}
+        for line in _override_text.replace(",", "\n").split("\n"):
+            if ":" not in line:
+                continue
+            k, _, v = line.partition(":")
+            try:
+                slip_overrides[k.strip().upper()] = float(v.strip())
+            except ValueError:
+                continue
 
-    cash_rate = st.number_input("Cash rate (annual %)", 0.0, 15.0,
-                                float(c0.cash_rate_pa * 100), 0.25,
-                                key="cashrate_pct") / 100.0
-    mgmt_fee = st.number_input(
-        "Management fee (annual %)", 0.0, 10.0,
-        float(getattr(c0, "management_fee_pa", 0.0) * 100), 0.05,
-        key="mgmtfee_pct",
-        help="Accrued daily on the marked value and deducted at each "
-             "month-end, which is how a fee is actually billed. A fully "
-             "invested book has no idle cash to pay from, so the deduction "
-             "sells holdings pro rata, exactly as a fund liquidates units "
-             "to meet its own fee.") / 100.0
-    fx_spread = float(c0.fx_spread_bps)
-    fx_cash_policy = e0.fx_cash
-    fx_cash_rate = float(c0.foreign_cash_rate_pa)
-    if base_currency:
-        st.markdown('<div class="eyebrow" style="margin:.8rem 0 .25rem;">'
-                    'Currency conversion</div>', unsafe_allow_html=True)
-        fx_spread = st.number_input(
-            "Exchange spread (bps, each way)", 0.0, 300.0, fx_spread, 5.0,
-            key="fx_spread_bps",
-            help="What it costs to move money between currencies, charged "
-                 "on the amount actually converted. Roughly: 1-5 bps at an "
-                 "institutional desk or Interactive Brokers, 5-15 bps for "
-                 "Norbert's gambit, 100-200 bps at a bank-owned broker "
-                 "converting automatically. 25 is a middle-of-the-road "
-                 "default; set the one you really pay.")
-        fx_cash_policy = st.radio(
-            "Foreign-currency cash", ["net", "hold"],
-            index=0 if fx_cash_policy == "net" else 1, horizontal=True,
-            format_func=lambda k: {"net": "Convert at each trade",
-                                   "hold": "Hold until needed"}[k],
-            key="fx_cash_policy",
-            help="Convert at each trade: at every rebalance the balance in "
-                 "each foreign currency is settled, buys against sells "
-                 "first, and only the remainder crosses currencies (selling "
-                 "one US ETF to buy another costs no conversion). Hold until "
-                 "needed: sale proceeds and dividends stay in their own "
-                 "currency, earn its interest, move with its exchange rate, "
-                 "and fund the next purchase there; money is converted only "
-                 "to cover a shortfall. That is how a USD account behaves, "
-                 "and it carries currency exposure while the cash sits.")
-        fx_cash_rate = st.number_input(
-            "Interest on foreign-currency cash (annual %)", 0.0, 15.0,
-            fx_cash_rate * 100, 0.25, key="fx_cash_rate",
-            help="Paid on every foreign-currency balance. Many brokers "
-                 "pay little or nothing on USD cash.") / 100.0
-    fee_pays_frictions = st.checkbox(
-        "Fee liquidation pays the same commission and slippage",
-        value=bool(getattr(c0, "apply_frictions_to_fee_liquidation", True)),
-        help="An involuntary sale to raise cash for the fee is not free "
-             "just because it was involuntary. On, it pays the same costs "
-             "as any other trade and appears in the trade log tagged "
-             "\u201cFee liquidation\u201d; off reproduces the earlier, "
-             "simpler behaviour.")
+        cash_rate = st.number_input("Cash rate (annual %)", 0.0, 15.0,
+                                    float(c0.cash_rate_pa * 100), 0.25,
+                                    key="cashrate_pct") / 100.0
+        mgmt_fee = st.number_input(
+            "Management fee (annual %)", 0.0, 10.0,
+            float(getattr(c0, "management_fee_pa", 0.0) * 100), 0.05,
+            key="mgmtfee_pct",
+            help="Accrued daily on the marked value and deducted at each "
+                 "month-end, which is how a fee is actually billed. A fully "
+                 "invested book has no idle cash to pay from, so the deduction "
+                 "sells holdings pro rata, exactly as a fund liquidates units "
+                 "to meet its own fee.") / 100.0
+        fx_spread = float(c0.fx_spread_bps)
+        fx_cash_policy = e0.fx_cash
+        fx_cash_rate = float(c0.foreign_cash_rate_pa)
+        if base_currency:
+            st.markdown('<div class="eyebrow" style="margin:.8rem 0 .25rem;">'
+                        'Currency conversion</div>', unsafe_allow_html=True)
+            fx_spread = st.number_input(
+                "Exchange spread (bps, each way)", 0.0, 300.0, fx_spread, 5.0,
+                key="fx_spread_bps",
+                help="What it costs to move money between currencies, charged "
+                     "on the amount actually converted. Roughly: 1-5 bps at an "
+                     "institutional desk or Interactive Brokers, 5-15 bps for "
+                     "Norbert's gambit, 100-200 bps at a bank-owned broker "
+                     "converting automatically. 25 is a middle-of-the-road "
+                     "default; set the one you really pay.")
+            fx_cash_policy = st.radio(
+                "Foreign-currency cash", ["net", "hold"],
+                index=0 if fx_cash_policy == "net" else 1, horizontal=True,
+                format_func=lambda k: {"net": "Convert at each trade",
+                                       "hold": "Hold until needed"}[k],
+                key="fx_cash_policy",
+                help="Convert at each trade: at every rebalance the balance in "
+                     "each foreign currency is settled, buys against sells "
+                     "first, and only the remainder crosses currencies (selling "
+                     "one US ETF to buy another costs no conversion). Hold until "
+                     "needed: sale proceeds and dividends stay in their own "
+                     "currency, earn its interest, move with its exchange rate, "
+                     "and fund the next purchase there; money is converted only "
+                     "to cover a shortfall. That is how a USD account behaves, "
+                     "and it carries currency exposure while the cash sits.")
+            fx_cash_rate = st.number_input(
+                "Interest on foreign-currency cash (annual %)", 0.0, 15.0,
+                fx_cash_rate * 100, 0.25, key="fx_cash_rate",
+                help="Paid on every foreign-currency balance. Many brokers "
+                     "pay little or nothing on USD cash.") / 100.0
+        fee_pays_frictions = st.checkbox(
+            "Fee liquidation pays the same commission and slippage",
+            value=bool(getattr(c0, "apply_frictions_to_fee_liquidation", True)),
+            help="An involuntary sale to raise cash for the fee is not free "
+                 "just because it was involuntary. On, it pays the same costs "
+                 "as any other trade and appears in the trade log tagged "
+                 "\u201cFee liquidation\u201d; off reproduces the earlier, "
+                 "simpler behaviour.")
 
 st.sidebar.markdown("")
 
@@ -3558,7 +3832,8 @@ run_label = (_blend_label if _blend_label else
 cfg = RunConfig(
     label=run_label,
     data=DataConfig(
-        source="yfinance" if source == "Yahoo Finance" else "upload",
+        source=("yfinance" if source == "Yahoo Finance"
+               else "vqc" if source == "VQC export" else "upload"),
         tickers=sel_universe,
         start=str(start) if start else "1990-01-01",
         end=str(end) if end else None,
@@ -3581,9 +3856,7 @@ cfg = RunConfig(
                             weights_source=w_source),
     engine=EngineConfig(initial_capital=float(capital), rebalance=rebalance,
                         execution_lag=int(lag), max_leverage=float(max_lev),
-                        execute_at_open=bool(exec_at_open and (
-                            source == "Yahoo Finance" or (
-                                price_import is not None and price_import.has("open")))),
+                        execute_at_open=bool(exec_at_open and has_open_data),
                         trim_warmup=bool(trim_warm),
                         whole_shares=bool(whole_shares),
                         cash_sweep=cash_sweep,
@@ -3641,6 +3914,32 @@ def build_market() -> MarketData:
         return fetch_market(tuple(needed), str(start), str(end),
                             bool(adjusted), bool(exec_at_open) or need_ohlc,
                             need_div, need_ohlc)
+    if source == "VQC export":
+        if prices_raw is None:
+            raise RuntimeError("No VQC prices file loaded.")
+        # VQC's export is price-return (TR.PriceClose, split-adjusted but
+        # NOT dividend-adjusted) with dividends supplied separately -- the
+        # exact opposite convention from this branch's neighbour below,
+        # which assumes a single price file is already total-return.
+        # Mixing the two up here would double-count VQC's dividends.
+        close = prices_raw
+        adj_close = None
+        if yahoo_bench_ticker and yahoo_bench_ticker.strip():
+            tkr = yahoo_bench_ticker.strip().upper()
+            if tkr not in close.columns:
+                try:
+                    bench_md = load_market_data(
+                        [tkr], str(close.index.min().date()),
+                        str(close.index.max().date()), adjusted=True)
+                    bser = bench_md.close[tkr].reindex(close.index).ffill()
+                    close = close.copy()
+                    close[tkr] = bser
+                    adj_close = pd.DataFrame({tkr: bser})
+                except Exception as exc:
+                    st.sidebar.error(f"Could not fetch benchmark {tkr} "
+                                     f"from Yahoo Finance: {exc}")
+        return MarketData(close=close, open=vqc_open_raw, dividends=vqc_div_raw,
+                          adj_close=adj_close, adjusted=False)
     if price_import is None or not price_import.instruments:
         raise RuntimeError("No file loaded.")
     return PI.to_market(price_import, file_convention or "auto")
@@ -3787,10 +4086,22 @@ if run_clicked and not blocking:
             if market.volume is not None and cfg.costs.impact_model != "flat":
                 vol_px = market.volume.reindex(index=universe.index, columns=cols)
 
+            # A VQC export's universe is survivorship-bias-free: delisted
+            # names carry a caret suffix (e.g. VRN.TO^E25) and their price
+            # series genuinely ends at delisting. Without this, a holding
+            # that delists is marked at zero forever instead of closed out
+            # at its last (possibly reviewed-terminal) price -- the caret
+            # is exactly what distinguishes "this name delisted" from an
+            # ordinary data gap, so it's the only source used here, never
+            # inferred from wherever a price series happens to end.
+            delistable_assets = ({c for c in cols if "^" in c}
+                                 if cfg.data.source == "vqc" else None)
             result = run_backtest(universe, weights, cfg.engine, cfg.costs,
                                   cash_px, run_label, rebal_dates,
                                   open_prices=open_px, dividends=div_px,
-                                  volume=vol_px, fx=fx_book)
+                                  volume=vol_px, fx=fx_book,
+                                  liquidate_on_delist=bool(delistable_assets),
+                                  delistable_assets=delistable_assets)
             # Comparison strategies: the same inputs, calendar, execution and
             # frictions as the main run, each with its own model.
             cmp_results: Dict[str, Any] = {}
@@ -3805,7 +4116,9 @@ if run_clicked and not blocking:
                     cmp_results[name] = run_backtest(
                         universe, w_c, cfg.engine, cfg.costs, cash_px, name,
                         None, open_prices=open_px, dividends=div_px,
-                        volume=vol_px, fx=fx_book)
+                        volume=vol_px, fx=fx_book,
+                        liquidate_on_delist=bool(delistable_assets),
+                        delistable_assets=delistable_assets)
                 except Exception as exc:
                     quality.warnings.append(
                         f"Comparison strategy {name} failed: {exc}")
@@ -3955,6 +4268,9 @@ if run_clicked and not blocking:
             # otherwise the preset's own tags.
             "classes": (dict(class_map) if class_map else PRESETS.classes_for(
                 st.session_state.get("_preset_applied", ""), list(universe.columns))),
+            # GICS sector per instrument, from a VQC export, for the
+            # Attribution tab and the Excel report.
+            "sectors": (dict(vqc_sectors) if source == "VQC export" else {}),
             "market": market,
             "bench_mode": bench_mode,
             "bench_frictions": (list(bench_fric) if bench is not None
@@ -4812,8 +5128,10 @@ with tabs[4]:
              "return exactly, for the whole backtest and for every period.")
         _assets = list(res.weights.columns)
         a1, a2 = st.columns([1.2, 1])
-        _view = a1.radio("Group by", ["Security", "Asset class"], horizontal=True,
-                         key="attr_view")
+        _sectors = {a: v for a, v in (run.get("sectors") or {}).items()
+                    if a in _assets}
+        _views = ["Security", "Asset class"] + (["Sector"] if _sectors else [])
+        _view = a1.radio("Group by", _views, horizontal=True, key="attr_view")
         _period = a2.selectbox("Period table by", ["Year", "Quarter", "Month"],
                                key="attr_period")
 
@@ -4836,6 +5154,12 @@ with tabs[4]:
                     disabled=["Instrument", "Name"], hide_index=True,
                     use_container_width=True, key="attr_cls_editor")
             _groups = dict(zip(_ed["Instrument"], _ed["Asset class"]))
+        elif _view == "Sector":
+            _groups = {a: _sectors.get(a, "Unclassified") for a in _assets}
+            _nun = sum(1 for a in _assets if a not in _sectors)
+            note(f"Grouped by the sector in the VQC export"
+                 + (f"; {_nun} instrument(s) have none and sit under "
+                    f"“Unclassified”." if _nun else "."))
         elif len(_assets) > 12:
             # Thirty lines on one chart is unreadable: the ten largest
             # contributors by size keep their own line, the rest are pooled.
@@ -6164,6 +6488,13 @@ with tabs[9]:
                           ATTR.summary(res, _cls, ppy), False),
                          ("Attribution", "Class Contribution by Year",
                           ATTR.by_period(res, "Year", _cls), True)]
+            _sec = dict(run.get("sectors") or {})
+            if _sec:
+                _sec = {a: _sec.get(a, "Unclassified") for a in res.weights.columns}
+                secs += [("Attribution", "Contribution by Sector",
+                          ATTR.summary(res, _sec, ppy), False),
+                         ("Attribution", "Sector Contribution by Year",
+                          ATTR.by_period(res, "Year", _sec), True)]
         else:
             miss.append(("Attribution", "Contribution",
                          "This result predates contribution tracking; run again."))
@@ -6295,7 +6626,8 @@ with tabs[9]:
                  else "Imported target weights")
         assumptions = {
             "Strategy": strat,
-            "Data": ("Yahoo Finance" if rcfg.data.source == "yfinance" else "Imported files")
+            "Data": ({"yfinance": "Yahoo Finance", "vqc": "VQC export"}.get(
+                         rcfg.data.source, "Imported files"))
                     + (", total return" if rcfg.data.adjusted else ", price return + cash dividends"),
             "Period": f"{res.equity.index[0].date()} to {res.equity.index[-1].date()}"
                       + (" (window)" if windowed else ""),

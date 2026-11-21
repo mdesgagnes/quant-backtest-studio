@@ -1636,6 +1636,24 @@ for the whole backtest, each year, quarter or month -- with no residual.
 The Excel export carries the contribution summary, the contribution by
 year and the daily ledger.
 
+**VQC strategies.** A VQC bundle (or any imported target weights) is
+attributed exactly like a built-in model: the weights drive the same
+engine, so every holding gets its own contribution, share of result and
+share of risk. A fundamental book usually holds far more names than a
+chart can show, so under *Security* the ten largest contributors keep
+their own line and the rest are pooled as "Other holdings"; the table,
+the period view and the downloads still list every name. A name that
+delists is sold at its last price, which realizes nothing, so its exit
+does not appear as a loss: contributions still add up to the portfolio's
+return.
+
+When the bundle carries a `sectors.csv` (VQC adds it to its "Bundle for the
+studio" download), *Group by* offers **Sector**: contributions, share of
+risk and the period tables per GICS sector, and the Excel report gains
+*Contribution by Sector* sheets. A sectors file can also be uploaded
+alone under "Or upload individual files". Names without a sector are
+shown as "Unclassified".
+
 ## 8 bis bis. Performance standard (CIPM / GIPS)
 
 Performance figures follow the CIPM program and Carl Bacon, *Practical

@@ -36,6 +36,10 @@ Simulation model, explicit and verifiable:
    scheduled or threshold-triggered reinvestment, which buys toward the
    last rebalance's target weights and keeps a cash buffer. This requires price-return (non dividend-adjusted)
    prices, otherwise the dividend would be counted twice.
+8. Optionally, a holding whose price series genuinely ENDS (its last valid
+   observation, not just a halt or a missing bar) is liquidated into cash at
+   that last price on the following session -- a real delisting, not a
+   phantom position marked at zero forever. See `liquidate_on_delist`.
 """
 from __future__ import annotations
 
@@ -184,7 +188,9 @@ def run_backtest(prices: pd.DataFrame,
                  open_prices: Optional[pd.DataFrame] = None,
                  dividends: Optional[pd.DataFrame] = None,
                  volume: Optional[pd.DataFrame] = None,
-                 fx: Optional[FxBook] = None) -> BacktestResult:
+                 fx: Optional[FxBook] = None,
+                 liquidate_on_delist: bool = False,
+                 delistable_assets: Optional[set] = None) -> BacktestResult:
     """Simulates the portfolio day by day. Returns all diagnostics.
 
     `fx` switches on multi-currency accounting. `prices` and `dividends`
@@ -221,10 +227,59 @@ def run_backtest(prices: pd.DataFrame,
     the simulation "know" a print it could not have known when the order
     was placed. Instruments with no volume data supplied fall back to the
     flat slippage rate, since impact cannot be estimated without it.
+
+    `liquidate_on_delist`, when true, closes out any instrument whose price
+    series has genuinely ENDED -- its last valid observation, determined once
+    from the whole column, not merely today's missing bar -- at that last
+    known price, the session after. Without this a name that stops pricing
+    is marked at zero for every remaining session (since its weight can no
+    longer be computed from a NaN price) while its shares silently linger in
+    the book forever: harmless if the last price already was the reviewed
+    terminal value (e.g. 0 for cancelled equity), but wrong whenever a
+    delisting instead converts the holding to cash at a nonzero price (e.g.
+    a takeout). Off by default, since a universe of continuously-priced
+    instruments (ETFs, major indices) never exercises it.
+
+    `delistable_assets`, when supplied alongside `liquidate_on_delist=True`,
+    restricts the exit mechanism to that set of column names -- every other
+    column's "last valid observation" is never treated as a delisting, no
+    matter how far short of the dataset's own final date it falls short.
+    This matters because a live data pull's tail is routinely ragged: most
+    instruments' last available session lands a day or two before the
+    single most-recently-updated instrument's, for mundane vendor-lag
+    reasons that have nothing to do with any of them delisting. Without
+    this restriction, EVERY instrument sharing that earlier common cutoff
+    gets exited on the same date as if it had just delisted -- a mass
+    false-delisting event manufactured entirely by which few names happened
+    to be refreshed most recently. Left as None (the default), every
+    column is eligible, which is correct only for a dataset with no ragged
+    edge (e.g. a periodically-refreshed universe of ETFs) or when the
+    caller has no independent signal for which names are genuinely
+    delisted (e.g. the studio's own generic file-upload path). The VQC
+    bridge (`vqc.studio.run_with_studio`) always supplies this, computed
+    from the portfolio's own `Delisted`/caret-suffix flag -- the one
+    reliable source of truth for "this name actually delisted" in that
+    dataset.
     """
     prices = prices.sort_index()
     idx = prices.index
     assets = list(prices.columns)
+
+    # A column NOT in `delistable_assets` is, by construction, a name the
+    # caller has told us never genuinely delists -- so a missing price
+    # there (a temporary vendor gap, or simply today's not-yet-updated
+    # session at the live edge of a data pull) must NOT collapse that
+    # holding's mark to zero. Forward-filled here, once, before marking
+    # ever runs: the position is carried at its last known price instead
+    # of being wiped out by a data hole that says nothing about its real
+    # value. Delisted columns are deliberately left untouched -- their
+    # trailing NaNs are exactly what `last_valid_pos` below needs to find
+    # the real exit point.
+    if liquidate_on_delist and delistable_assets is not None:
+        stale_ok = [a for a in assets if a not in delistable_assets]
+        if stale_ok:
+            prices = prices.copy()
+            prices[stale_ok] = prices[stale_ok].ffill()
 
     w_target = target_weights.reindex(index=idx, columns=assets).fillna(0.0)
 
@@ -701,9 +756,33 @@ def run_backtest(prices: pd.DataFrame,
                       "Cash after": cash})
         return cost + fx_paid, float(notional.sum()) / portfolio_value
 
+    # Last valid session per instrument -- computed once, from the whole
+    # column, so a genuine delisting (the series never prices again) is
+    # never confused with a halt or a one-day vendor gap that later resumes.
+    #
+    # This must accept a recorded price of exactly 0.0 as a real, final
+    # observation, NOT the same as missing data: a reviewed terminal value
+    # of 0 for a cancelled equity IS the last valid observation, and has to
+    # be the exit price so the position realizes -100%, not whatever it
+    # last quoted before review. `_valid` (isfinite & >0) is right for
+    # marking/trading, where a zero price can't size a position -- but
+    # wrong here, where it would silently walk back to a stale nonzero
+    # price and understate a cancelled name's loss.
+    last_valid_pos = np.full(m, n - 1, dtype=int)
+    if liquidate_on_delist:
+        has_price = np.isfinite(close_px)
+        eligible = (set(assets) if delistable_assets is None
+                    else set(delistable_assets) & set(assets))
+        for j in range(m):
+            if assets[j] not in eligible:
+                continue
+            valid_j = np.flatnonzero(has_price[:, j])
+            last_valid_pos[j] = valid_j[-1] if len(valid_j) else -1
+
     # ------------------------------------------------------------------
     # One day at a time. Nothing below reads a future row.
     # ------------------------------------------------------------------
+    delisted_today = np.zeros(m, dtype=bool)   # reset daily when in use
     for i, date in enumerate(idx):
         prev_value = nav[i - 1] if i > 0 else float(engine.initial_capital)
         cost_i = 0.0
@@ -713,6 +792,8 @@ def run_backtest(prices: pd.DataFrame,
         cash_pnl = 0.0
         div_vec = np.zeros(m)
         fx_day = 0.0                       # exchange spread paid today
+        if liquidate_on_delist:
+            delisted_today[:] = False
 
         if i > 0:
             # 1) Cash earns overnight; leverage is charged for.
@@ -755,6 +836,27 @@ def run_backtest(prices: pd.DataFrame,
                                   "Units": float(shares[j]),
                                   "Per unit": float(div_ps[i][j])})
 
+            # 2b) Delisting exits: a name whose series ENDED yesterday is
+            # closed out today at its last known price, before any of
+            # today's own trading. Frictionless -- this is a reviewed
+            # corporate outcome, not a discretionary order.
+            if liquidate_on_delist:
+                gone = np.flatnonzero((last_valid_pos == i - 1) & (shares != 0.0))
+                for j in gone:
+                    exit_px = float(close_px[last_valid_pos[j], j])
+                    proceeds = shares[j] * exit_px
+                    trades.append({
+                        "Date": date, "Instrument": assets[j],
+                        "Shares Before": shares[j], "Shares After": 0.0,
+                        "Change": -shares[j], "Price": exit_px,
+                        "Notional": float(abs(shares[j]) * exit_px),
+                        "Effective Cost (bps)": 0.0,
+                        "Reason": "Delisting exit",
+                    })
+                    cash += proceeds
+                    shares[j] = 0.0
+                    delisted_today[j] = True
+
         # 3) Trade. At the open the book is valued at open prices first, so
         #    the order is sized on what it is worth when it is placed.
         can_trade = (date in rebal_set) and (i >= int(engine.execution_lag))
@@ -796,6 +898,13 @@ def run_backtest(prices: pd.DataFrame,
                              + shares * (mark - mark_open))
             else:
                 price_pnl = shares_open * (mark - mark_prev)
+            # A delisting exit sells at the last price the name traded at,
+            # which is the mark it carried in: it realizes nothing. Left in,
+            # the missing close would mark the carried units to zero and
+            # book a total loss that never happened, and the contribution
+            # ledger would stop adding up to the portfolio's return.
+            if liquidate_on_delist:
+                price_pnl = np.where(delisted_today, 0.0, price_pnl)
             PNL[i, :m] = price_pnl + div_vec
             PNL[i, m] = cash_pnl
 

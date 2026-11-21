@@ -6,6 +6,7 @@ yfinance>=0.2.40
 PyYAML>=6.0
 openpyxl>=3.1
 xlrd>=2.0
+pyarrow>=14.0
 matplotlib>=3.8
 reportlab>=4.0
 python-pptx>=0.6.23

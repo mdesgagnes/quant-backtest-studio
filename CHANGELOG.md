@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased: `feature/vqc-bundle` (2026-11-21)
+
+### Added
+- **VQC export as a data source, ported from V2 (`quant-backtest-studio-v2`).** A fourth source, "VQC export", takes VQC's "Bundle for the studio" zip (close, open, dividends, weights and optional sectors CSVs) in one upload, or the files one by one (CSV, Excel or parquet). A bundle drives the run: its own rebalance dates, execution lag 0, open execution when opens are present, whole shares, 5 bps commission; only slippage and initial capital stay adjustable. VQC portfolios then go through V1's statistics, CIPM appraisal, Brinson-Fachler attribution and Excel report unchanged. Delisted names (caret suffix, e.g. `VRN.TO^E25`) are sold at their last price instead of being marked at zero, comparison strategies included. Attribution groups by **Sector** when the bundle carries `sectors.csv`. On the sample export the result matches V2's to the cent (final equity, 1,399 trades, 13 delisting exits). 1 test.
+
+### Fixed
+- V2's "Or upload individual files" path called a `parse_upload` helper that no longer existed; it is restored.
+
 ## Unreleased: `feature/symbol-impact-view` (2026-11-21), seventh round
 
 ### Added

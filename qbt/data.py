@@ -288,7 +288,23 @@ def load_file(file_obj, sheet: Optional[str] = None,
     data = file_obj.read() if hasattr(file_obj, "read") else file_obj
     buf = io.BytesIO(data) if isinstance(data, (bytes, bytearray)) else data
 
-    if name.endswith((".xlsx", ".xls", ".xlsm")):
+    if name.endswith(".parquet") or name.endswith(".pq"):
+        df = pd.read_parquet(buf)
+        if isinstance(df.index, pd.DatetimeIndex):
+            # A matrix saved with dates already as the index (e.g.
+            # vqc.storage's close_daily.parquet/open_daily.parquet/
+            # dps_daily.parquet) -- nothing to pivot. Arrow round-trips can
+            # hand back nullable Float64/Int64 dtypes instead of plain
+            # float64, which several downstream numeric ops don't expect.
+            wide = _normalize_index(df)
+            wide = wide.apply(pd.to_numeric, errors="coerce").astype("float64")
+            wide.index.name = "Date"
+            return wide
+        # No meaningful saved index (e.g. a long/stacked export with Date
+        # as an ordinary column) -- treat it like CSV/Excel below and let
+        # the date-column / wide-vs-long detection handle it.
+        df = df.reset_index(drop=isinstance(df.index, pd.RangeIndex))
+    elif name.endswith((".xlsx", ".xls", ".xlsm")):
         df = pd.read_excel(buf, sheet_name=sheet or 0)
     else:
         try:
@@ -323,6 +339,15 @@ def load_file(file_obj, sheet: Optional[str] = None,
         wide = df.set_index(dc)
         wide = wide.select_dtypes(include=[np.number, "object"])
 
+    # The index is whatever dtype read_csv/set_index left it as (typically
+    # plain strings) until normalized to real dates here. Callers that
+    # immediately run this through clean_prices() get this for free via
+    # _normalize_index() there too, but callers that use a load_file()
+    # result directly -- e.g. the VQC-export source's open-price and
+    # dividend uploads, reindexed straight against an already-cleaned price
+    # panel -- would otherwise reindex a string index against a
+    # DatetimeIndex and silently match nothing.
+    wide = _normalize_index(wide)
     wide.index.name = "Date"
     return wide
 
