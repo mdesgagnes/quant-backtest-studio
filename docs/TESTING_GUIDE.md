@@ -18,7 +18,7 @@ conda activate quant
 python -m pytest -q
 ```
 
-Expected: **347 passed** (285 existing + 62 new). Takes about a minute.
+Expected: **350 passed** (285 existing + 65 new). Takes about a minute.
 
 ```bash
 streamlit run app.py
@@ -114,6 +114,7 @@ Open the **Security review** workspace (first in the sidebar). Defaults: USMV, a
 | 20 | Press **Full report (Excel)** and open it | Opens on the Executive Summary (the portfolio with the security against the portfolio without it), then About (every table, with links), Performance (statistics, CIPM appraisal, trailing periods, calendar years, drawdowns, monthly returns), Performance Analysis, then the review sheets: Summary, Verdict, Ranking, Fund Review, Relative to Benchmark, Diversification, Portfolio Impact, Scenarios, Regimes, Factor Exposures, Robustness, (Profile Sweep), Methodology, Series. Red titles, black headers, percentages as numbers. The Summary sheet holds the sentences and the summary table; every Details tab matches a sheet. |
 | 21 | Methodology sheet | Source field, currency method, T-bill source, CPI source, rebalancing, holdings with proxy splice dates, objective definition and thresholds. |
 | 22 | Switch to **Backtest**, Yahoo Finance source, default settings, run | The backtest works as before (results, tabs, exports). |
+| 22b | Backtest, Model **Fixed Weights**, "Load an investor profile": Balanced; run | Weights box: XIC.TO:0.18, VFV.TO:0.27, XEF.TO:0.12, XEC.TO:0.03, XBB.TO:0.4; the five tickers appear in Symbols and the investable universe; the run completes. Comparison benchmark **Blend of several**, load Conservative: XBB.TO 60% in the note. |
 | 23 | Backtest > Source **Return stream** > Yahoo, a few tickers | Return stream, Fund review and Diversification work as before. |
 | 24 | Set `markets: enabled: true` in `config/features.yaml`, reload | Markets is back in the sidebar (Research the same way). Set it back to `false`. |
 | 25 | Run the calibration and matrix scripts (optional, about 1 and 5 minutes) | `python scripts/calibration.py` rewrites docs/CALIBRATION_REPORT.md; `python scripts/scenario_matrix.py` rewrites docs/SCENARIO_MATRIX.md and examples/scenario_matrix.xlsx. |

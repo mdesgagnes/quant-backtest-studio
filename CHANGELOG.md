@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased: `feature/symbol-impact-view` (2026-11-21), sixth round
+## Unreleased: `feature/symbol-impact-view` (2026-11-21), seventh round
+
+### Added
+- **Investor profiles in the Backtest.** With the **Fixed Weights** model, "Load an investor profile" fills the weights from `config/profiles.yaml` (and saved custom profiles), adds the profile's tickers to the symbols and includes them in the investable universe. With **Blend of several** as the comparison benchmark, the same list fills the benchmark weights. The weights stay editable; a note gives the weights in percent and reminds that the Security review rebalances profiles quarterly and that the Backtest has no proxy splicing (start after late 2013 for a fully invested profile). New module `qbt/profile_weights.py`; 3 tests.
+
 
 ### Added
 - **Split funding.** "Funded from: Split between bonds and equities" sets the share of the add weight each side pays, whatever the portfolio's own split: 6% gold paid 50/50 takes 3 points from bonds and 3 from equities, so Balanced becomes 57% equities / 37% bonds / 6% gold and Growth 67 / 27 / 6. Each side is reduced pro rata within itself. The default share is the portfolio's own bond weight; the sidebar shows every holding that changes (XBB.TO 40.0% -> 37.0%) and warns when a side cannot pay its part. Works in the profile sweep (n/a where a side is not held), the add-weight grid (capped where a side runs out) and the command line (`fund_from: {bonds: 50, equities: 50}`; any tickers as well as groups). Demo 9. 2 tests.

@@ -46,6 +46,7 @@ from qbt import returns_input as RS
 from qbt import clustering_ui as CLUI
 from qbt import sortable as SORTABLE
 from qbt import presets as PRESETS
+from qbt import profile_weights as PROFW
 from qbt import formula as FORMULA
 from qbt import excel_export as XL
 from qbt import exec_summary as ES
@@ -2523,6 +2524,46 @@ if source == "Return stream":
     st.stop()
 
 
+_KEEP_TYPED = "(keep the weights typed below)"
+
+
+def _apply_profile(sel_key: str, target_key: str, universe: bool) -> None:
+    """Runs before the page is redrawn: fills the weights box from the
+    chosen profile and, for the model, adds its tickers to the symbols."""
+    prof = PROFW.profiles().get(st.session_state.get(sel_key))
+    if prof is None:
+        return
+    st.session_state[target_key] = PROFW.weights_spec(prof)
+    if universe:
+        st.session_state["tickers_box"] = PROFW.merge_tickers(
+            st.session_state.get("tickers_box", ""), list(prof.weights))
+        st.session_state["_universe_all"] = True
+
+
+def _profile_picker(sel_key: str, target_key: str, universe: bool, label: str) -> None:
+    """A list of the Security review's investor profiles (config/profiles.yaml
+    and saved custom ones); choosing one fills the weights below."""
+    opts = PROFW.profiles()
+    if not opts:
+        return
+    st.sidebar.selectbox(
+        label, [_KEEP_TYPED] + list(opts), key=sel_key,
+        on_change=_apply_profile, args=(sel_key, target_key, universe),
+        help="The same profiles as the Security review (config/profiles.yaml, plus "
+             "profiles saved there). The weights below are filled in and stay "
+             "editable" + ("; the profile's tickers are added to the symbols and the "
+                           "investable universe." if universe else "."))
+    prof = opts.get(st.session_state.get(sel_key))
+    if prof is not None:
+        st.sidebar.markdown(
+            '<div class="note">' + PROFW.weights_words(prof)
+            + f'. The Security review rebalances profiles {prof.rebalance}: set Rebalance '
+            + ('(Execution, below) ' if universe else '(Benchmark rebalance) ')
+            + 'to match. The Backtest uses each ETF\'s own history, with no proxy splicing: '
+              'start after the youngest holding\'s first price (VFV.TO late 2012, XEF.TO and '
+              'XEC.TO 2013) for a fully invested portfolio.</div>', unsafe_allow_html=True)
+
+
 price_import: Optional["PI.ImportResult"] = None
 upload_error = None
 
@@ -2600,8 +2641,9 @@ else:
 univ_options = tickers or []
 sel_universe = st.sidebar.multiselect(
     "Investable universe", univ_options,
-    default=[t for t in (d0.tickers if source == "Yahoo Finance" else univ_options)
-             if t in univ_options] or univ_options)
+    default=(univ_options if st.session_state.get("_universe_all") else
+             [t for t in (d0.tickers if source == "Yahoo Finance" else univ_options)
+              if t in univ_options] or univ_options))
 
 BLEND = "Blend of several"
 BENCH_STRAT = "Another strategy"
@@ -2616,9 +2658,11 @@ benchmark = st.sidebar.selectbox(
 bench_blend: Dict[str, float] = {}
 bench_blend_rule = "A"
 if benchmark == BLEND:
+    _profile_picker("bench_profile", "benchspec", universe=False,
+                    label="Load an investor profile as the benchmark")
+    st.session_state.setdefault("benchspec", "XIC.TO:60, XBB.TO:40")
     bench_spec = st.sidebar.text_area(
-        "Benchmark weights", value=st.session_state.get(
-            "benchspec", "XIC.TO:60, XBB.TO:40"),
+        "Benchmark weights",
         height=68, key="benchspec",
         help="TICKER:WEIGHT, comma or line separated. Percentages or "
              "fractions both work. Instruments outside the investable "
@@ -3142,6 +3186,10 @@ if mode == "builtin" and construction == "Blend of strategies":
                 else f'<div class="note">Budgets total {_tot*100:.0f}%.</div>')
         st.markdown(_msg, unsafe_allow_html=True)
 
+if mode == "builtin" and strat_key == "fixed_weights":
+    _profile_picker("fw_profile", "p_fixed_weights_weights", universe=True,
+                    label="Load an investor profile")
+
 params: Dict[str, Any] = {}
 for p in (strategy.params if mode == "builtin" else []):
     key = f"p_{strat_key}_{p.key}"
@@ -3177,8 +3225,10 @@ for p in (strategy.params if mode == "builtin" else []):
         params[p.key] = st.sidebar.selectbox(p.label, opts, index=idx,
                                              help=p.help or None, key=key)
     else:
-        params[p.key] = st.sidebar.text_input(p.label, str(default or ""),
-                                              help=p.help or None, key=key)
+        # No value argument: the box may have been filled from a profile
+        # through the session state (see _profile_picker).
+        st.session_state.setdefault(key, str(default or ""))
+        params[p.key] = st.sidebar.text_input(p.label, help=p.help or None, key=key)
 
 # --- Execution and frictions ---
 # Folded by default: these hold steady across runs, while the universe and
