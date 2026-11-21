@@ -2754,9 +2754,10 @@ elif source == "VQC export":
         "Pull a benchmark ticker from Yahoo Finance (optional)",
         value=st.session_state.get("_yahoo_bench_ticker", ""),
         help="VQC's export doesn't include an index/ETF benchmark -- e.g. "
-             "XIC.TO. Fetched as total return (dividends reinvested); "
-             "leave blank to compare against nothing or pick a ticker "
-             "already in the price file instead.")
+             "XIC.TO. It becomes the comparison benchmark below and is "
+             "fetched as total return (dividends reinvested) when the run "
+             "starts. Leave blank to pick a ticker already in the price "
+             "file, a blend, or no benchmark.")
     st.session_state["_yahoo_bench_ticker"] = yahoo_bench_ticker
 else:
     ups = st.sidebar.file_uploader(
@@ -2813,10 +2814,16 @@ else:
 
 BLEND = "Blend of several"
 BENCH_STRAT = "Another strategy"
-bench_choices = ["None"] + univ_options + [BLEND, BENCH_STRAT]
+# A VQC export carries no index or ETF: the ticker typed under "Benchmark
+# (Yahoo Finance)" is downloaded at run time, so it is offered here, and
+# selected, even though it is not in the imported prices.
+_yahoo_bench = (yahoo_bench_ticker.strip().upper()
+                if source == "VQC export" and yahoo_bench_ticker else "")
+_extra_bench = [_yahoo_bench] if _yahoo_bench and _yahoo_bench not in univ_options else []
+bench_choices = ["None"] + univ_options + _extra_bench + [BLEND, BENCH_STRAT]
 _pb = st.session_state.get("_preset_bench")
-bench_default = _pb if _pb in univ_options else (
-    d0.benchmark if d0.benchmark in univ_options else None)
+bench_default = _yahoo_bench or (_pb if _pb in univ_options else (
+    d0.benchmark if d0.benchmark in univ_options else None))
 benchmark = st.sidebar.selectbox(
     "Comparison benchmark", bench_choices,
     index=bench_choices.index(bench_default) if bench_default else 0)
@@ -3924,22 +3931,35 @@ def build_market() -> MarketData:
         # Mixing the two up here would double-count VQC's dividends.
         close = prices_raw
         adj_close = None
-        if yahoo_bench_ticker and yahoo_bench_ticker.strip():
-            tkr = yahoo_bench_ticker.strip().upper()
-            if tkr not in close.columns:
-                try:
-                    bench_md = load_market_data(
-                        [tkr], str(close.index.min().date()),
-                        str(close.index.max().date()), adjusted=True)
-                    bser = bench_md.close[tkr].reindex(close.index).ffill()
-                    close = close.copy()
-                    close[tkr] = bser
-                    adj_close = pd.DataFrame({tkr: bser})
-                except Exception as exc:
-                    st.sidebar.error(f"Could not fetch benchmark {tkr} "
-                                     f"from Yahoo Finance: {exc}")
+        notes: List[str] = []
+        # Benchmark instruments the export does not carry come from Yahoo
+        # Finance as total return: the typed ticker, and the components of
+        # a blend (the default XIC.TO / XBB.TO blend included).
+        extra = list(dict.fromkeys(
+            ([_yahoo_bench] if _yahoo_bench else [])
+            + (list(bench_blend.keys()) if benchmark == BLEND else [])))
+        extra = [t for t in extra if t not in close.columns]
+        if extra:
+            try:
+                bench_md = fetch_market(
+                    tuple(extra), str(close.index.min().date()),
+                    str((close.index.max() + pd.Timedelta(days=1)).date()),
+                    True, False, False, False)
+                got = [t for t in extra if t in bench_md.close.columns
+                       and bench_md.close[t].notna().any()]
+                if got:
+                    bpx = bench_md.close[got].reindex(close.index).ffill()
+                    close = pd.concat([close, bpx], axis=1)
+                    adj_close = bpx
+                for t in extra:
+                    if t not in got:
+                        notes.append(f"Benchmark {t}: no prices from Yahoo "
+                                     f"Finance for the export's period.")
+            except Exception as exc:
+                notes.append(f"Could not fetch the benchmark "
+                             f"({', '.join(extra)}) from Yahoo Finance: {exc}")
         return MarketData(close=close, open=vqc_open_raw, dividends=vqc_div_raw,
-                          adj_close=adj_close, adjusted=False)
+                          adj_close=adj_close, adjusted=False, notes=notes)
     if price_import is None or not price_import.instruments:
         raise RuntimeError("No file loaded.")
     return PI.to_market(price_import, file_convention or "auto")
