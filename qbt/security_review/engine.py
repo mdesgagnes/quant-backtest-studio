@@ -1,17 +1,29 @@
 """The Security review decision engine: one pure entry point, `run`.
 
-    review = run(Request(profile="balanced", objective="lower_volatility",
-                         candidates=["USMV", "SPLV", "QUAL"]), cfg, bundle)
+    review = run(Request(profile="balanced", objective=None,
+                         candidates=["DBMF", "GLD"], weight=0.06,
+                         fund_from={"bonds": 50, "equities": 50}), cfg, bundle)
 
-Steps for each candidate, on the analysis period (see `alignment`):
-standalone profile -> within-sleeve statistics vs the sleeve benchmark ->
-factor exposures -> portfolio impact (Add at a weight funded pro rata, or
-Replace a holding) -> risk of ruin and decumulation -> stress windows and
-regimes -> robustness (rolling windows, add-weight grid) -> verdict for
-every objective, with the requested objective first.
+The flow, for each candidate (the page shows the same steps, numbered):
+
+1. Portfolio "without": the profile, blend, benchmark ticker or uploaded
+   stream (`resolve_profile`), its holdings' monthly CAD returns with proxy
+   splices (`holding_returns`).
+2. Portfolio "with": the candidate at the add weight, paid for by the
+   funding plan (`funding_plan`: every holding pro rata, a group, a split
+   between groups, or chosen holdings), or one holding replaced.
+3. Analysis period: the months both portfolios and the candidate have
+   (common to all candidates, or each candidate's own; `alignment`).
+4. Measures: both portfolios with `qbt.metrics` (CIPM, the Backtest's own),
+   the difference (`impact.impact_metrics`), the candidate against the
+   benchmark (the portfolio unless another is chosen), factor exposures,
+   weighted MER and yield, risk of ruin and decumulation.
+5. Checks: stress windows, regimes, rolling windows, the add-weight grid,
+   data-quality flags.
+6. Verdict: every objective scored; the requested one (if any) first.
 
 Nothing here draws or reads the interface; the Streamlit page, the Excel
-export and the scenario-matrix script all call `run`.
+export, the command line and the scenario-matrix script all call `run`.
 """
 from __future__ import annotations
 
@@ -27,7 +39,7 @@ from . import stats as S
 from . import verdict as V
 from .bundle import Bundle
 from .config import AllConfig, ConfigError, Profile
-from .portfolio import add_weights, fund_weights, portfolio_returns, replace_weights
+from .portfolio import add_weights, portfolio_returns, replace_weights, split_fund_weights
 
 CURRENCY_NOTE = ("All returns in CAD. US-listed prices are converted at each day's USD/CAD "
                  "close (Yahoo CAD=X; Fed H.10 history before 2003-09-17); CAD-listed "
@@ -58,7 +70,8 @@ class Request:
     # Add mode: where the add weight comes from. None = every holding, pro
     # rata. Otherwise a list of holdings and / or groups ("bonds",
     # "equities"), reduced pro rata to their weights; the rest is untouched.
-    fund_from: Optional[List[str]] = None
+    # A dict splits it: {"bonds": 50, "equities": 50} takes half from each.
+    fund_from: Optional[Union[List[str], Dict[str, float]]] = None
 
 
 @dataclass
@@ -121,6 +134,7 @@ class Review:
     objective_chosen: bool = True            # False: the verdict is computed but not the point
     rf: Optional[pd.Series] = None           # monthly risk-free returns used (CAD T-bill)
     funded_from: Optional[List[str]] = None  # holdings reduced to pay for the addition
+    funding: Optional[List[Dict[str, Any]]] = None   # the funding plan (see funding_plan)
 
 
 # ----------------------------------------------------------------------
@@ -138,25 +152,82 @@ def asset_class(cfg: AllConfig, t: str) -> Optional[str]:
     return "bond" if "bond" in sl else "equity" if "equity" in sl else None
 
 
-def funding_sources(cfg: AllConfig, prof: Profile, fund_from: Optional[List[str]]) -> Optional[List[str]]:
-    """The holdings of `prof` that pay for the addition (None = all, pro rata)."""
+FundFrom = Union[List[str], Dict[str, float]]
+
+
+def _group_holdings(cfg: AllConfig, prof: Profile, f: str) -> List[str]:
+    g = GROUPS.get(str(f).lower())
+    if g:
+        return [t for t in prof.weights if asset_class(cfg, t) == g]
+    return [str(f).upper()] if str(f).upper() in prof.weights else []
+
+
+def funding_plan(cfg: AllConfig, prof: Profile, fund_from: Optional[FundFrom]
+                 ) -> Optional[List[Dict[str, Any]]]:
+    """Who pays for the addition, as parts: [{"name", "holdings", "share"}],
+    shares of the add weight summing to 1. None = every holding, pro rata.
+
+    - a list (["bonds"], ["XBB.TO", "XIC.TO"]): one part, the named groups
+      and holdings together, reduced pro rata to their weights;
+    - a dict ({"bonds": 50, "equities": 50}): one part per entry, each paying
+      its share (percent or fraction) of the add weight, pro rata within it.
+    """
     if not fund_from:
         return None
-    out = []
-    for f in fund_from:
-        g = GROUPS.get(str(f).lower())
-        if g:
-            out += [t for t in prof.weights if asset_class(cfg, t) == g]
-        elif str(f).upper() in prof.weights:
-            out.append(str(f).upper())
-    return list(dict.fromkeys(out))
+    if isinstance(fund_from, dict):
+        items = [(str(k), float(v)) for k, v in fund_from.items() if float(v) > 0]
+        tot = sum(v for _, v in items)
+        if not items or tot <= 0:
+            raise ConfigError("The funding split needs at least one positive share.")
+        if abs(tot - 100.0) < 1e-6 or tot > 1.0 + 1e-6:
+            items = [(k, v / 100.0) for k, v in items]
+            tot = sum(v for _, v in items)
+        if abs(tot - 1.0) > 1e-3:
+            raise ConfigError(f"The funding shares add up to {tot:.0%}, not 100%.")
+        return [{"name": k, "holdings": _group_holdings(cfg, prof, k), "share": v / tot}
+                for k, v in items]
+    held = list(dict.fromkeys(t for f in fund_from for t in _group_holdings(cfg, prof, f)))
+    return [{"name": " and ".join(str(f) for f in fund_from), "holdings": held, "share": 1.0,
+             "names": list(fund_from)}]
 
 
-def funding_label(fund_from: Optional[List[str]], sources: Optional[List[str]] = None) -> str:
+def funding_sources(cfg: AllConfig, prof: Profile, fund_from: Optional[FundFrom]) -> Optional[List[str]]:
+    """Every holding of `prof` that pays for the addition (None = all, pro rata)."""
+    plan = funding_plan(cfg, prof, fund_from)
+    if plan is None:
+        return None
+    return list(dict.fromkeys(t for p in plan for t in p["holdings"]))
+
+
+def funding_capacity(prof: Profile, plan: Optional[List[Dict[str, Any]]]) -> float:
+    """The largest add weight the plan can pay for."""
+    if not plan:
+        return 1.0
+    caps = [sum(prof.weights[t] for t in p["holdings"]) / p["share"] for p in plan if p["share"] > 0]
+    return min(caps) if caps else 0.0
+
+
+def _name(f: str) -> str:
+    return GROUP_LABEL.get(str(f).lower(), str(f).upper())
+
+
+def funding_label(fund_from: Optional[FundFrom], sources: Optional[List[str]] = None,
+                  plan: Optional[List[Dict[str, Any]]] = None, weight: Optional[float] = None) -> str:
+    """'funded pro rata from every holding', 'taken from bonds (XBB.TO)', or
+    for a split 'taken 3.0% from bonds (XBB.TO) and 3.0% from equities (...)'."""
     if not fund_from:
         return "funded pro rata from every holding"
-    names = [GROUP_LABEL.get(str(f).lower(), str(f).upper()) for f in fund_from]
-    held = f" ({', '.join(sources)})" if sources and any(str(f).lower() in GROUPS for f in fund_from) else ""
+    if isinstance(fund_from, dict) and plan:
+        bits = []
+        for p in plan:
+            amt = (f"{p['share'] * weight:.1%}" if weight is not None else f"{p['share']:.0%}")
+            grp = str(p["name"]).lower() in GROUPS
+            bits.append(f"{amt} from {_name(p['name'])}"
+                        + (f" ({', '.join(p['holdings'])})" if grp and 0 < len(p["holdings"]) <= 2 else ""))
+        return "taken " + " and ".join(bits)
+    names = [_name(f) for f in fund_from]
+    held = (f" ({', '.join(sources)})" if sources and len(sources) <= 2
+            and any(str(f).lower() in GROUPS for f in fund_from) else "")
     return "taken from " + " and ".join(names) + held
 
 
@@ -291,19 +362,25 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
     if req.mode == "replace" and req.replace_holding not in prof.weights:
         raise ConfigError(f"Replace mode needs a holding of {prof.label}: "
                           f"{', '.join(prof.weights)}.")
-    sources = funding_sources(cfg, prof, req.fund_from) if req.mode == "add" else None
-    if req.mode == "add" and req.fund_from:
-        if not sources:
-            raise ConfigError(f"{prof.describe()} holds none of: {', '.join(req.fund_from)}.")
-        avail = sum(prof.weights[t] for t in sources)
-        if weight > avail + 1e-12:
-            raise ConfigError(f"{prof.describe()} holds only {avail:.0%} in "
-                              f"{', '.join(sources)}: it cannot fund {weight:.0%}.")
+    plan = funding_plan(cfg, prof, req.fund_from) if req.mode == "add" else None
+    sources = list(dict.fromkeys(t for p in plan for t in p["holdings"])) if plan else None
+    if plan:
+        empty = [_name(p["name"]) for p in plan if not p["holdings"]]
+        if empty:
+            raise ConfigError(f"{prof.describe()} holds no {', '.join(empty)}.")
+        for p in plan:
+            avail = sum(prof.weights[t] for t in p["holdings"])
+            if p["share"] * weight > avail + 1e-12:
+                raise ConfigError(f"{prof.describe()} holds only {avail:.1%} in {_name(p['name'])} "
+                                  f"({', '.join(p['holdings'])}): it cannot pay "
+                                  f"{p['share'] * weight:.1%}.")
 
     def with_weights(c: str, w: float) -> Dict[str, float]:
         if req.mode == "replace":
             return replace_weights(prof.weights, req.replace_holding, c)
-        return fund_weights(prof.weights, c, w, sources) if sources else add_weights(prof.weights, c, w)
+        if plan:
+            return split_fund_weights(prof.weights, c, w, [(p["holdings"], p["share"]) for p in plan])
+        return add_weights(prof.weights, c, w)
     regimes = regimes if regimes is not None else regime_labels(cfg, b)
     ctx = _ctx(cfg, b, regimes)
     F = factor_frame(cfg, b)
@@ -402,7 +479,7 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
                 rolling[key] = I.rolling_share(key, spec.better, spec.center, cand, base, new,
                                                ctx, oc.rolling_window, req.rolling_step)
             if req.mode == "add":
-                cap = sum(prof.weights[t] for t in sources) if sources else 1.0
+                cap = funding_capacity(prof, plan)
                 for w in [x for x in oc.weight_grid if x <= cap + 1e-12]:
                     nw = with_weights(c, w)
                     nn = portfolio_returns(R, nw, reb)
@@ -468,7 +545,7 @@ def run(req: Request, cfg: AllConfig, b: Bundle,
                   obj.description if req.objective else "", weight, holdings,
                   holdings[holdings["Spliced months"] > 0].copy(), results, skipped, ranking,
                   components, corr, excorr, crisis, equiv, fund, notes, period,
-                  b.rf_label, b.cpi_label, req.objective is not None, b.rf, sources)
+                  b.rf_label, b.cpi_label, req.objective is not None, b.rf, sources, plan)
 
 
 def run_many(req: Request, bases: List[Union[str, Profile]], cfg: AllConfig, b: Bundle,
@@ -630,7 +707,7 @@ def _fund_review(results, b: Bundle, base_label: str = "Portfolio") -> pd.DataFr
 def sweep(cfg: AllConfig, b: Bundle, candidate: str, objective: str, mode: str = "add",
           weight: Optional[float] = None, replace_holding: Optional[str] = None,
           regimes: Optional[Dict[str, pd.Series]] = None, robustness: bool = True,
-          fund_from: Optional[List[str]] = None) -> pd.DataFrame:
+          fund_from: Optional[Union[List[str], Dict[str, float]]] = None) -> pd.DataFrame:
     """One candidate across every preset profile."""
     regimes = regimes if regimes is not None else regime_labels(cfg, b)
     rows = []

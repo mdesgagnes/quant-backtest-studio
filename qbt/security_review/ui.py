@@ -11,6 +11,7 @@ summary comes first and every detail table sits behind "Details".
 from __future__ import annotations
 
 import io
+import re
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -23,6 +24,7 @@ from ..brand import BRAND, RED
 from . import config as CF
 from . import engine as E
 from . import export as X
+from . import portfolio as P
 from . import report as RP
 from .bundle import load_bundle, load_macro, with_streams
 
@@ -31,6 +33,7 @@ PALETTE = [RED, "#C9B896", "#D08C4E", "#EFE9DE", "#9A9389", "#B01419", "#CBBFA8"
 BASE_KINDS = ["Benchmark", "Blend", "Uploaded portfolio", "Investor profile"]
 NO_OBJECTIVE = "(none)"
 FUND_ALL, FUND_PICK = "Every holding, pro rata", "Chosen holdings"
+FUND_SPLIT = "Split between bonds and equities"
 FUND_GROUP = {"bonds": "Bonds", "equities": "Equities"}
 BENCH_MODES = ["The portfolio (default)", "Each security's sleeve benchmark", "A ticker"]
 
@@ -205,6 +208,39 @@ def _ticker_list(text: str) -> List[str]:
     return [t.strip().upper() for t in text.replace(";", ",").replace(" ", ",").split(",") if t.strip()]
 
 
+def _request_words(cands, bases, mode, weight, holding, fund_from, ok, cfg) -> str:
+    """The request in one plain sentence, so the sidebar reads top to bottom."""
+    if not cands or not bases:
+        return "Pick at least one security and one portfolio."
+    who = ", ".join(cands[:6]) + (f" and {len(cands) - 6} more" if len(cands) > 6 else "")
+    where = "; ".join(p.describe() for p in bases[:3]) + (f" and {len(bases) - 3} more"
+                                                         if len(bases) > 3 else "")
+    if mode != "Add":
+        what = f"Replace {holding} with {who} in {where}."
+    else:
+        plan = E.funding_plan(cfg, bases[0], fund_from) if fund_from else None
+        how = E.funding_label(fund_from, None, plan, weight) if fund_from else "funded pro rata"
+        what = f"Add {weight:.0%} of {who} to {where}, {how}."
+    judge = (" Judge it on: " + cfg.objectives.objectives[ok].label + "."
+             if ok != NO_OBJECTIVE else " No objective: the facts only.")
+    return what + judge
+
+
+def _funding_preview(cfg, base: CF.Profile, weight: float, fund_from) -> None:
+    """The holdings that change, before the run: 'XBB.TO 40.0% → 37.0%'."""
+    sb = st.sidebar
+    try:
+        plan = E.funding_plan(cfg, base, fund_from)
+        if not plan or any(not p["holdings"] for p in plan if p["share"] > 0):
+            return
+        new = P.split_fund_weights(base.weights, "(new)", weight, [(p["holdings"], p["share"]) for p in plan])
+    except (ValueError, KeyError, CF.ConfigError) as exc:
+        sb.warning(str(exc))
+        return
+    sb.caption(" · ".join(f"{t} {w:.1%} → {new.get(t, 0.0):.1%}"
+                          for t, w in base.weights.items() if abs(new.get(t, 0.0) - w) > 1e-9))
+
+
 def _sidebar(cfg: CF.AllConfig):
     sb = st.sidebar
     uploads: Dict[str, pd.Series] = {}
@@ -309,27 +345,35 @@ def _sidebar(cfg: CF.AllConfig):
         weight = sb.slider("Add weight (% of the portfolio)", 1, 40,
                            int(round(cfg.objectives.add_weight * 100)), key="sr_w") / 100
         classes = {E.asset_class(cfg, t) for p in bases for t in p.weights}
-        opts = [FUND_ALL] + [FUND_GROUP[g] for g in ("bonds", "equities")
-                             if E.GROUPS[g] in classes]
+        groups = [g for g in ("bonds", "equities") if E.GROUPS[g] in classes]
+        opts = [FUND_ALL] + [FUND_GROUP[g] for g in groups]
+        if len(groups) == 2:
+            opts.append(FUND_SPLIT)
         if len(bases) == 1 and len(bases[0].weights) > 1:
             opts.append(FUND_PICK)
         how = sb.selectbox("Funded from", opts, key="sr_fund",
                            help="Every holding, pro rata: each holding gives up the same share. "
                                 "Bonds / equities: only that part of the portfolio is reduced, pro "
-                                "rata within it. Chosen holdings: only those, pro rata.")
+                                "rata within it. Split: you set how much of the add weight each "
+                                "side pays (e.g. 6% gold, half from bonds and half from equities), "
+                                "whatever the portfolio's own split. Chosen holdings: only those.")
         if how == FUND_PICK:
             fund_from = sb.multiselect("Holdings to reduce", list(bases[0].weights), key="sr_fund_pick",
                                        format_func=lambda t: f"{t} ({bases[0].weights[t]:.0%})") or None
+        elif how == FUND_SPLIT:
+            b0 = bases[0]
+            own = sum(w for t, w in b0.weights.items() if E.asset_class(cfg, t) == "bond")
+            pb = sb.number_input("Share paid by bonds (%)", 0, 100, int(round(own * 100 / 5) * 5),
+                                 step=5, key="sr_fund_split",
+                                 help="The rest is paid by equities. The default is the portfolio's "
+                                      "own bond share (pro rata between the two).")
+            sb.caption(f"Bonds pay {pb / 100 * weight:.1%} of the portfolio, equities "
+                       f"{(100 - pb) / 100 * weight:.1%}.")
+            fund_from = {"bonds": pb, "equities": 100 - pb}
         elif how != FUND_ALL:
             fund_from = [next(g for g, lab in FUND_GROUP.items() if lab == how)]
         if fund_from and len(bases) == 1:
-            src = E.funding_sources(cfg, bases[0], fund_from) or []
-            avail = sum(bases[0].weights[t] for t in src)
-            if src and weight <= avail + 1e-12:
-                sb.caption(" · ".join(f"{t} {bases[0].weights[t]:.0%} → "
-                                      f"{bases[0].weights[t] * (1 - weight / avail):.0%}" for t in src))
-            elif src:
-                sb.warning(f"Only {avail:.0%} is held in {', '.join(src)}.")
+            _funding_preview(cfg, bases[0], weight, fund_from)
     else:
         hs = list(bases[0].weights)
         holding = sb.selectbox("Holding to replace", hs, key="sr_hold",
@@ -366,6 +410,8 @@ def _sidebar(cfg: CF.AllConfig):
                                help="The first security across all 7 preset profiles.")
     for m in msgs:
         sb.caption(m)
+    sb.markdown('<div class="eyebrow">Your request</div>', unsafe_allow_html=True)
+    sb.caption(_request_words(cands, bases, mode, weight, holding, fund_from, ok, cfg))
     run = sb.button("Run", type="primary", width="stretch", key="sr_run")
     return dict(bases=bases, kind=kind, rebalance=None if reb.startswith("(") else reb,
                 objective=None if ok == NO_OBJECTIVE else ok, candidates=cands, uploads=uploads,
@@ -455,12 +501,20 @@ def _run(inp, cfg):
             first = next((c for rv in rvs for c in rv.results), None)
             sw = (E.sweep(cfg, b, first, inp["objective"] or next(iter(cfg.objectives.objectives)),
                           inp["mode"], inp["weight"], inp["holding"], reg,
-                          fund_from=[f for f in (inp["fund_from"] or []) if f in E.GROUPS] or None)
+                          fund_from=_sweepable(inp["fund_from"]))
                   if inp["sweep"] and first else None)
     except (CF.ConfigError, KeyError, ValueError) as exc:
         st.error(str(exc))
         st.stop()
     st.session_state["sr_result"] = (rvs, sw)
+
+
+def _sweepable(fund_from):
+    """Funding that means something in every preset profile: groups and
+    splits between groups carry over; named holdings do not."""
+    if isinstance(fund_from, dict):
+        return fund_from if all(k in E.GROUPS for k in fund_from) else None
+    return [f for f in (fund_from or []) if f in E.GROUPS] or None
 
 
 def _deferred(build):
@@ -500,50 +554,141 @@ def _downloads(rvs, cfg, sw, pairs) -> None:
                "security against the portfolio without it, followed by every table on this page.")
 
 
+HOW_IT_WORKS = """
+<b>1. Securities.</b> The tickers or return streams you want to judge.<br>
+<b>2. Portfolio.</b> What you would add them to: a benchmark, a blend, your portfolio's returns or a
+profile. It is also the benchmark every comparison is made against.<br>
+<b>3. Two portfolios.</b> For each security the review builds the portfolio <i>without</i> it and
+<i>with</i> it: the add weight is funded pro rata, from bonds or equities, from a split between them,
+or from chosen holdings (or one holding is replaced). Both are rebalanced the same way.<br>
+<b>4. Same months, same measures.</b> Both are measured over the same months with the Backtest's own
+statistics (CIPM): return, volatility, drawdown, Sharpe, costs and yield. The difference is the answer.<br>
+<b>5. Checks.</b> Stress windows, market regimes, rolling windows and other add weights show whether
+the result holds; the caveats list what limits it.<br>
+<b>6. Verdict (optional).</b> With an objective, the measures are scored into Add / Consider /
+Do not add, with a confidence level.
+"""
+
+TAB_PURPOSE = {
+    "Scenarios": "How the portfolio did with and without the security in each historical stress window.",
+    "Regimes": "Annualised returns in each market regime (rising yields, high inflation, equity bear...).",
+    "Portfolio Impact": "Every measure with and without, the risk-of-ruin simulation and the target weights.",
+    "Diversification": "How the securities move with each other and with the portfolio, including in its "
+                       "worst months.",
+    "Factor Exposures": "Which style tilts (size, value, momentum, quality, low volatility) explain each "
+                        "security's returns.",
+    "Fund Review": "Each security on its own, next to the portfolio, with fund costs and liquidity.",
+    "Relative to Benchmark": "Each security against the benchmark: excess return, tracking error, "
+                             "capture, beta.",
+    "Robustness": "Whether the result holds over rolling 36-month windows and other add weights, and the "
+                  "data caveats.",
+    "Verdict": "How each security scores on every objective, and the rationale.",
+    "Ranking": "The ranking for the chosen objective and its score breakdown.",
+    "Profile Sweep": "The first security across every preset profile.",
+    "Charts": "Stress-window and rolling charts, with the monthly series used.",
+    "Methodology": "Data sources, period, assumptions and definitions.",
+}
+
+
+def _signature(inp) -> str:
+    """What the result depends on, to tell when the sidebar no longer matches it."""
+    d = {k: v for k, v in inp.items() if k not in ("run", "bases", "uploads")}
+    d["bases"] = [(p.label, tuple(sorted(p.weights.items())), p.rebalance) for p in inp["bases"]]
+    d["uploads"] = [(k, len(v), round(float(v.sum()), 10)) for k, v in inp["uploads"].items()]
+    return repr(d)
+
+
+def _step(n: int, title: str, why: str = "") -> None:
+    st.markdown(f'<div class="eyebrow">{n} · {title}</div>', unsafe_allow_html=True)
+    if why:
+        st.caption(why)
+
+
+def _request_strip(rvs: List[E.Review]) -> None:
+    rv0 = rvs[0]
+    cands = list(dict.fromkeys(c for rv in rvs for c in list(rv.results) + list(rv.skipped)))
+    bench = rv0.request.benchmark
+    items = [("Securities", ", ".join(cands)),
+             ("Added to", "; ".join(RP.base_label(rv) for rv in rvs)),
+             ("Change", RP.change_label(rv0) if rv0.request.mode == "replace" else f"{rv0.weight:.0%}"),
+             ("Paid for by", re.sub(r"^(funded |taken )", "", RP.fund_text(rv0))
+              if rv0.request.mode == "add" else "the replaced holding"),
+             ("Objective", rv0.objective_label if rv0.objective_chosen else "none (facts only)"),
+             ("Benchmark", "the portfolio" if not bench else "sleeve benchmarks" if bench == "sleeve"
+              else bench),
+             ("Period", rv0.period),
+             ("Rebalancing", rv0.request.rebalance or rv0.profile.rebalance)]
+    st.markdown('<div class="runbar"><span class="lead">Your request</span>'
+                + "".join(f'<span class="item">{k} <b>{v}</b></span>' for k, v in items)
+                + "</div>", unsafe_allow_html=True)
+
+
 def render() -> None:
     cfg = _config()
     st.markdown('<div class="masthead"><div><h1>Security review</h1>'
                 '<div class="sub">What does adding this security do to the portfolio?</div>'
                 '</div></div>', unsafe_allow_html=True)
     inp = _sidebar(cfg)
+    sig = _signature(inp)
     if inp["run"]:
         _run(inp, cfg)
+        st.session_state["sr_sig"] = sig
     res = st.session_state.get("sr_result")
+    with st.expander("How the review works", expanded=not res):
+        st.markdown(f'<div class="note">{HOW_IT_WORKS}</div>', unsafe_allow_html=True)
     if not res:
-        st.markdown('<div class="note">Pick one or more securities (or upload return streams), '
-                    'choose what to add them to (a benchmark, a blend, your portfolio\'s returns '
-                    'or a profile), then press <b>Run</b>. The first run downloads prices '
-                    '(a few seconds); later runs read the disk cache.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="note">Work down the sidebar: 1 securities, 2 portfolio, 3 how much '
+                    'and where it comes from, 4 an objective if you want a verdict. Then press '
+                    '<b>Run</b>. The first run downloads prices (a few seconds); later runs read the '
+                    'disk cache.</div>', unsafe_allow_html=True)
         return
     rvs, sw = res
+    if st.session_state.get("sr_sig") != sig:
+        st.markdown('<div class="flag">The sidebar has changed since these results were computed: '
+                    'they still show the request below. Press <b>Run</b> to update them.</div>',
+                    unsafe_allow_html=True)
+    _request_strip(rvs)
     secs = RP.all_sections(rvs, cfg, sw)
-    summ = [s for s in secs if s[0] == "Summary"]
+    summ = {t: (df, note) for sh, t, df, note in secs if sh == "Summary"}
     pairs = [(rv, c) for rv in rvs for c in rv.results]
     rv0 = rvs[0]
-    ctx = [RP.change_label(rv0) if len({RP.change_label(r) for r in rvs}) == 1 else "",
-           rv0.objective_label if rv0.objective_chosen else "",
-           rv0.period if rv0.request.alignment == "common" else "each security's own history"]
-    st.markdown(f'<div class="eyebrow">{" · ".join(x for x in ctx if x)}</div>', unsafe_allow_html=True)
+    n = 1
 
+    _step(n, "The answer", "One sentence per security and portfolio: what the portfolio gains or "
+                           "gives up by adding it.")
     if pairs and len(pairs) <= 4:
         for rv, c in pairs:
             st.markdown(f'<div class="note" style="margin-bottom:.5rem;">{RP.headline(rv, c)}</div>',
                         unsafe_allow_html=True)
     elif pairs:
-        st.caption(f"{len(pairs)} results: one row each below. Click a column header to sort.")
+        st.markdown(f'<div class="note">{len(pairs)} results: too many to read as sentences. They are '
+                    'one row each in the next table; click a column header to sort.</div>',
+                    unsafe_allow_html=True)
+    if "Not analysed" in summ:
+        st.dataframe(_styled(summ["Not analysed"][0]), hide_index=True, width="stretch")
+    n += 1
+    plan = [("What adding it changes", "The portfolio with the security minus without it. Teal helps "
+                                       "the investor, rust hurts."),
+            ("Costs and income of the portfolio", "Weighted MER and distribution yield, without and "
+                                                  "with the security."),
+            ("Before and after", "The portfolio's main measures, without and with the security.")]
+    for title, why in plan:
+        if title in summ:
+            df, note = summ[title]
+            _step(n, title, why)
+            st.dataframe(_styled(df), hide_index=True, width="stretch")
+            if note:
+                st.caption(note)
+            n += 1
 
-    for _, title, df, note in summ:
-        if title == "In one sentence":
-            continue
-        st.markdown(f'<div class="eyebrow">{title}</div>', unsafe_allow_html=True)
-        st.dataframe(_styled(df), hide_index=True, width="stretch")
-        if note:
-            st.caption(note)
-
+    _step(n, "Growth and drawdown", "The two portfolios' value and their falls from a previous peak.")
     _charts(rvs)
+    n += 1
+    _step(n, "Full report (Excel)", "")
     _downloads(rvs, cfg, sw, pairs)
-
-    with st.expander("Details: stress windows, regimes, factors, robustness, fund data, methodology"):
+    n += 1
+    _step(n, "Details", "The evidence behind the answer, one question per tab.")
+    with st.expander("Stress windows, regimes, robustness, factors, fund data, methodology"):
         rv = rv0
         if len(rvs) > 1:
             lab = {RP.base_label(r): r for r in rvs}
@@ -551,13 +696,14 @@ def render() -> None:
         by_sheet: Dict[str, List[RP.Section]] = {}
         for s in RP.sections(rv, cfg, sw if rv is rv0 else None):
             by_sheet.setdefault(s[0], []).append(s)
-        tabs = ["Scenarios", "Regimes", "Portfolio Impact", "Diversification", "Factor Exposures",
-                "Fund Review", "Relative to Benchmark", "Robustness", "Verdict", "Ranking",
+        tabs = ["Scenarios", "Regimes", "Robustness", "Portfolio Impact", "Diversification",
+                "Relative to Benchmark", "Factor Exposures", "Fund Review", "Verdict", "Ranking",
                 "Profile Sweep", "Charts", "Methodology"]
         names = {"Verdict": "Objectives" if not rv.objective_chosen else "Verdict"}
         tabs = [t for t in tabs if t in by_sheet or t == "Charts"]
         for t, tab in zip(tabs, st.tabs([names.get(t, t) for t in tabs])):
             with tab:
+                st.caption(TAB_PURPOSE.get(t, ""))
                 if t == "Charts":
                     _detail_charts(rv)
                     st.caption("Chart data: the Series sheet of the Excel export.")

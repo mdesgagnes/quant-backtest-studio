@@ -18,7 +18,7 @@ conda activate quant
 python -m pytest -q
 ```
 
-Expected: **345 passed** (285 existing + 60 new). Takes about a minute.
+Expected: **347 passed** (285 existing + 62 new). Takes about a minute.
 
 ```bash
 streamlit run app.py
@@ -62,6 +62,10 @@ python -m qbt.security_review examples/demo_7_symbol_vs_benchmarks.yaml
 python -m qbt.security_review examples/demo_8_dbmf_from_bonds.yaml
 ```
 
+```bash
+python -m qbt.security_review examples/demo_9_gold_split_funding.yaml
+```
+
 | Demo | Request | What you should see |
 |---|---|---|
 | 1 | Balanced, lower volatility, 11 US equity ETFs, Add 10% | Common period 2013-08 onward (QUAL's start). Every fund is Do not add: measured against the Balanced portfolio itself, a 100% equity fund raises its volatility (downside capture of the portfolio above 1). USMV and SPLV come closest (volatility up only 0.07 and 0.02 points, drawdown about 0.3 to 0.6 points shallower); IWM, QQQ and VUG raise it most. Choose Advanced > Each security's sleeve benchmark to compare them with SPY instead. |
@@ -71,6 +75,7 @@ python -m qbt.security_review examples/demo_8_dbmf_from_bonds.yaml
 | 6 | USMV, GLD, DBMF added at 10% to the uploaded `examples/sample_portfolio_returns.csv`, no objective | Three sentences, no verdicts. GLD and DBMF lower volatility and drawdown the most (correlation about 0.1 and -0.35); USMV barely changes volatility (correlation about 0.8). Only 1 or 2 stress windows: the uploaded stream starts in 2016 and is monthly, so the short windows are skipped. |
 | 7 | ZLB.TO added to XIC.TO, VFV.TO and XBB.TO separately, objective Lower volatility | One row per benchmark. Add for XIC.TO and VFV.TO; for XBB.TO volatility rises slightly and the verdict drops to Consider. |
 | 8 | DBMF and KMLM, 10% taken from bonds in Balanced, stock-bond hedge | Weights XBB.TO 30%, equities unchanged. Against pro rata funding (demo 2) the excess return is about +1.0% a year instead of +0.3% for DBMF, because the money comes out of bonds rather than partly out of equities; volatility falls less (0.8 instead of 1.3 points). |
+| 9 | 6% GLD paid 50/50 by bonds and equities, in Balanced, Growth and Conservative | Each sentence reads "taken 3.0% from bonds (XBB.TO) and 3.0% from equities"; Balanced becomes 57% equities / 37% bonds / 6% GLD, Growth 67 / 27 / 6, Conservative 37 / 57 / 6. |
 | 5 | Profile sweep of DBMF, stock-bond hedge | One row per profile: Add in each, High confidence. Volatility falls by 1.0 to 1.6 points and max drawdown improves by 2.4 to 4.7 points depending on the profile. DBMF's history (from 2019) misses the GFC, euro crisis, 2015-16 and Q4 2018 (stated in the caveats). In the app, switch the objective to Faster recovery to see a sweep where the verdict changes by profile. |
 
 `examples/custom_profile_example.csv` is a ready file for the Custom profile upload (check 12).
@@ -101,6 +106,8 @@ Open the **Security review** workspace (first in the sidebar). Defaults: USMV, a
 | 17c | Look at "What adding it changes" | Teal for changes that help (lower volatility, higher return), rust for those that hurt; the excess return is geometric. |
 | 17d | Investor profile Balanced, security DBMF, **Funded from: Bonds** | The sidebar shows "XBB.TO 40% → 30%"; the sentence reads "taken from bonds (XBB.TO)". **Chosen holdings** with XBB.TO at 15%: "XBB.TO 40% → 25%". Asking for more than the holdings hold shows a warning. |
 | 17e | Same run (Balanced, DBMF from bonds) | "Costs and income of the portfolio": MER about 0.11% without and 0.19% with (DBMF's 0.85% on 10%), yield about 2.3% to 2.5%; the sentence ends with the same figures. With an uploaded portfolio both read n/a. |
+| 17f | Balanced, GLD, weight 6%, **Funded from: Split between bonds and equities**, share paid by bonds 50 | Sidebar: "Bonds pay 3.0% of the portfolio, equities 3.0%" and every holding's change (XBB.TO 40.0% → 37.0%, VFV.TO 27.0% → 25.7%...). The request strip reads "Paid for by: 3.0% from bonds (XBB.TO) and 3.0% from equities". Set bonds to 100 with a 45% weight: a warning that bonds hold only 40%. |
+| 17g | Look at the page after a run, then change any sidebar input | Request strip, sections numbered 1 to 7 each with a one-line purpose, Details tabs each starting with what they answer. After the change, a red note says the results no longer match the sidebar until **Run** is pressed. |
 | 17 | Advanced: Uploaded returns are in **USD** | The uploaded stream is converted to CAD month by month (USD/CAD). |
 | 18 | Open **Factor Exposures** | Loadings and t-stats for market, size, value, momentum, quality, low vol; R2; mega-cap tilt. The note under the table names the factor source: Ken French where reachable, otherwise the ETF spreads (with the caveat on factor legs). |
 | 19 | Open **Details > Charts** | Stress-window bars and (with an objective) the rolling metric; the monthly series table under them. Red / sand palette. |

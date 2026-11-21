@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased: `feature/symbol-impact-view` (2026-11-15), fifth round
+## Unreleased: `feature/symbol-impact-view` (2026-11-21), sixth round
+
+### Added
+- **Split funding.** "Funded from: Split between bonds and equities" sets the share of the add weight each side pays, whatever the portfolio's own split: 6% gold paid 50/50 takes 3 points from bonds and 3 from equities, so Balanced becomes 57% equities / 37% bonds / 6% gold and Growth 67 / 27 / 6. Each side is reduced pro rata within itself. The default share is the portfolio's own bond weight; the sidebar shows every holding that changes (XBB.TO 40.0% -> 37.0%) and warns when a side cannot pay its part. Works in the profile sweep (n/a where a side is not held), the add-weight grid (capped where a side runs out) and the command line (`fund_from: {bonds: 50, equities: 50}`; any tickers as well as groups). Demo 9. 2 tests.
+
+### Changed
+- **The page reads top to bottom.** A "How the review works" panel (six steps, open until the first run); a plain-language "Your request" line above Run; above the results, a strip restating the request (securities, portfolio, change, who pays, objective, benchmark, period, rebalancing); numbered result sections (1 The answer, 2 What adding it changes, 3 Costs and income, 4 Before and after, 5 Growth and drawdown, 6 Full report, 7 Details), each with one line on what it answers; a one-line purpose at the top of every Details tab, ordered from the most to the least used. When the sidebar no longer matches the results on screen, a warning says so until Run is pressed.
+- The engine's own description (`engine.py`) lists the same six steps, with the function behind each.
+
 
 ### Added
 - **Weighted MER and distribution yield of the portfolio, without and with the security.** A "Costs and income of the portfolio" table under the summary, two rows in "Before and after", a clause in each sentence ("Weighted MER 0.11% -> 0.19%; distribution yield 2.32% -> 2.46%") and two lines in the Excel executive summary's assumptions. Weighted by target weights; MER is the expense ratio yfinance reports (cached 30 days), yield the trailing 12-month distributions over the last price. n/a, with a caveat naming the holdings, when any holding has no figure (uploaded streams, stocks, funds Yahoo does not cover): a partial average is never shown. 1 test.

@@ -414,7 +414,7 @@ def base_label(rv: Review) -> str:
 
 def fund_text(rv: Review) -> str:
     from .engine import funding_label
-    return funding_label(rv.request.fund_from, rv.funded_from)
+    return funding_label(rv.request.fund_from, rv.funded_from, rv.funding, rv.weight)
 
 
 def change_label(rv: Review) -> str:

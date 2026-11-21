@@ -8,7 +8,7 @@ end of December for "annual", never for "none").
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -72,6 +72,39 @@ def fund_weights(base: Dict[str, float], candidate: str, weight: float,
     if weight > avail + 1e-12:
         raise ValueError(f"Only {avail:.0%} is held in {', '.join(src)}; cannot take {weight:.0%}.")
     out = {t: w * (1.0 - weight / avail) if t in src else w for t, w in base.items()}
+    out = {t: w for t, w in out.items() if w > 1e-12}
+    out[candidate] = out.get(candidate, 0.0) + weight
+    return out
+
+
+def split_fund_weights(base: Dict[str, float], candidate: str, weight: float,
+                       parts: List[Tuple[List[str], float]]) -> Dict[str, float]:
+    """Add `candidate` at `weight`, paid for by several parts: each part is
+    (holdings, share of the add weight) and takes share x weight from its
+    holdings, pro rata to their weights. Shares must sum to 1. With 6% gold
+    paid 50 / 50 by bonds and equities, bonds give up 3 points and equities
+    3 points, whatever the portfolio's own split."""
+    if not 0 < weight < 1:
+        raise ValueError("The add weight must be between 0 and 1.")
+    if abs(sum(s for _, s in parts) - 1.0) > 1e-6:
+        raise ValueError("The funding shares must add up to 100%.")
+    cut: Dict[str, float] = {}
+    for holdings, share in parts:
+        src = [t for t in dict.fromkeys(holdings) if base.get(t, 0) > 0]
+        amount = share * weight
+        if amount <= 0:
+            continue
+        if not src:
+            raise KeyError("A funding part holds nothing in this portfolio.")
+        avail = sum(base[t] for t in src)
+        if amount > avail + 1e-12:
+            raise ValueError(f"Only {avail:.1%} is held in {', '.join(src)}; cannot take {amount:.1%}.")
+        for t in src:
+            cut[t] = cut.get(t, 0.0) + amount * base[t] / avail
+    over = [t for t, x in cut.items() if x > base[t] + 1e-12]
+    if over:
+        raise ValueError(f"The funding takes more than is held in {', '.join(over)}.")
+    out = {t: w - cut.get(t, 0.0) for t, w in base.items()}
     out = {t: w for t, w in out.items() if w > 1e-12}
     out[candidate] = out.get(candidate, 0.0) + weight
     return out

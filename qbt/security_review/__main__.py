@@ -18,7 +18,9 @@ The request file holds the same inputs as the page:
     mode: add                         # add | replace
     weight: 0.10                      # Add mode: share of the whole portfolio
     fund_from: [bonds]                # optional: reduce only these (bonds, equities or
-                                      # tickers), pro rata; default every holding
+                                      # tickers), pro rata; default every holding.
+                                      # A split: {bonds: 50, equities: 50} = half of
+                                      # the add weight from each, pro rata within each
     replace_holding: VFV.TO           # Replace mode
     alignment: common                 # common | each
     sweep: DBMF                       # optional: also run a profile sweep for this ticker

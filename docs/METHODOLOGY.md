@@ -2,6 +2,17 @@
 
 How the Security review reaches a verdict. Every number below is set in `config/*.yaml`; the code is in `qbt/security_review/`. Judgment calls and how to change them are in [DECISIONS.md](DECISIONS.md).
 
+## 0. How a review flows
+
+The page, the command line and this document follow the same six steps (`qbt/security_review/engine.py` lists the function behind each):
+
+1. **Securities**: tickers or uploaded return streams.
+2. **Portfolio** ("without"): a benchmark ticker, a blend, an uploaded portfolio, or a profile. It is also the benchmark for every relative statistic unless another is chosen.
+3. **Two portfolios**: "with" adds the security at the add weight, paid for by every holding pro rata, by the bonds or the equities, by a split between them, or by chosen holdings; or replaces one holding.
+4. **Same months, same measures**: both portfolios over the months they share, measured with the Backtest's statistics (section 4); the difference is the answer.
+5. **Checks**: stress windows, regimes, rolling windows, other add weights, data caveats (sections 6 to 9).
+6. **Verdict** (optional): with an objective, the measures are scored (section 5).
+
 ## 1. Data
 
 - **Source field.** Yahoo Finance `Adj Close` (download with `auto_adjust=False`): split- and distribution-adjusted, i.e. total return with distributions reinvested. `Close` and `Dividends` are kept only for the distribution yield.
@@ -45,7 +56,7 @@ Equity portion: Canadian 30%, US 45%, international 20%, EM 5%. Bond portion: XB
 **The portfolio** ("without") is any one of: a benchmark ticker (100% that ticker), a blend of tickers, an uploaded portfolio return stream (one holding: the stream itself), or a preset or saved investor profile. Several can be given; each is a separate review with the same securities and settings.
 
 - **Analysis period** (default "common"): the months in which every candidate, every sleeve benchmark and every profile holding have a return. Option "each": each candidate on its own overlap with the profile and its benchmark (used by the scenario matrix).
-- **Without** = the profile. **With** = Add mode: the candidate at weight w (default 10% of the whole portfolio), funded either from every holding (each scaled by 1 - w) or, with *Funded from*, only from the bonds, the equities or chosen holdings: those are reduced pro rata to their weights by w in total (XBB.TO 40% to 30% for 10% taken from bonds in Balanced) and every other holding keeps its weight. Bonds and equities are the building blocks' asset classes, and for other tickers the universe sleeve's. w cannot exceed what the chosen holdings hold; taking all of one holding is the same as Replace. Replace mode: the named holding's whole weight goes to the candidate. Both portfolios are simulated with the same rebalancing rule from the same first month.
+- **Without** = the profile. **With** = Add mode: the candidate at weight w (default 10% of the whole portfolio), funded either from every holding (each scaled by 1 - w) or, with *Funded from*, only from the bonds, the equities or chosen holdings: those are reduced pro rata to their weights by w in total (XBB.TO 40% to 30% for 10% taken from bonds in Balanced) and every other holding keeps its weight. Bonds and equities are the building blocks' asset classes, and for other tickers the universe sleeve's. w cannot exceed what the chosen holdings hold; taking all of one holding is the same as Replace. **Split**: each side pays a set share of w, whatever the portfolio's own split (6% gold paid 50/50 takes 3 points from bonds and 3 from equities, each side pro rata within itself); each side must hold its part, so the largest w a split can pay is min(side's weight / side's share). Replace mode: the named holding's whole weight goes to the candidate. Both portfolios are simulated with the same rebalancing rule from the same first month.
 - **Simulation.** Monthly returns at target weights, drifting between rebalance dates, rebalanced at month end on the schedule; no trading costs, cash, execution lag or taxes. This is not the Backtest engine (`qbt/engine.py`, daily, with costs, cash, execution lag and trades); see DECISIONS.md.
 
 ## 4. Metrics

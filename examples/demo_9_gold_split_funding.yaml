@@ -1,0 +1,8 @@
+# Demo 9: 6% gold paid 50/50 by bonds and equities, whatever the profile's own split.
+# Balanced 60/40 becomes 57% equities / 37% bonds / 6% GLD; Growth 70/30 becomes 67/27/6.
+candidates: [GLD]
+profiles: [balanced, growth, conservative]
+mode: add
+weight: 0.06
+fund_from: {bonds: 50, equities: 50}
+output: examples/output/demo_9_gold_split_funding.xlsx

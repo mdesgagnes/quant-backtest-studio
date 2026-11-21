@@ -856,3 +856,43 @@ def test_weighted_mer_and_yield(world, monkeypatch):
     assert "Weighted MER 0.09% → 0.09%" in RP.headline(rv, "SPYCLONE")
     t = RP.costs_income_table([rv])
     assert t["Change in MER"].iloc[0] == pytest.approx(0.1 * (0.0003 - 0.000945))
+
+
+def test_split_funding_between_groups():
+    base = {"XIC.TO": 0.18, "VFV.TO": 0.27, "XEF.TO": 0.12, "XEC.TO": 0.03, "XBB.TO": 0.40}
+    eq = ["XIC.TO", "VFV.TO", "XEF.TO", "XEC.TO"]
+    w = P.split_fund_weights(base, "GLD", 0.06, [(["XBB.TO"], 0.5), (eq, 0.5)])
+    assert w["XBB.TO"] == pytest.approx(0.37) and w["GLD"] == pytest.approx(0.06)
+    assert sum(w[t] for t in eq) == pytest.approx(0.57)
+    assert w["VFV.TO"] / w["XIC.TO"] == pytest.approx(0.27 / 0.18)      # pro rata inside equities
+    assert sum(w.values()) == pytest.approx(1.0)
+    with pytest.raises(ValueError):                                     # shares must add to 100%
+        P.split_fund_weights(base, "GLD", 0.06, [(["XBB.TO"], 0.5), (eq, 0.4)])
+    with pytest.raises(ValueError):                                     # bonds cannot pay 45%
+        P.split_fund_weights(base, "GLD", 0.50, [(["XBB.TO"], 0.9), (eq, 0.1)])
+
+
+def test_split_funding_in_the_engine(world):
+    cfg, b, reg = world
+    for key in ("balanced", "growth", "conservative"):
+        prof = cfg.profiles.profiles[key]
+        rv = E.run(E.Request(key, None, ["NEGC"], weight=0.06,
+                             fund_from={"bonds": 50, "equities": 50}), cfg, b, reg)
+        w = rv.results["NEGC"].weights_new
+        assert w["XBB.TO"] == pytest.approx(prof.bonds - 0.03)
+        assert sum(w[t] for t in ("XIC.TO", "VFV.TO", "XEF.TO", "XEC.TO")) == pytest.approx(prof.equity - 0.03)
+        assert "3.0% from bonds (XBB.TO) and 3.0% from equities" in RP.change_label(rv)
+        # the add-weight grid stops where one side runs out
+        cap = E.funding_capacity(prof, rv.funding)
+        assert rv.results["NEGC"].weight_grid["Add weight"].max() <= cap + 1e-9
+    plan = E.funding_plan(cfg, cfg.profiles.profiles["balanced"], {"bonds": 0.25, "equities": 0.75})
+    assert [p["share"] for p in plan] == pytest.approx([0.25, 0.75])         # fractions accepted too
+    with pytest.raises(CF.ConfigError):
+        E.funding_plan(cfg, cfg.profiles.profiles["balanced"], {"bonds": 50, "equities": 30})
+    with pytest.raises(CF.ConfigError):                                       # 100% Equities has no bonds
+        E.run(E.Request("equities_100", None, ["NEGC"], fund_from={"bonds": 50, "equities": 50}),
+              cfg, b, reg)
+    sw = E.sweep(cfg, b, "NEGC", "lower_volatility", weight=0.06, regimes=reg, robustness=False,
+                 fund_from={"bonds": 50, "equities": 50})
+    assert sw.set_index("Key").loc["equities_100", "Verdict"] == "n/a"
+    assert sw.set_index("Key").loc["growth", "Verdict"] in ("Add", "Consider", "Do not add")
