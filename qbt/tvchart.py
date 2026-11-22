@@ -28,13 +28,13 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from .brand import BRAND
+from .brand import BRAND, SERIES
 
 CDN = ("https://unpkg.com/lightweight-charts@4.2.3/dist/"
        "lightweight-charts.standalone.production.js")
 
 ATTRIBUTION = (
-    '<div style="font-family:IBM Plex Mono,monospace;font-size:.62rem;'
+    '<div style="font-family:Inter,system-ui,sans-serif;font-size:.62rem;'
     'letter-spacing:.06em;color:{muted};padding:.35rem .1rem 0;">'
     'Charting by <a href="https://www.tradingview.com/" target="_blank" '
     'rel="noopener" style="color:{red};text-decoration:none;">TradingView '
@@ -64,7 +64,7 @@ def _theme() -> Dict[str, Any]:
         "layout": {
             "background": {"type": "solid", "color": BRAND["panel"]},
             "textColor": BRAND["muted"],
-            "fontFamily": "IBM Plex Mono, SFMono-Regular, Consolas, monospace",
+            "fontFamily": "Inter, system-ui, sans-serif",
             "fontSize": 11,
             "attributionLogo": True,      # licence: keep this visible
         },
@@ -109,7 +109,7 @@ def _shell(body_js: str, height: int, extra: str = "") -> str:
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <script src="{CDN}"></script>
 <style>
-  body{{margin:0;background:{BRAND['panel']};font-family:'IBM Plex Mono',monospace;}}
+  body{{margin:0;background:{BRAND['panel']};font-family:Inter,system-ui,sans-serif;}}
   #wrap{{width:100%;height:{height}px;}}
   .legend{{position:absolute;z-index:5;top:8px;left:10px;font-size:11px;
     color:{BRAND['text']};pointer-events:none;line-height:1.5;}}
@@ -194,8 +194,7 @@ def line(series_map: Dict[str, pd.Series], title: str = "",
          height: int = 420, log: bool = False,
          percent: bool = False) -> str:
     """One or more lines, for equity curves and comparisons."""
-    palette = [BRAND["red"], "#C9B896", BRAND["gain"], "#8C93A8",
-               "#D08C4E", "#7E6BA8", "#5B9EC7"]
+    palette = list(SERIES)
     parts = []
     for i, (name, s) in enumerate(series_map.items()):
         pts = _series_points(s)

@@ -1,10 +1,25 @@
 [theme]
+# Same theme as the VQC app: National Bank colours on a black ground.
 base = "dark"
-primaryColor = "#E41C23"
-backgroundColor = "#0F0F0E"
-secondaryBackgroundColor = "#181816"
-textColor = "#EFE9DE"
-font = "sans serif"
+primaryColor = "#E41C23"                 # NBC red
+backgroundColor = "#0F0F0E"              # black ground
+secondaryBackgroundColor = "#181816"     # cards, inputs
+textColor = "#EFE9DE"                    # sand-tinted text
+borderColor = "#2E2C27"
+dataframeBorderColor = "#24231F"
+dataframeHeaderBackgroundColor = "#1E1E1B"
+showWidgetBorder = true
+baseRadius = "12px"
+buttonRadius = "full"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFontWeights = [700, 650, 600]
+metricValueFontWeight = 650
+chartCategoricalColors = ["#C9B896", "#D08C4E", "#4FB79A", "#EFE9DE", "#9A9389", "#8C6D4F", "#CBBFA8"]
+
+[theme.sidebar]
+backgroundColor = "#131312"
+secondaryBackgroundColor = "#1E1E1B"
 
 [server]
 headless = true

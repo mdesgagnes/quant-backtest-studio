@@ -69,10 +69,15 @@ PRINT: Dict[str, str] = {
     "loss": "#B3322B",
 }
 
-# Chart series. Red leads because the first series is the subject; the rest
-# are context and stay in the sand and neutral family so red keeps meaning.
-SERIES = [RED, "#C9B896", "#4FB79A", "#8C93A8",
-          "#D08C4E", "#7E6BA8", "#5B9EC7"]
+# Chart accent: sand-gold for the subject series and highlights. Brand red
+# stays on controls and navigation and never appears inside a chart, where
+# it would be read as a loss. Same values as the VQC app (vqc/ui.py).
+ACCENT = "#C9B896"
+
+# Chart series. The subject leads in sand-gold; the rest stay in the sand,
+# copper and neutral family, with green kept for a benchmark. No blue.
+SERIES = [ACCENT, "#D08C4E", "#4FB79A", "#EFE9DE",
+          "#9A9389", "#8C6D4F", "#CBBFA8"]
 
 SERIES_PRINT = [RED, "#3F3A34", "#1F6F5C", "#C9B896",
                 "#8C6D4F", "#5B7A8C", "#A8574E"]

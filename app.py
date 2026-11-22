@@ -75,31 +75,37 @@ st.set_page_config(page_title="Quant Backtest Studio",
 # ----------------------------------------------------------------------
 CSS = ("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 /* ---------------------------------------------------------------
-   National Bank of Canada palette. Red #E41C23 is the signature
-   and is spent deliberately: the active tab, the primary action,
-   the rule under the masthead. Everything structural is warm grey,
-   so when red appears it means something. Gains and losses get a
-   separate green/red pair: a chart where "up" and "brand" share a
-   colour cannot be read.
+   Same look as the VQC app (vqc/ui.py): National Bank palette on a
+   black ground, glass cards with soft shadows, pill tabs and buttons,
+   one font (Inter, with tabular digits for figures).
 
-   One type family (IBM Plex: Sans for words, Mono for figures), one
-   corner radius (3px), no drop shadows and no hover lifts. Figures
-   do not move when the pointer passes over them.
+   Brand red #E41C23 is for controls and navigation: buttons, the
+   active tab, sliders, focus. It never appears inside a chart, where
+   it would read as a loss: charts use sand-gold for the subject, green
+   for gains and coral for losses.
    --------------------------------------------------------------- */
 :root{
   """ + css_variables() + """
   --slate:#3F3A34;
-  --sans:'IBM Plex Sans',-apple-system,Segoe UI,sans-serif;
-  --mono:'IBM Plex Mono',SFMono-Regular,Consolas,monospace;
-  --radius:3px;
+  --sans:Inter,system-ui,-apple-system,Segoe UI,sans-serif;
+  --mono:Inter,system-ui,-apple-system,Segoe UI,sans-serif;
+  --radius:12px;
+  --card-radius:18px;
+  --glass:linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.015));
+  --glass-soft:linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.01));
+  --glass-line:rgba(255,255,255,.07);
+  --shadow:0 10px 30px -16px rgba(0,0,0,.6);
 }
 
 html, body, [class*="css"]{ font-family:var(--sans); color:var(--ink); }
-.stApp{ background:var(--bg); }
-.block-container{ padding-top:1.6rem; max-width:1500px; }
+.stApp{ background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(228,28,35,.08), transparent 60%),
+    radial-gradient(900px 500px at 0% 0%, rgba(201,184,150,.06), transparent 60%),
+    var(--bg); }
+.block-container, .stMainBlockContainer{ padding-top:2.2rem; max-width:1500px; }
 
 /* Numbers must align on the decimal to be scanned down a column. */
 .dial .v,.dial .d,[data-testid="stDataFrame"],table,code,
@@ -116,7 +122,7 @@ html, body, [class*="css"]{ font-family:var(--sans); color:var(--ink); }
 
 /* ---------------- Sidebar ---------------- */
 section[data-testid="stSidebar"]{
-  background:var(--panel); border-right:1px solid var(--rule); }
+  background:#131312; border-right:1px solid var(--rule); }
 section[data-testid="stSidebar"] > div{ padding-top:.6rem; }
 section[data-testid="stSidebar"] label p{
   font-size:.79rem !important; font-weight:500; color:#C4BDB1 !important; }
@@ -152,40 +158,48 @@ section[data-testid="stSidebar"] .eyebrow, .side-label{
 
 /* ---------------- Masthead ---------------- */
 .masthead{
-  border-bottom:2px solid var(--nb-red); padding:.1rem 0 .7rem;
-  margin-bottom:.6rem; display:flex; justify-content:space-between;
-  align-items:baseline; flex-wrap:wrap; gap:.6rem; }
+  padding:0; margin:0 0 1.2rem; display:flex; justify-content:space-between;
+  align-items:flex-end; flex-wrap:wrap; gap:1rem; }
 .masthead h1{
-  font-family:var(--sans); font-weight:700; font-size:1.6rem;
+  font-family:var(--sans); font-weight:700; font-size:2rem;
   letter-spacing:-.02em; color:var(--ink); margin:0; padding:0; line-height:1.15; }
-.masthead .sub{
-  font-family:var(--sans); font-size:.85rem; font-weight:500;
-  color:var(--muted); }
+/* Beside the title: a chip naming the workspace. Under it: a subtitle. */
+.masthead > .sub{
+  font-family:var(--sans); font-size:.8rem; font-weight:500; color:var(--ink);
+  display:inline-flex; align-items:center; gap:.4rem; padding:.35rem .8rem;
+  border-radius:999px; background:rgba(255,255,255,.04);
+  border:1px solid var(--rule); white-space:nowrap; }
+.masthead > .sub::before{ content:""; width:.5rem; height:.5rem; border-radius:999px;
+  background:var(--gain); box-shadow:0 0 8px var(--gain); }
+.masthead > div > .sub{
+  font-family:var(--sans); font-size:.95rem; color:var(--muted); margin:.25rem 0 0; }
 
 /* ---------------- Section headers ---------------- */
 .eyebrow{
-  font-family:var(--sans); font-size:.95rem; font-weight:600;
+  font-family:var(--sans); font-size:1rem; font-weight:650;
   color:var(--ink); letter-spacing:-.005em;
-  margin:2rem 0 .7rem; padding-bottom:.4rem;
-  border-bottom:1px solid var(--rule); }
+  margin:2rem 0 .7rem; padding:0; border:0; }
 
 /* ---------------- Dials ---------------- */
 .dial{
-  background:var(--panel-2); border:1px solid var(--rule);
-  border-top:2px solid var(--rule); border-radius:var(--radius);
-  padding:.7rem .85rem; height:100%; }
+  background:var(--glass); border:1px solid var(--glass-line);
+  border-radius:var(--card-radius); padding:1rem 1.1rem; height:100%;
+  backdrop-filter:blur(10px); box-shadow:var(--shadow);
+  transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.dial:hover{ transform:translateY(-4px); border-color:rgba(228,28,35,.45);
+  box-shadow:0 18px 40px -18px rgba(228,28,35,.35); }
 .dial .k{
-  font-family:var(--mono); font-size:.62rem; letter-spacing:.08em;
-  text-transform:uppercase; color:var(--faint); display:block;
-  margin-bottom:.3rem; font-weight:600; }
+  font-family:var(--sans); font-size:.78rem; font-weight:500;
+  color:var(--muted); display:block; margin-bottom:.35rem;
+  text-transform:none; letter-spacing:0; }
 .dial .v{
-  font-family:var(--mono); font-size:1.3rem; font-weight:600;
-  color:var(--ink); line-height:1.1; letter-spacing:-.02em; }
+  font-family:var(--sans); font-size:clamp(1.1rem, 1.7vw, 1.75rem); font-weight:700;
+  color:var(--ink); line-height:1.1; letter-spacing:-.02em; white-space:nowrap; }
 .dial .d{
-  font-family:var(--mono); font-size:.68rem; color:var(--faint);
-  margin-top:.2rem; }
-.dial.pos{ border-top-color:var(--gain); } .dial.pos .v{ color:var(--gain); }
-.dial.neg{ border-top-color:var(--loss); } .dial.neg .v{ color:var(--loss); }
+  font-family:var(--sans); font-size:.75rem; color:var(--muted);
+  margin-top:.45rem; }
+.dial.pos .v{ color:var(--gain); }
+.dial.neg .v{ color:var(--loss); }
 
 /* ---------------- Notes and flags ---------------- */
 .note{
@@ -207,8 +221,9 @@ details.note[open] summary{ margin-bottom:.2rem; }
 .runbar{
   display:flex; flex-wrap:wrap; gap:.2rem 1.7rem; align-items:baseline;
   background:var(--panel); border:1px solid var(--rule);
-  border-left:3px solid var(--nb-red); border-radius:var(--radius);
-  padding:.55rem .9rem; margin:.35rem 0 .2rem; }
+  border-left:3px solid var(--nb-red); border-radius:14px;
+  background:var(--glass-soft); box-shadow:var(--shadow);
+  padding:.65rem 1rem; margin:.35rem 0 .2rem; }
 .runbar .item{ font-family:var(--mono); font-size:.72rem; color:var(--muted); }
 .runbar .item b{ color:var(--ink); font-weight:600; }
 .runbar .lead{
@@ -216,31 +231,39 @@ details.note[open] summary{ margin-bottom:.2rem; }
   color:var(--ink); letter-spacing:-.015em; margin-right:.35rem; }
 
 /* ---------------- Tabs ---------------- */
-.stTabs [data-baseweb="tab-list"]{
-  gap:.2rem; border-bottom:1px solid var(--rule);
-  position:sticky; top:0; z-index:99;
-  background:rgba(15,15,14,.96); padding-top:.4rem; }
-.stTabs [data-baseweb="tab"]{
-  font-family:var(--sans); font-size:.82rem; font-weight:600;
-  color:var(--muted); padding:.5rem .9rem;
-  border-radius:var(--radius) var(--radius) 0 0; transition:color .12s ease; }
-.stTabs [data-baseweb="tab"]:hover{ color:var(--ink); }
-.stTabs [aria-selected="true"]{ color:var(--ink) !important; }
-.stTabs [data-baseweb="tab-highlight"]{ background:var(--nb-red); height:2px; }
-.stTabs [data-baseweb="tab-border"]{ background:transparent; }
+/* A pill bar, as in VQC; it stays in view while a long tab scrolls. */
+.stTabs [role="tablist"]{
+  gap:.25rem; padding:.3rem; width:fit-content; max-width:100%;
+  overflow-x:auto; border:1px solid var(--rule) !important; border-radius:999px;
+  background:rgba(24,24,22,.92); backdrop-filter:blur(10px);
+  position:sticky; top:.5rem; z-index:99; }
+.stTabs [role="tab"]{
+  height:2.1rem; padding:0 1.1rem; border-radius:999px; border:none !important;
+  display:flex; align-items:center; white-space:nowrap;
+  transition:background .15s ease; }
+.stTabs [role="tab"]:hover{ background:rgba(255,255,255,.06); }
+.stTabs [role="tab"] p{
+  font-family:var(--sans); font-size:.85rem; font-weight:500; color:var(--muted); }
+.stTabs [role="tab"][aria-selected="true"]{ background:var(--nb-red); }
+.stTabs [role="tab"][aria-selected="true"] p{ color:#FFFFFF; font-weight:600; }
+.stTabs .react-aria-SelectionIndicator,
+.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"]{ display:none; }
+.stTabs [role="tabpanel"]{ padding-top:1.2rem; }
+/* Tabs inside a tab do not stick. */
+.stTabs [role="tabpanel"] .stTabs [role="tablist"]{ position:static; }
 
 /* ---------------- Controls ---------------- */
 .stButton>button{
   font-family:var(--sans); font-size:.82rem; font-weight:600;
   background:var(--nb-red); color:#fff;
-  border:1px solid var(--nb-red); border-radius:var(--radius); width:100%;
-  padding:.55rem; transition:background .12s ease; }
+  border:1px solid var(--nb-red); border-radius:999px; width:100%;
+  padding:.55rem 1rem; transition:background .12s ease; }
 .stButton>button:hover{
   background:var(--nb-red-dark); border-color:var(--nb-red-dark); color:#fff; }
 .stButton>button:active{ transform:translateY(1px); }
 .stDownloadButton>button{
   background:transparent; color:var(--nb-sand-dark);
-  border:1px solid var(--rule); font-weight:500; border-radius:var(--radius); }
+  border:1px solid var(--rule); font-weight:500; border-radius:999px; }
 .stDownloadButton>button:hover{
   background:var(--panel); border-color:var(--nb-sand-dark);
   color:var(--nb-sand); }
@@ -258,21 +281,31 @@ details.note[open] summary{ margin-bottom:.2rem; }
 
 /* ---------------- Tables ---------------- */
 [data-testid="stDataFrame"]{
-  border:1px solid var(--rule); border-radius:var(--radius); font-family:var(--mono); }
+  border:1px solid var(--glass-line); border-radius:14px; overflow:hidden;
+  font-family:var(--sans); }
 [data-testid="stDataFrame"] [role="columnheader"]{
-  font-family:var(--mono) !important; font-size:.64rem !important;
-  letter-spacing:.06em; text-transform:uppercase;
+  font-family:var(--sans) !important; font-size:.72rem !important;
   color:var(--muted) !important; font-weight:600;
-  background:var(--panel) !important; }
+  background:var(--panel-2) !important; }
 
 /* ---------------- Charts ---------------- */
 .js-plotly-plot{
-  border:1px solid var(--rule); border-radius:var(--radius);
-  background:var(--panel); padding:.3rem; }
+  border:1px solid var(--glass-line); border-radius:var(--card-radius);
+  background:var(--glass-soft); box-shadow:0 10px 30px -18px rgba(0,0,0,.7);
+  padding:.6rem .5rem .3rem; }
+
+/* Bordered containers and metrics: the same cards as VQC. */
+[data-testid="stVerticalBlockBorderWrapper"], div[class*="st-key-card"]{
+  background:var(--glass-soft);
+  border:1px solid var(--glass-line) !important; border-radius:var(--card-radius) !important;
+  box-shadow:0 10px 30px -18px rgba(0,0,0,.7); }
+[data-testid="stMetric"]{ background:var(--panel-2); border:1px solid var(--rule);
+  border-radius:14px; padding:.7rem .9rem; }
+[data-testid="stMetricLabel"] p{ color:var(--muted); font-size:.78rem; }
 
 /* ---------------- Expanders ---------------- */
 [data-testid="stExpander"]{
-  border:1px solid var(--rule); border-radius:var(--radius); background:var(--panel); }
+  border:1px solid var(--glass-line); border-radius:14px; background:var(--glass-soft); }
 [data-testid="stExpander"] summary{
   font-family:var(--sans); font-size:.82rem; font-weight:600;
   color:var(--nb-sand-dark); }
@@ -320,9 +353,9 @@ hr{ border-color:var(--rule-soft); }
    After the fund header on Sparkline Analytics: ticker, name, a row of
    figures, a percentile and a small trend. Same palette, same 3px radius. */
 .hero{ display:flex; justify-content:space-between; gap:1.2rem; flex-wrap:wrap;
-  background:var(--panel-2); border:1px solid var(--rule);
-  border-top:2px solid var(--nb-red); border-radius:var(--radius);
-  padding:1rem 1.2rem; margin:.4rem 0 .6rem; }
+  background:var(--glass); border:1px solid var(--glass-line);
+  border-radius:var(--card-radius); box-shadow:var(--shadow);
+  padding:1.1rem 1.3rem; margin:.4rem 0 .6rem; }
 .hero-tkr{ font-family:var(--mono); font-size:2rem; font-weight:600;
   color:var(--ink); line-height:1.05; letter-spacing:-.01em; }
 .hero-name{ font-size:.9rem; color:var(--muted); margin:.15rem 0 .8rem; }
@@ -343,8 +376,8 @@ hr{ border-color:var(--rule-soft); }
 /* st.pills / st.segmented_control: the same flat, square-cornered look as
    the tabs, with red kept for the active choice only. */
 [data-testid="stPills"] button, [data-testid="stButtonGroup"] button{
-  border-radius:var(--radius) !important; font-family:var(--mono);
-  font-size:.74rem; }
+  border-radius:999px !important; font-family:var(--sans);
+  font-size:.78rem; }
 [data-testid="stPills"] button[aria-checked="true"],
 [data-testid="stButtonGroup"] button[aria-checked="true"],
 [data-testid="stPills"] button[kind="pillsActive"]{
@@ -356,10 +389,10 @@ hr{ border-color:var(--rule-soft); }
     transition-duration:.001ms !important; } }
 
 @media (max-width: 640px){
-  .masthead h1{ font-size:1.3rem; }
-  .dial .v{ font-size:1.05rem; }
-  .stTabs [data-baseweb="tab-list"]{ gap:.1rem; overflow-x:auto; }
-  .stTabs [data-baseweb="tab"]{ padding:.45rem .6rem; font-size:.74rem; } }
+  .masthead h1{ font-size:1.4rem; }
+  .dial .v{ font-size:1.2rem; }
+  .stTabs [role="tablist"]{ gap:.1rem; }
+  .stTabs [role="tab"]{ padding:0 .7rem; } }
 </style>
 """)
 st.markdown(CSS, unsafe_allow_html=True)

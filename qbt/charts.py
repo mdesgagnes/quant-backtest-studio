@@ -1,8 +1,8 @@
 """Plotly charts.
 
-"Ink and brass" visual identity: dark ink-blue background, brass traces for
-the strategy, teal for the benchmark, rust for risk. One accent color per
-chart, everything else in working gray.
+National Bank palette on a black ground, as in the VQC app: sand-gold
+traces for the strategy, green for the benchmark, coral for risk. Brand red
+stays out of the charts so it is never read as a loss.
 
 A light "print" theme is also available for the exportable tearsheet report,
 where a dark background would be wrong on paper.
@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 
 from . import metrics as M
 
-from .brand import BRAND, PRINT, SERIES, SERIES_PRINT
+from .brand import ACCENT, BRAND, PRINT, SERIES, SERIES_PRINT
 
 # Every colour comes from qbt/brand.py. Correcting the three brand values
 # there restyles the interface, the charts and the exported report together.
@@ -27,10 +27,10 @@ PALETTE = {
     "rule": BRAND["rule"],
     "text": BRAND["text"],
     "muted": BRAND["muted"],
-    "brass": BRAND["red"],
+    "brass": ACCENT,
     "teal": BRAND["gain"],
     "rust": BRAND["loss"],
-    "slate": "#8C93A8",
+    "slate": BRAND["muted"],
 }
 
 # The report is printed and shared, so it stays light regardless of the
@@ -51,7 +51,7 @@ SERIES_COLORS = list(SERIES)
 SERIES_COLORS_PRINT = list(SERIES_PRINT)
 
 FONT = "Inter, Segoe UI, Helvetica Neue, sans-serif"
-MONO = "IBM Plex Mono, SFMono-Regular, Consolas, monospace"
+MONO = FONT                 # figures in Inter too, with tabular digits
 
 
 def _colors(theme: str):
